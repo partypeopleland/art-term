@@ -87,4 +87,4 @@ class MainActivity : TauriActivity() {
     super.onPause()
   }
 }
-'@ | Set-Content "$androidRoot/app/src/main/java/net/missart/artterm/mobile/MainActivity.kt"
+'@ | Set-Content "$androidRoot/app/src/main/java/net/missart/artterm/MainActivity.kt"
