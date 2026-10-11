@@ -1,0 +1,44 @@
+# Rust build output and local Cargo cache
+/target/
+/.cargo/
+/dist/
+/apps/desktop/node_modules/
+/node_modules/
+/.wrangler/
+/nul
+/config/connections.toml
+/config/*.private.toml
+/crates/tauri-plugin-mobile-vault/android/build/
+/crates/tauri-plugin-mobile-vault/android/.tauri/
+/crates/tauri-plugin-mobile-voice/android/build/
+/crates/tauri-plugin-mobile-voice/android/.tauri/
+/apps/desktop/dist/
+/crates/art-term-gui/gen/
+
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Local credentials and machine-specific settings
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+pod-auth*
+.secrets/
+
+# Editor and operating-system files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Private coordination records and agent rules (not part of the public repo)
+/.coordination/
+/AGENTS.md

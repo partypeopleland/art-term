@@ -1,0 +1,14 @@
+[default]
+description = "On-device speech recognition: session commands, permission request, model download and voice event listeners."
+permissions = [
+    "allow-status",
+    "allow-requestPermission",
+    "allow-downloadLanguage",
+    "allow-start",
+    "allow-stop",
+    "allow-cancel",
+    "allow-register-listener",
+    "allow-registerListener",
+    "allow-remove-listener",
+    "allow-removeListener",
+]

@@ -1,0 +1,2 @@
+-r ../windows-regression/requirements.txt
+websocket-client==1.9.2

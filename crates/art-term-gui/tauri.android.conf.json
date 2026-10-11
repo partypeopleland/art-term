@@ -1,0 +1,17 @@
+{
+  "version": "0.1.19",
+  "identifier": "net.missart.artterm",
+  "app": {
+    "windows": [{"label": "main", "title": "art-term", "dragDropEnabled": false, "useHttpsScheme": true}],
+    "security": {
+      "capabilities": [{
+        "identifier": "mobile",
+        "description": "Validated Android runtime Host sessions and desktop preview; native vault is denied to the WebView.",
+        "platforms": ["android"],
+        "windows": ["main"],
+        "permissions": ["core:default", "allow-mobile", "clipboard-manager:allow-write-text", "mobile-voice:default"]
+      }]
+    }
+  },
+  "bundle": {"active": true, "targets": "all"}
+}

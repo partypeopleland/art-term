@@ -1,0 +1,18 @@
+# Fictional services prepared by the user; no credentials belong here.
+schema_version = 4
+
+[[connections]]
+id = "example-host"
+name = "Example Host"
+openab_pty_url = "https://computer.example.invalid:8443"
+category = "host"
+desktop_transport = "runtime-mcp"
+coding_cli = { id = "assistant", name = "Assistant", command = "assistant-cli", args = ["--model", "example-model"] }
+
+[[connections]]
+id = "example-agent"
+name = "Example Agent"
+openab_pty_url = "https://runtime.example.test:8443"
+category = "agent"
+desktop_transport = "runtime-mcp"
+coding_cli = { id = "another", name = "Another CLI", command = "another-cli", args = [] }

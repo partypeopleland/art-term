@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-gui"
+description = "Runtime Host sessions and local session operations."
+commands.allow = ["gui_transfer_export", "gui_transfer_pick_import", "gui_transfer_unlock", "gui_transfer_apply", "gui_transfer_cancel", "gui_platform", "gui_open", "gui_poll", "gui_write", "gui_resize", "gui_close", "gui_desktop", "gui_screenshot", "gui_runtime_hosts", "gui_runtime_save_host", "gui_runtime_delete_host", "gui_runtime_test_host", "gui_runtime_sessions", "gui_runtime_create_session", "gui_runtime_ack", "gui_runtime_recover"]

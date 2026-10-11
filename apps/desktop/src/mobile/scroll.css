@@ -1,0 +1,8 @@
+.mobile-terminal .xterm { width: 100%; box-sizing: border-box; padding-right: 12px; overflow: hidden; }
+.mobile-terminal .xterm-screen { touch-action: pan-x pinch-zoom; }
+.mobile-terminal .xterm .scrollbar.vertical { display: none; }
+.mobile-scrollbar { position: absolute; top: 4px; right: 1px; bottom: 4px; width: 12px; overflow: hidden; }
+.mobile-scroll-track { position: absolute; inset: 0; touch-action: none; }
+.mobile-scroll-thumb { position: absolute; right: 3px; width: 4px; border-radius: 3px; background: #8395ab; pointer-events: none; }
+.mobile-scroll-track:active .mobile-scroll-thumb { background: #c0d0e3; }
+.mobile-scroll-track:focus-visible { outline: 1px solid #90a8c4; outline-offset: -1px; }

@@ -1,0 +1,39 @@
+[package]
+name = "art-term-core"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Shared core for art-term frontends: runtime_agents config, openab runtime sessions, image validation"
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml = "0.8.23"
+tokio.workspace = true
+sha2.workspace = true
+base64 = "0.22"
+argon2 = { version = "=0.5.3", features = ["zeroize"] }
+aes-gcm = { version = "=0.10.3", features = ["zeroize"] }
+aes = { version = "=0.8.4", features = ["zeroize"] }
+getrandom = "=0.3.4"
+image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg"] }
+reqwest = { version = "0.12.28", default-features = false, features = ["rustls-tls", "json", "stream"] }
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+tempfile = "3"
+rustls = { version = "=0.23.45", default-features = false, features = ["std"] }
+tokio-tungstenite = { version = "=0.24.0", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+futures-util = { version = "0.3", features = ["sink"] }
+
+[dependencies.zeroize]
+version = "1.8"
+features = ["derive"]
+
+[features]
+default = []
+openab-fixture = []
+
+[dev-dependencies]
+rcgen = { version = "=0.13.2", features = ["ring"] }
+tokio-rustls = { version = "=0.26.6", default-features = false, features = ["ring"] }

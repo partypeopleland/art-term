@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-downloadLanguage"
+description = "Enables the downloadLanguage command without any pre-configured scope."
+commands.allow = ["downloadLanguage"]
+
+[[permission]]
+identifier = "deny-downloadLanguage"
+description = "Denies the downloadLanguage command without any pre-configured scope."
+commands.deny = ["downloadLanguage"]

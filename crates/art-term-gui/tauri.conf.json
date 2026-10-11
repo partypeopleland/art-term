@@ -1,0 +1,31 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "art-term",
+  "version": "0.1.19",
+  "identifier": "net.missart.artterm.desktop",
+  "build": {
+    "frontendDist": "../../apps/desktop/dist",
+    "devUrl": "http://localhost:1420"
+  },
+  "app": {
+    "windows": [{
+      "label": "main",
+      "title": "art-term",
+      "width": 1240,
+      "height": 820,
+      "minWidth": 800,
+      "minHeight": 560,
+      "dragDropEnabled": false
+    }],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src ipc: http://ipc.localhost; font-src 'self' data:; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'",
+      "capabilities": ["main"]
+    }
+  },
+  "bundle": {
+    "active": false,
+    "resources": {"../../config/connections.example.toml": "connections.toml"},
+    "targets": ["nsis"],
+    "icon": ["icons/icon.ico"]
+  }
+}
