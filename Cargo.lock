@@ -119,6 +119,61 @@ dependencies = [
 ]
 
 [[package]]
+name = "art-term-core"
+version = "0.1.0"
+dependencies = [
+ "aes",
+ "aes-gcm",
+ "anyhow",
+ "argon2",
+ "base64 0.22.1",
+ "futures-util",
+ "getrandom 0.3.4",
+ "image",
+ "rcgen",
+ "reqwest 0.12.28",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "tokio-rustls",
+ "tokio-tungstenite",
+ "toml 0.8.23",
+ "url",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
+name = "art-term-gui"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "art-term-core",
+ "base64 0.22.1",
+ "futures-util",
+ "rcgen",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-clipboard-manager",
+ "tauri-plugin-dialog",
+ "tauri-plugin-fs",
+ "tauri-plugin-mobile-vault",
+ "tauri-plugin-mobile-voice",
+ "tempfile",
+ "tokio",
+ "tokio-rustls",
+ "tokio-tungstenite",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
 name = "atk"
 version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2127,61 +2182,6 @@ dependencies = [
  "serde",
  "thiserror 2.0.21",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "art-term-core"
-version = "0.1.0"
-dependencies = [
- "aes",
- "aes-gcm",
- "anyhow",
- "argon2",
- "base64 0.22.1",
- "futures-util",
- "getrandom 0.3.4",
- "image",
- "rcgen",
- "reqwest 0.12.28",
- "rustls",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "tokio",
- "tokio-rustls",
- "tokio-tungstenite",
- "toml 0.8.23",
- "url",
- "uuid",
- "zeroize",
-]
-
-[[package]]
-name = "art-term-gui"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "futures-util",
- "art-term-core",
- "rcgen",
- "serde",
- "serde_json",
- "sha2",
- "tauri",
- "tauri-build",
- "tauri-plugin-clipboard-manager",
- "tauri-plugin-dialog",
- "tauri-plugin-fs",
- "tauri-plugin-mobile-vault",
- "tauri-plugin-mobile-voice",
- "tempfile",
- "tokio",
- "tokio-rustls",
- "tokio-tungstenite",
- "uuid",
- "zeroize",
 ]
 
 [[package]]

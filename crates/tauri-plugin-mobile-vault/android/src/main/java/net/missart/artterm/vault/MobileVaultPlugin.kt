@@ -27,6 +27,8 @@ class MobileVaultPlugin(private val activity: Activity) : Plugin(activity) {
     // Independent operator namespace and no-backup files. Existing
     // unrelated app data is left untouched.
     private val operatorAlias = "art-term-openab-operator-wrap-v1"
+    private val operatorMarkerText = "art-term-openab-operator-v1"
+    private val operatorMarkerBytes get() = operatorMarkerText.toByteArray(Charsets.US_ASCII)
     private val operatorRoot: File get() = File(activity.noBackupFilesDir.canonicalFile, "openab-operator-v1")
     private val operatorMarker: File get() = File(operatorRoot, "key-used-v1")
 
@@ -57,11 +59,11 @@ class MobileVaultPlugin(private val activity: Activity) : Plugin(activity) {
             operatorKey(true)
             if (!operatorMarker.exists()) {
                 java.io.FileOutputStream(operatorMarker).use {
-                    it.write("art-term-openab-operator-v1".toByteArray(Charsets.US_ASCII)); it.fd.sync()
+                    it.write(operatorMarkerBytes); it.fd.sync()
                 }
             }
-            require(operatorMarker.isFile && operatorMarker.length() == 25L)
-            require(operatorMarker.readText(Charsets.US_ASCII) == "art-term-openab-operator-v1")
+            require(operatorMarker.isFile && operatorMarker.length() == operatorMarkerBytes.size.toLong())
+            require(operatorMarker.readText(Charsets.US_ASCII) == operatorMarkerText)
             val result = JSObject(); result.put("path", operatorRoot.absolutePath); invoke.resolve(result)
         } catch (_: Exception) { invoke.reject("Unable to initialize operator vault") }
     }
@@ -80,8 +82,8 @@ class MobileVaultPlugin(private val activity: Activity) : Plugin(activity) {
             args = invoke.parseArgs(OperatorBytesArgs::class.java)
             data = operatorBytes(args.data, if (encrypt) 1024 else 1053)
             context = operatorBytes(args.context, 4096)
-            require(operatorMarker.isFile && operatorMarker.length() == 25L && operatorMarker.canonicalFile == operatorMarker.absoluteFile)
-            require(operatorMarker.readText(Charsets.US_ASCII) == "art-term-openab-operator-v1")
+            require(operatorMarker.isFile && operatorMarker.length() == operatorMarkerBytes.size.toLong() && operatorMarker.canonicalFile == operatorMarker.absoluteFile)
+            require(operatorMarker.readText(Charsets.US_ASCII) == operatorMarkerText)
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             if (encrypt) cipher.init(Cipher.ENCRYPT_MODE, operatorKey(false))
             else {
