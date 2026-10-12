@@ -9,7 +9,10 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path $PSScriptRoot -Parent
 if ($ConfigPath) { throw 'APK no longer embeds connections. Add or import connections in the app.' }
-if (-not $OutputApk) { $OutputApk = Join-Path $repoRoot "dist/android/art-term-0.1.19-$Target.apk" }
+if (-not $OutputApk) {
+    $version = (Get-Content "$repoRoot/crates/art-term-gui/tauri.android.conf.json" -Raw | ConvertFrom-Json).version
+    $OutputApk = Join-Path $repoRoot "dist/android/art-term-$version-$Target.apk"
+}
 $OutputApk = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputApk)
 $SigningRoot = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($SigningRoot)
 $previousConfig = $env:ART_TERM_CONNECTIONS_FILE

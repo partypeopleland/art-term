@@ -1,10 +1,12 @@
 param(
     [switch]$SkipBuild,
     [string]$ConfigPath = "$PSScriptRoot/../config/connections.example.toml",
-    [string]$OutputPath = "$PSScriptRoot/../dist/windows/art-term-0.1.19"
+    [string]$OutputPath
 )
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
+$productVersion = (Get-Content -LiteralPath (Join-Path $projectRoot 'crates/art-term-gui/tauri.conf.json') -Raw | ConvertFrom-Json).version
+if (-not $OutputPath) { $OutputPath = Join-Path $projectRoot "dist/windows/art-term-$productVersion" }
 $outputRoot = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputPath)
 $ConfigPath = (Resolve-Path -LiteralPath $ConfigPath).Path
 if ((Test-Path -LiteralPath $outputRoot) -and (Get-ChildItem -LiteralPath $outputRoot -Force | Measure-Object).Count -gt 0) {
@@ -53,7 +55,6 @@ try {
         '關分頁只本機脫離；遠端 Shell 仍受 TTL 及 runtime 生命週期限制。'
     )
     Set-Content -LiteralPath (Join-Path $outputRoot 'README.md') -Value $instructions -Encoding UTF8
-    $productVersion = (Get-Content -LiteralPath (Join-Path $projectRoot 'crates/art-term-gui/tauri.conf.json') -Raw | ConvertFrom-Json).version
     $manifest = foreach ($name in @('art-term-gui.exe','connections.toml','README.md','LICENSE','THIRD-PARTY-NOTICES.md')) {
         $path = Join-Path $outputRoot $name
         [ordered]@{file=$name;sha256=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant();bytes=(Get-Item -LiteralPath $path).Length}

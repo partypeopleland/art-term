@@ -15,7 +15,7 @@ Android APK -- HTTPS / WSS --> Runtime --> Shell / Desktop
 
 連線設定只保存在本機 `connections.toml`，管理憑證由 operator Keystore（此 App 在 Android 使用的金鑰儲存）保護。APK 不包含私人連線；新手機可在 App 新增或匯入。觸控與背景處理會影響使用者能否持續操作，所以桌面測試與 APK 建置成功都不能取代手機驗收。
 
-目前 package 為 `net.missart.artterm`，minSdk 24／targetSdk 36，release 為 ARM64、16KB page alignment；版本 0.1.19／code 1019。更新必須使用原簽章，才能維持既有 App 與 Keystore 的連續性。
+目前 package 為 `net.missart.artterm`，minSdk 24／targetSdk 36，release 為 ARM64、16KB page alignment；版本 0.1.20／code 1020。更新必須使用原簽章，才能維持既有 App 與 Keystore 的連續性。
 
 ## 操作與背景
 
@@ -67,8 +67,8 @@ setup 產生 ignored `target/android-tools/environment.json`；SDK 預設在 `ta
 原簽章release與驗證：
 
 ```powershell
-.\scripts\build-android.ps1 -Target aarch64 -OutputApk ./dist/android/art-term-0.1.19-aarch64.apk
-.\scripts\verify-android.ps1 -Apk ./dist/android/art-term-0.1.19-aarch64.apk
+.\scripts\build-android.ps1 -Target aarch64 -OutputApk ./dist/android/art-term-0.1.20-aarch64.apk
+.\scripts\verify-android.ps1 -Apk ./dist/android/art-term-0.1.20-aarch64.apk
 ```
 
 

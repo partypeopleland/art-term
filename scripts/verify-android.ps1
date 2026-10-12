@@ -1,5 +1,5 @@
 param(
-    [string]$Apk = "$PSScriptRoot/../dist/android/art-term-0.1.19-aarch64.apk",
+    [string]$Apk,
     [string]$ConfigPath,
     [ValidateSet('aarch64','x86_64')][string]$Target = 'aarch64',
     [string]$ExpectedCertificate,
@@ -9,6 +9,7 @@ $ErrorActionPreference = 'Stop'
 if ($ConfigPath) { throw 'APK no longer embeds connections; ConfigPath is unsupported.' }
 $repoRoot = Split-Path $PSScriptRoot -Parent
 $androidConfig = Get-Content "$repoRoot/crates/art-term-gui/tauri.android.conf.json" -Raw | ConvertFrom-Json
+if (-not $Apk) { $Apk = Join-Path $repoRoot "dist/android/art-term-$($androidConfig.version)-$Target.apk" }
 $cfg = Get-Content "$repoRoot/target/android-tools/environment.json" | ConvertFrom-Json
 $env:JAVA_HOME = $cfg.javaHome
 $env:PATH = "$env:JAVA_HOME/bin;$env:PATH"

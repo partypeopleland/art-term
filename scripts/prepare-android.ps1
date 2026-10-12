@@ -3,6 +3,19 @@ $repoRoot = Split-Path $PSScriptRoot -Parent
 $androidConfig = Get-Content "$repoRoot/crates/art-term-gui/tauri.android.conf.json" -Raw | ConvertFrom-Json
 $androidRoot = Join-Path $repoRoot 'crates/art-term-gui/gen/android'
 if (-not (Test-Path "$androidRoot/app/build.gradle.kts")) { throw 'Run tauri android init first' }
+# Direct `node tauri.js android init` makes Tauri generate `node tauri ...`.
+# Gradle needs the actual JS entry point, including on a fresh CI runner.
+$buildTaskPath = Join-Path $androidRoot 'buildSrc/src/main/kotlin/BuildTask.kt'
+$buildTask = Get-Content -LiteralPath $buildTaskPath -Raw
+$nodePath = (Get-Command node -CommandType Application | Select-Object -First 1).Source.Replace('\', '/')
+$cliPath = (Join-Path $repoRoot 'apps/desktop/node_modules/@tauri-apps/cli/tauri.js').Replace('\', '/')
+if ($buildTask -notmatch 'val executable = """[^\r\n]+""";' -or $buildTask -notmatch 'val args = listOf\([^\r\n]+\);') {
+    throw 'Unexpected Tauri BuildTask template; cannot configure the CLI callback safely'
+}
+# MatchEvaluator preserves literal dollar signs in local paths.
+$buildTask = [regex]::Replace($buildTask, 'val executable = """[^\r\n]+""";', [System.Text.RegularExpressions.MatchEvaluator]{ param($m) 'val executable = """' + $nodePath.Replace('$', '${''$''}') + '""";' })
+$buildTask = [regex]::Replace($buildTask, 'val args = listOf\([^\r\n]+\);', [System.Text.RegularExpressions.MatchEvaluator]{ param($m) 'val args = listOf("""' + $cliPath.Replace('$', '${''$''}') + '""", "android", "android-studio-script");' })
+Set-Content -LiteralPath $buildTaskPath -Value $buildTask -NoNewline
 # Connections are created/imported at runtime; remove only this retired generated asset.
 New-Item -ItemType Directory -Force "$androidRoot/app/src/main/assets" | Out-Null
 $retiredConfiguration = Join-Path $androidRoot 'app/src/main/assets/connections.toml'
