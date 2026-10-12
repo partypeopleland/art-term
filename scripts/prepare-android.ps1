@@ -5,7 +5,9 @@ $androidRoot = Join-Path $repoRoot 'crates/art-term-gui/gen/android'
 if (-not (Test-Path "$androidRoot/app/build.gradle.kts")) { throw 'Run tauri android init first' }
 # Direct `node tauri.js android init` makes Tauri generate `node tauri ...`.
 # Gradle needs the actual JS entry point, including on a fresh CI runner.
-$buildTaskPath = Join-Path $androidRoot 'buildSrc/src/main/kotlin/BuildTask.kt'
+$buildTasks = @(Get-ChildItem -LiteralPath "$androidRoot/buildSrc/src/main" -Recurse -File -Filter 'BuildTask.kt')
+if ($buildTasks.Count -ne 1) { throw 'Expected exactly one generated Tauri BuildTask.kt' }
+$buildTaskPath = $buildTasks[0].FullName
 $buildTask = Get-Content -LiteralPath $buildTaskPath -Raw
 $nodePath = (Get-Command node -CommandType Application | Select-Object -First 1).Source.Replace('\', '/')
 $cliPath = (Join-Path $repoRoot 'apps/desktop/node_modules/@tauri-apps/cli/tauri.js').Replace('\', '/')

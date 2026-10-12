@@ -15,6 +15,11 @@ concurrency:
 
 jobs:
   build:
+    name: Build ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [windows, android]
     runs-on: windows-2022
     timeout-minutes: 90
     defaults:
@@ -52,6 +57,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Rust toolchain selection failed' }
 
       - name: Build Windows EXE and portable ZIP
+        if: matrix.platform == 'windows'
         run: |
           $package = "dist/windows/art-term-$env:ART_TERM_VERSION-windows-x64"
           ./scripts/package-windows.ps1 -OutputPath $package
@@ -60,12 +66,14 @@ jobs:
           Copy-Item "$package/art-term-gui.exe" "dist/release/art-term-$env:ART_TERM_VERSION-windows-x64.exe"
 
       - uses: actions/upload-artifact@v4
+        if: matrix.platform == 'windows'
         with:
           name: windows
           path: dist/release/*
           if-no-files-found: error
 
       - name: Check Android signing secrets
+        if: matrix.platform == 'android'
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -73,7 +81,7 @@ jobs:
         run: |
           foreach ($name in @('ANDROID_KEYSTORE_BASE64', 'ANDROID_KEYSTORE_PASSWORD', 'ANDROID_CERTIFICATE_SHA256')) {
             if (-not [Environment]::GetEnvironmentVariable($name)) {
-              throw "Missing repository secret: $name. See docs/platforms/releases.md. Windows artifacts are already available."
+              throw "Missing repository secret: $name. See docs/platforms/releases.md. Windows builds separately."
             }
           }
           if ($env:ANDROID_CERTIFICATE_SHA256 -notmatch '^[0-9a-fA-F]{64}$') {
@@ -81,6 +89,7 @@ jobs:
           }
 
       - name: Set up Android tools
+        if: matrix.platform == 'android'
         run: |
           ./scripts/setup-android.ps1 -BootstrapOnly -SdkRoot $env:ANDROID_HOME
           $cfg = Get-Content target/android-tools/environment.json -Raw | ConvertFrom-Json
@@ -90,7 +99,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Android SDK license acceptance failed' }
           ./scripts/setup-android.ps1 -SdkRoot $cfg.androidHome
 
+      - name: Install Android frontend dependencies
+        if: matrix.platform == 'android'
+        run: |
+          npm.cmd --prefix apps/desktop ci
+          if ($LASTEXITCODE -ne 0) { throw 'npm ci failed' }
+
       - name: Build and verify signed Android APK
+        if: matrix.platform == 'android'
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -113,6 +129,7 @@ jobs:
           }
 
       - uses: actions/upload-artifact@v4
+        if: matrix.platform == 'android'
         with:
           name: android
           path: dist/release/*.apk
