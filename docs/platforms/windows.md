@@ -57,10 +57,10 @@ cargo check -p art-term-gui --locked
 .\scripts\package-windows.ps1
 ```
 
-打包預設公開空設定，輸出 `dist/windows/art-term-0.1.21`；輸出需為新建或空目錄，保留既有交付。自訂交付 TOML：
+打包預設公開空設定，輸出 `dist/windows/art-term-0.1.22`；輸出需為新建或空目錄，保留既有交付。自訂交付 TOML：
 
 ```powershell
-.\scripts\package-windows.ps1 -ConfigPath C:/art-term-private/connections.toml -OutputPath ./dist/windows/private-test-0.1.21
+.\scripts\package-windows.ps1 -ConfigPath C:/art-term-private/connections.toml -OutputPath ./dist/windows/private-test-0.1.22
 ```
 
 包內有 EXE、設定、README、LICENSE、第三方說明及 hash manifest。`ConfigPath` 只決定旁置 TOML，不嵌入 binary；私有 bootstrap 已退役，啟用會拒絕。`-SkipBuild` 沿用 binary，需另核對來源，不能代表新建置。腳本使用 Rust path remap 避免內嵌建置者 home／專案路徑。

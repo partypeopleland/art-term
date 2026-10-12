@@ -43,7 +43,8 @@ try {
         if($LASTEXITCODE -ne 0){throw 'Android initialization failed'}
     }
     & "$repoRoot/scripts/prepare-android.ps1"
-    $buildArgs=@('android','build','--target',$Target,'--apk','--ci')
+    # Keep the output variant consistent with the selected ABI and fallback task.
+    $buildArgs=@('android','build','--target',$Target,'--apk','--split-per-abi','--ci')
     if($Debug){$buildArgs += '--debug'}
     $logPath="$repoRoot/target/android-tools/build-$Target-$profile.txt"
     & node $cli @buildArgs 2>&1 | Tee-Object -FilePath $logPath
