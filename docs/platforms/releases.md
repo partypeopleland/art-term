@@ -3,7 +3,7 @@
 Git push 只會上傳原始碼；GitHub 不會自行執行本機打包腳本。此專案的 `Build and release` workflow 在推送 `v*` 版本標籤後，用 GitHub 的 Windows runner 建置 EXE 和已簽章的 ARM64 APK，再建立 GitHub Release。成果不需要加入 Git。
 
 ```text
-push v0.1.22 --+--> Windows EXE + ZIP -----------+
+push v0.1.23 --+--> Windows EXE + ZIP -----------+
               +--> Android APK + verification --+--> GitHub Release + SHA256SUMS
 ```
 
@@ -79,14 +79,14 @@ Repository 必須允許 GitHub Actions 執行。Workflow 僅在發布 job 要求
 
 ## 發布版本
 
-先將 workflow、腳本與設定變更 commit 並 push 至 `main`。目前 App 版本為 `0.1.22`，首次發布可執行：
+先將 workflow、腳本與設定變更 commit 並 push 至 `main`。目前 App 版本為 `0.1.23`，首次發布可執行：
 
 ```sh
-git tag -a v0.1.22 -m "Release 0.1.22"
-git push origin v0.1.22
+git tag -a v0.1.23 -m "Release 0.1.23"
+git push origin v0.1.23
 ```
 
-標籤必須指向包含 workflow 的 commit。後續發布先同步修改 `crates/art-term-gui/tauri.conf.json` 與 `crates/art-term-gui/tauri.android.conf.json` 的 `version`，並增加 Android 設定的 `bundle.android.versionCode`（目前為 `1022`）。Commit、push 後，再推送對應的新標籤，例如 `v0.1.23`。Workflow 會拒絕與 App 版本不一致的標籤。
+標籤必須指向包含 workflow 的 commit。後續發布先同步修改 `crates/art-term-gui/tauri.conf.json` 與 `crates/art-term-gui/tauri.android.conf.json` 的 `version`，並增加 Android 設定的 `bundle.android.versionCode`（目前為 `1023`）。Commit、push 後，再推送對應的新標籤，例如 `v0.1.24`。Workflow 會拒絕與 App 版本不一致的標籤。
 
 成功後 Release 附件包含：
 
@@ -95,7 +95,7 @@ git push origin v0.1.22
 - `art-term-<version>-android-arm64.apk`：使用 repository Secrets 指定的固定金鑰簽署、可安裝的 ARM64 Android 版。
 - `SHA256SUMS.txt`：上述檔案的 SHA256。
 
-0.1.22 修正首次乾淨建置時，Gradle 將 `tauri` 誤當成 Node 檔案的問題；準備腳本會明確指定 Node 與 Tauri CLI 的路徑，並要求 Tauri 按 ABI 分開封裝，讓 APK 產物路徑與取檔、驗證流程一致。
+0.1.23 修正首次乾淨建置時，Gradle 將 `tauri` 誤當成 Node 檔案的問題；準備腳本會明確指定 Node 與 Tauri CLI 的路徑，並要求 Tauri 按 ABI 分開封裝，讓 APK 產物路徑與取檔、驗證流程一致。Android 另以空資源清單覆寫桌面設定，避免將 Windows 的連線範本嵌入 APK。
 
 ## 失敗與驗證範圍
 
