@@ -30,6 +30,18 @@ art-term and openab-pty are independent projects. This app works with the offici
 
 Prepare a Linux host reachable from your Windows PC or Android device over the same private Tailnet, such as Tailscale, and have the official openab-pty Runtime configured. Add its URL and management credential in the app. A coding CLI is optional and must already be installed on the host. For desktop previews, also prepare a shared desktop, the Host helper, and instance-mcp.
 
+## Build your own version
+
+Clone this repository (or your fork), then follow the [local build and customization guide](docs/platforms/local-build.md) (Traditional Chinese) to install the Windows toolchain. Building the app does not require a remote Runtime; connecting to a shell does.
+
+Once the prerequisites are ready, run this from the repository root in PowerShell to build a Windows portable package:
+
+```powershell
+.\scripts\package-windows.ps1 -OutputPath ".\dist\windows\art-term-$(Get-Date -Format yyyyMMdd-HHmmss)"
+```
+
+For Android, the guide covers first-time SDK setup, a debug APK, your own release signing key, and APK verification. It also explains how to change the app name, icons, identifiers, and version. Signing keys are not included in a clone or fork.
+
 ## Documentation and builds
 
 For automatic Windows EXE and Android APK builds and publishing GitHub Releases, see the [release setup guide](docs/platforms/releases.md). Publishing is triggered by a version tag; Android uses a persistent signing key stored in GitHub Actions secrets. Fork maintainers can create their own key.

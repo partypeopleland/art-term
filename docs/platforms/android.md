@@ -44,6 +44,8 @@ Android 終端分頁提供麥克風按鈕，可在語音設定選擇「點一下
 
 ## Windows 建置
 
+第一次 clone／fork、需要建立自己的 release 簽章，或要修改 Android 識別碼時，先讀[本地建置與自訂版本](local-build.md)。下列建置命令假設已完成該指南的前端依賴安裝；維護者的簽章材料不隨原始碼提供。
+
 要請 AI 驗證 APK 操作，先準備本節建置工具、Python 與可用的 Android 模擬器，再貼上：
 
 ```text

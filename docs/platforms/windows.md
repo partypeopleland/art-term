@@ -25,6 +25,8 @@ Windows PC                                      Remote Host
 
 ## 工具鏈與建置
 
+第一次 clone／fork、只想打包，或要更換名稱與圖示時，先依[本地建置與自訂版本](local-build.md)完成準備；本節補充開發檢查與平台驗收。
+
 要請 AI 驗證功能，準備本節開發工具，以及 Python、WebView2 與版本相符的 Edge WebDriver，再直接貼上：
 
 ```text

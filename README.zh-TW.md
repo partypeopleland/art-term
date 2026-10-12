@@ -30,6 +30,18 @@ art-term 與 openab-pty 是獨立專案。App 與官方 openab-pty Runtime 配�
 
 準備一台 Linux Host，讓 Windows 電腦或 Android 手機可透過同一個私人 Tailnet（例如 Tailscale）連線，並先設定好官方 openab-pty Runtime。再於 App 填入 Runtime 網址與管理憑證。coding CLI 是選配工具，使用前須先安裝在 Host。要使用桌面預覽，還需準備共享桌面、Host helper 與 instance-mcp。
 
+## 本地打包與製作自己的版本
+
+Clone 本專案或自己的 fork 後，依[本地建置與自訂版本指南](docs/platforms/local-build.md)準備 Windows 工具鏈。編譯 App 不需要遠端 Runtime；要實際連線操作 Shell 時才需要。
+
+工具準備好後，在專案根目錄的 PowerShell 執行這一行，即可建置 Windows 可攜資料夾：
+
+```powershell
+.\scripts\package-windows.ps1 -OutputPath ".\dist\windows\art-term-$(Get-Date -Format yyyyMMdd-HHmmss)"
+```
+
+Android 的首次 SDK 設定、debug APK、自有 release 金鑰與 APK 驗證，以及名稱、圖示、識別碼和版本號的調整，都收在上述指南。Clone／fork 不會取得維護者的簽章金鑰。
+
 ## 文件與建置
 
 自動建置 Windows EXE、Android APK 並發布 GitHub Release，請見[自動發布設定](docs/platforms/releases.md)。推送版本標籤即可觸發；Android 使用保存在 GitHub Actions Secrets 的固定簽章金鑰，fork 維護者可建立自己的金鑰。
