@@ -32,6 +32,8 @@ art-term 與 openab-pty 是獨立專案。App 與官方 openab-pty Runtime 配�
 
 ## 文件與建置
 
+自動建置 Windows EXE、Android APK 並發布 GitHub Release，請見[自動發布設定](docs/platforms/releases.md)。推送版本標籤即可觸發；Android 使用保存在 GitHub Actions Secrets 的固定簽章金鑰，fork 維護者可建立自己的金鑰。
+
 目前詳細文件以繁體中文撰寫。可從[使用前準備](docs/openab-host-setup.md)或[文件入口](docs/INDEX.md)開始，並參考[架構](docs/refarch/architecture.md)、[Shell 工作階段與恢復](docs/refarch/sessions.md)、[桌面預覽](docs/refarch/desktop.md)、[連線搬移](docs/refarch/connection-transfer.md)、[Windows 建置指南](docs/platforms/windows.md)、[Android 建置指南](docs/platforms/android.md)及[Android 語音輸入決策](docs/bdr/BDR-001-android-voice-input.md)。
 
 ## Issues 與授權

@@ -14,6 +14,7 @@
 | App 共享桌面預覽與 binding | [桌面](refarch/desktop.md) |
 | 官方 Runtime 專用截圖 Shell 與 Host helper | [Runtime 桌面 helper](refarch/runtime-desktop.md) |
 | Windows 工具鏈、操作差異、打包與驗收 | [Windows](platforms/windows.md) |
+| GitHub Actions、EXE／APK 自動建置、簽章 Secrets 與 Release | [自動發布](platforms/releases.md) |
 | 功能回歸、unit／原生 E2E、測試計畫與本機執行 | [Windows 回歸測試](platforms/windows-regression.md) |
 | 哪些操作受保護、跨平台案例與驗收界線 | [功能測試矩陣](refarch/test-matrix.md) |
 | 真 APK／模擬器／Keystore／系統選檔／跨裝置搬移 | [Android APK 原生 E2E](platforms/android-regression.md) |

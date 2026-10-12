@@ -8,6 +8,7 @@ param(
 $ErrorActionPreference = 'Stop'
 if ($ConfigPath) { throw 'APK no longer embeds connections; ConfigPath is unsupported.' }
 $repoRoot = Split-Path $PSScriptRoot -Parent
+$androidConfig = Get-Content "$repoRoot/crates/art-term-gui/tauri.android.conf.json" -Raw | ConvertFrom-Json
 $cfg = Get-Content "$repoRoot/target/android-tools/environment.json" | ConvertFrom-Json
 $env:JAVA_HOME = $cfg.javaHome
 $env:PATH = "$env:JAVA_HOME/bin;$env:PATH"
@@ -26,7 +27,7 @@ if ($LASTEXITCODE -ne 0) { throw 'APK ZIP alignment failed' }
 $badging = & "$buildTools/aapt.exe" dump badging $apkPath
 if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect APK metadata' }
 $metadata = $badging -join "`n"
-foreach ($expected in @("package: name='net.missart.artterm' versionCode='1019' versionName='0.1.19'", "sdkVersion:'24'", "targetSdkVersion:'36'", "native-code: '$abi'")) {
+foreach ($expected in @("package: name='net.missart.artterm' versionCode='$($androidConfig.bundle.android.versionCode)' versionName='$($androidConfig.version)'", "sdkVersion:'24'", "targetSdkVersion:'36'", "native-code: '$abi'")) {
     if (-not $metadata.Contains($expected)) { throw "Unexpected APK metadata: $expected" }
 }
 if ($metadata -match 'application-debuggable') { throw 'Release APK is debuggable' }
@@ -75,8 +76,8 @@ $result = [pscustomobject]@{
     sha256 = (Get-FileHash -LiteralPath $apkPath).Hash.ToLowerInvariant()
     bytes = (Get-Item -LiteralPath $apkPath).Length
     applicationId = 'net.missart.artterm'
-    version = '0.1.19'
-    versionCode = 1019
+    version = $androidConfig.version
+    versionCode = $androidConfig.bundle.android.versionCode
     minSdk = 24
     targetSdk = 36
     certificateSha256 = $cert

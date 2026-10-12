@@ -1,5 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path $PSScriptRoot -Parent
+$androidConfig = Get-Content "$repoRoot/crates/art-term-gui/tauri.android.conf.json" -Raw | ConvertFrom-Json
 $androidRoot = Join-Path $repoRoot 'crates/art-term-gui/gen/android'
 if (-not (Test-Path "$androidRoot/app/build.gradle.kts")) { throw 'Run tauri android init first' }
 # Connections are created/imported at runtime; remove only this retired generated asset.
@@ -20,8 +21,8 @@ $wrapper = $wrapper -replace 'gradle-[\d.]+-bin.zip', 'gradle-8.13-bin.zip'
 Set-Content "$androidRoot/gradle/wrapper/gradle-wrapper.properties" $wrapper -NoNewline
 $app = Get-Content "$androidRoot/app/build.gradle.kts" -Raw
 $app = $app -replace '(compileSdk|targetSdk) = \d+', '$1 = 36'
-$app = $app -replace 'versionCode = [^\r\n]+', 'versionCode = 1019'
-$app = $app -replace 'versionName = [^\r\n]+', 'versionName = "0.1.19"'
+$app = $app -replace 'versionCode = [^\r\n]+', "versionCode = $($androidConfig.bundle.android.versionCode)"
+$app = $app -replace 'versionName = [^\r\n]+', "versionName = `"$($androidConfig.version)`""
 $app = $app -replace 'optimization\s*\{\s*enable = true\s*\}', 'isMinifyEnabled = false'
 # The prototype uses Jackson/Tauri reflection. R8 removed enum values() on
 # the real signed APK; keep release code intact until keep rules are verified.

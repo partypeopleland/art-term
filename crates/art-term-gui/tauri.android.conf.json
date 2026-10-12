@@ -13,5 +13,5 @@
       }]
     }
   },
-  "bundle": {"active": true, "targets": "all"}
+  "bundle": {"active": true, "targets": "all", "android": {"versionCode": 1019}}
 }

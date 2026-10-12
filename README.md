@@ -32,6 +32,8 @@ Prepare a Linux host reachable from your Windows PC or Android device over the s
 
 ## Documentation and builds
 
+For automatic Windows EXE and Android APK builds and publishing GitHub Releases, see the [release setup guide](docs/platforms/releases.md). Publishing is triggered by a version tag; Android uses a persistent signing key stored in GitHub Actions secrets. Fork maintainers can create their own key.
+
 The detailed documentation is currently written in Traditional Chinese. Start with the [quick start](docs/openab-host-setup.md) or [documentation index](docs/INDEX.md). See also [architecture](docs/refarch/architecture.md), [Shell sessions and recovery](docs/refarch/sessions.md), [desktop preview](docs/refarch/desktop.md), [connection transfer](docs/refarch/connection-transfer.md), the [Windows build guide](docs/platforms/windows.md), the [Android build guide](docs/platforms/android.md), and the [Android voice-input decision](docs/bdr/BDR-001-android-voice-input.md).
 
 ## Issues and license

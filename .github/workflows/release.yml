@@ -1,0 +1,143 @@
+name: Build and release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Check release version
+        run: |
+          $desktop = Get-Content crates/art-term-gui/tauri.conf.json -Raw | ConvertFrom-Json
+          $android = Get-Content crates/art-term-gui/tauri.android.conf.json -Raw | ConvertFrom-Json
+          $version = $desktop.version
+          if ($version -notmatch '^\d+\.\d+\.\d+$' -or $android.version -ne $version) {
+            throw 'Desktop and Android must have the same major.minor.patch version.'
+          }
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") {
+            throw "Tag must match the configured app version: v$version"
+          }
+          "ART_TERM_VERSION=$version" >> $env:GITHUB_ENV
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Set up Rust
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          if ($LASTEXITCODE -ne 0) { throw 'Rust installation failed' }
+          rustup default stable
+          if ($LASTEXITCODE -ne 0) { throw 'Rust toolchain selection failed' }
+
+      - name: Build Windows EXE and portable ZIP
+        run: |
+          $package = "dist/windows/art-term-$env:ART_TERM_VERSION-windows-x64"
+          ./scripts/package-windows.ps1 -OutputPath $package
+          New-Item -ItemType Directory -Force dist/release | Out-Null
+          Compress-Archive -Path "$package/*" -DestinationPath "dist/release/art-term-$env:ART_TERM_VERSION-windows-x64.zip"
+          Copy-Item "$package/art-term-gui.exe" "dist/release/art-term-$env:ART_TERM_VERSION-windows-x64.exe"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/release/*
+          if-no-files-found: error
+
+      - name: Check Android signing secrets
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_CERTIFICATE_SHA256: ${{ secrets.ANDROID_CERTIFICATE_SHA256 }}
+        run: |
+          foreach ($name in @('ANDROID_KEYSTORE_BASE64', 'ANDROID_KEYSTORE_PASSWORD', 'ANDROID_CERTIFICATE_SHA256')) {
+            if (-not [Environment]::GetEnvironmentVariable($name)) {
+              throw "Missing repository secret: $name. See docs/platforms/releases.md. Windows artifacts are already available."
+            }
+          }
+          if ($env:ANDROID_CERTIFICATE_SHA256 -notmatch '^[0-9a-fA-F]{64}$') {
+            throw 'ANDROID_CERTIFICATE_SHA256 must contain 64 hexadecimal characters without colons.'
+          }
+
+      - name: Set up Android tools
+        run: |
+          ./scripts/setup-android.ps1 -BootstrapOnly -SdkRoot $env:ANDROID_HOME
+          $cfg = Get-Content target/android-tools/environment.json -Raw | ConvertFrom-Json
+          $env:JAVA_HOME = $cfg.javaHome
+          $env:PATH = "$env:JAVA_HOME/bin;$env:PATH"
+          1..100 | ForEach-Object { 'y' } | & $cfg.sdkmanager "--sdk_root=$($cfg.androidHome)" --licenses
+          if ($LASTEXITCODE -ne 0) { throw 'Android SDK license acceptance failed' }
+          ./scripts/setup-android.ps1 -SdkRoot $cfg.androidHome
+
+      - name: Build and verify signed Android APK
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_CERTIFICATE_SHA256: ${{ secrets.ANDROID_CERTIFICATE_SHA256 }}
+        run: |
+          $signingRoot = Join-Path $env:RUNNER_TEMP 'art-term-signing'
+          New-Item -ItemType Directory -Force $signingRoot | Out-Null
+          try {
+            [IO.File]::WriteAllBytes((Join-Path $signingRoot 'android-release.p12'), [Convert]::FromBase64String($env:ANDROID_KEYSTORE_BASE64))
+            # Re-encrypt on this Windows runner; the home PC's DPAPI blob is not portable.
+            $env:ANDROID_KEYSTORE_PASSWORD | ConvertTo-SecureString -AsPlainText -Force | ConvertFrom-SecureString |
+              Set-Content (Join-Path $signingRoot 'android-release.dpapi')
+            $certificate = $env:ANDROID_CERTIFICATE_SHA256.ToLowerInvariant()
+            Remove-Item Env:ANDROID_KEYSTORE_BASE64, Env:ANDROID_KEYSTORE_PASSWORD
+            $apk = "dist/release/art-term-$env:ART_TERM_VERSION-android-arm64.apk"
+            ./scripts/build-android.ps1 -Target aarch64 -OutputApk $apk -SigningRoot $signingRoot -ExpectedCertificate $certificate
+            ./scripts/verify-android.ps1 -Apk $apk -SigningRoot $signingRoot -ExpectedCertificate $certificate
+          } finally {
+            Remove-Item -LiteralPath $signingRoot -Recurse -Force
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: dist/release/*.apk
+          if-no-files-found: error
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        working-directory: release
+        run: |
+          sha256sum ./*.exe ./*.zip ./*.apk > SHA256SUMS.txt
+          gh release create "$RELEASE_TAG" ./*.exe ./*.zip ./*.apk SHA256SUMS.txt \
+            --verify-tag --title "art-term $RELEASE_TAG" --generate-notes
