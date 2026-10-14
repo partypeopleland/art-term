@@ -19,7 +19,7 @@
 | 功能回歸、unit／原生 E2E、測試計畫與本機執行 | [Windows 回歸測試](platforms/windows-regression.md) |
 | 哪些操作受保護、跨平台案例與驗收界線 | [功能測試矩陣](refarch/test-matrix.md) |
 | 真 APK／模擬器／Keystore／系統選檔／跨裝置搬移 | [Android APK 原生 E2E](platforms/android-regression.md) |
-| APK 全介面操作案例、Linux 模擬器與逐案結果 | [UI 操作矩陣](../scripts/android-regression/ui-matrix.md)、[2026-10-14 修正驗證](report/apk-ui-fixes-20261014.md)（[基準報告](report/apk-ui-20261014.md)） |
+| APK UI 測試操作與覆蓋清單 | [UI 測試](../scripts/android-regression/ui-matrix.md) |
 | Linux 真官方 Runtime／helper／Host fixture驗收 | [Linux 回歸測試](platforms/linux-regression.md) |
 | Android 工具鏈、觸控／背景、原簽章與驗收 | [Android](platforms/android.md) |
 | 使用者：必要依賴與交給 AI 的安裝 prompt | [使用前準備](openab-host-setup.md) |
@@ -32,4 +32,4 @@
 | 文件寫法、拆篇與載入原則 | [文件規則](steering/documentation.md) |
 | 第三方散布義務 | [第三方說明](third-party-notices.md) |
 
-`refarch/`、`platforms/` 與 Host 頁解釋目前行為；ADR／BDR 記錄決策理由與提案，並標明實作狀態。`report/` 記版本差異及驗證範圍。歷史測試不代表目前實機驗收。
+`refarch/`、`platforms/` 與 Host 頁解釋目前行為；ADR／BDR 記錄決策理由與提案，並標明實作狀態。`report/` 只放按版本命名、給使用者閱讀的更新說明。
