@@ -123,15 +123,30 @@ class App:
         self.action = 'locating touch point ' + label
         wait(lambda:self.evaluate(f'(()=>{{const e={expression};return !!e&&!e.disabled&&e.getBoundingClientRect().width>0}})()'))
 
-        self.evaluate(f'(()=>{{const e={expression};e.focus();e.scrollIntoView({{block:"center",inline:"center"}})}})()')
+        # A touch must own focus changes. Programmatically focusing a button
+        # before tapping it would contaminate keyboard visibility assertions.
+        self.evaluate(f'({expression}).scrollIntoView({{block:"center",inline:"center"}})')
         self.touch_diagnostic['phase'] = 'native-calibration'
         native_bounds = self.device.webview_bounds()
         viewport = self.evaluate('({x:visualViewport.offsetLeft,y:visualViewport.offsetTop,width:visualViewport.width,height:visualViewport.height,scale:visualViewport.scale})')
         require(viewport['width'] > 0 and viewport['height'] > 0 and viewport['scale'] == 1, 'unsupported native WebView viewport scale')
         sx = (native_bounds[2]-native_bounds[0])/viewport['width']
         sy = (native_bounds[3]-native_bounds[1])/viewport['height']
-        require(abs(sx-sy) <= max(sx,sy)*.02, 'native WebView viewport aspect mismatch')
+        clipped_ime = False
+        if abs(sx-sy) > max(sx,sy)*.02:
+            # Android14 may keep the full WebView accessibility rectangle
+            # while Chromium clips only visualViewport for the soft keyboard.
+            # CSS coordinates retain the horizontal scale; stretching Y to
+            # the full rectangle would tap beneath the intended control.
+            shown = re.findall(r'mInputShown=(true|false)', self.device.text('shell','dumpsys','input_method'))
+            layout = self.evaluate('({width:innerWidth,height:innerHeight})')
+            clipped_ime = (shown and set(shown)=={'true'} and sx < sy
+                           and abs(layout['width']*sx-(native_bounds[2]-native_bounds[0])) <= 2
+                           and viewport['height']*sx < native_bounds[3]-native_bounds[1])
+            require(clipped_ime, 'native WebView viewport aspect mismatch')
+            sy = sx
         self.touch_diagnostic['calibration'] = {'bounds':native_bounds,'viewport':viewport,'scaleX':sx,'scaleY':sy}
+        self.touch_diagnostic['calibration']['imeClippedViewport'] = bool(clipped_ime)
         self.touch_diagnostic['phase'] = 'stable-geometry'
         previous, stable_since = None, None
         def stable_point():
@@ -205,6 +220,8 @@ document.addEventListener('click',p.listener,true)}})()''')
         self.fill(self.node(testid), value)
 
     def manage(self):
+        if self.has('[data-testid=runtime-create]'):
+            return
         if self.has('[data-testid=to-list]') and not self.has('[data-testid=runtime-host-manage]'):
             self.tap('to-list')
         self.tap('runtime-host-manage')

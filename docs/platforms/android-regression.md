@@ -2,6 +2,8 @@
 
 這份文件說明如何在 Windows 的專用 Android 模擬器操作真正的 APK，驗證畫面、Tauri IPC、Rust HTTPS／WSS、Android Keystore 與系統文件選擇器的整合。使用者準備 [Android 建置工具](android.md)及可用的 Android 模擬器即可；工具檢查、案例選擇與結果由 AI 處理。功能與跨平台保護範圍集中在[測試矩陣](../refarch/test-matrix.md)。
 
+Linux/KVM 的日常 APK UI 回歸使用[介面操作矩陣](../../scripts/android-regression/ui-matrix.md)，延伸同一套 Suite／協定 fixture，涵蓋語音設定 swap、原生歷史捲動、重連、快速鍵與 Android 軟鍵盤狀態；不依賴 Windows EXE。本文以下保留既有 Windows＋APK 跨裝置流程。
+
 本流程已在 Android 15／API 35 模擬器實際操作 APK，涵蓋六組 Android 案例及一組雙向跨平台案例。測試 APK 是 x86_64 debug＋`openab-fixture`，不是更新私人手機的 ARM64 release APK。測試使用真正的 Android 系統與產品程式，但模擬器不具有實體手機的 ARM64、硬體 Keystore、安全硬體與各廠牌省電行為。每次執行是否通過，仍以該次完整結果與清理狀態判定。
 
 ## 依賴與資料流
@@ -62,3 +64,9 @@ Windows test runner
 [測試入口](../../scripts/test-android-regression.ps1)、[專用 AVD 管理](../../scripts/android-regression/environment.py)、[APK runner](../../scripts/android-regression/run.py)、[Android 憑證與 fixture CA](../../crates/art-term-gui/src/android_operator.rs)。
 
 [Android Emulator 命令列](https://developer.android.com/studio/run/emulator-commandline)、[硬體加速](https://developer.android.com/studio/run/emulator-acceleration)、[ADB](https://developer.android.com/tools/adb)、[WebView 遠端除錯](https://developer.chrome.com/docs/devtools/remote-debugging/webviews)。
+
+## Linux 模擬器：NUC 斷線與歷史捲動
+
+針對原生閱讀區新增獨立測試入口，涵蓋真正拖曳、網路中斷後恢復，以及手動脫離再接回同一遠端 Shell。每次建立新的測試 AVD 與專用 Shell，不接管現有裝置或工作。使用 `ls`／`ls -al` 列出測試專用的虛構檔案，透過當次原生內容與畫面變化判斷舊輸出與捲動是否保留。
+
+執行前需準備可除錯的 x86_64 APK、可用的 NUC HTTPS 網址與 repo 外的管理憑證檔。工具啟動測試與真實歷史測試分開回報，沒有連線證據時不得宣稱歷史通過。完整命令、證據與清理方式見[NUC 歷史捲動測試](../../scripts/android-regression/reconnect-scroll.md)。

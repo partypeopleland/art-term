@@ -1,0 +1,293 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "id": "DEVICE-ARM64",
+      "title": "Release signature upgrade/OEM IME/Doze",
+      "automated": false,
+      "group": "DEVICE"
+    },
+    {
+      "id": "HOME-01",
+      "title": "Empty home, refresh, empty export disabled",
+      "automated": true,
+      "group": "HOME"
+    },
+    {
+      "id": "HOME-02",
+      "title": "All/Host/Agent filtering",
+      "automated": true,
+      "group": "HOME"
+    },
+    {
+      "id": "HOST-01",
+      "title": "Cancel new connection without writing",
+      "automated": true,
+      "group": "HOST"
+    },
+    {
+      "id": "HOST-02",
+      "title": "Invalid connection equivalence classes and UTF8 boundary",
+      "automated": true,
+      "group": "HOST"
+    },
+    {
+      "id": "HOST-03",
+      "title": "Create/test/edit/category/restart/delete last/Keystore",
+      "automated": true,
+      "group": "HOST"
+    },
+    {
+      "id": "HOST-04",
+      "title": "Cancel deletion preserves profile",
+      "automated": true,
+      "group": "HOST"
+    },
+    {
+      "id": "HOST-05",
+      "title": "Rejected credential shows failure, correction succeeds",
+      "automated": true,
+      "group": "HOST"
+    },
+    {
+      "id": "INPUT-01",
+      "title": "Cancel composer does not send",
+      "automated": true,
+      "group": "INPUT"
+    },
+    {
+      "id": "INPUT-02",
+      "title": "Send Unicode without Enter",
+      "automated": true,
+      "group": "INPUT"
+    },
+    {
+      "id": "INPUT-03",
+      "title": "Send Unicode with exactly one Enter and native text",
+      "automated": true,
+      "group": "INPUT"
+    },
+    {
+      "id": "INPUT-04",
+      "title": "Ctrl modifier sends control byte; toggle clears latch",
+      "automated": true,
+      "group": "INPUT"
+    },
+    {
+      "id": "INPUT-05",
+      "title": "Configured CLI preserves argument boundaries",
+      "automated": true,
+      "group": "INPUT"
+    },
+    {
+      "id": "KEY-CTRLC",
+      "title": "Touch CTRLC sends expected PTY bytes",
+      "automated": true,
+      "group": "KEY"
+    },
+    {
+      "id": "KEY-DOWN",
+      "title": "Touch DOWN sends expected PTY bytes",
+      "automated": true,
+      "group": "KEY"
+    },
+    {
+      "id": "KEY-ESC",
+      "title": "Touch ESC sends expected PTY bytes",
+      "automated": true,
+      "group": "KEY"
+    },
+    {
+      "id": "KEY-IME",
+      "title": "Arrows preserve hidden and visible Android keyboard",
+      "automated": true,
+      "group": "KEY"
+    },
+    {
+      "id": "KEY-LEFT",
+      "title": "Touch LEFT sends expected PTY bytes",
+      "automated": true,
+      "group": "KEY"
+    },
+    {
+      "id": "KEY-RIGHT",
+      "title": "Touch RIGHT sends expected PTY bytes",
+      "automated": true,
+      "group": "KEY"
+    },
+    {
+      "id": "KEY-SHIFTLEFT",
+      "title": "Touch SHIFTLEFT sends expected PTY bytes",
+      "automated": true,
+      "group": "KEY"
+    },
+    {
+      "id": "KEY-TAB",
+      "title": "Touch TAB sends expected PTY bytes",
+      "automated": true,
+      "group": "KEY"
+    },
+    {
+      "id": "KEY-UP",
+      "title": "Touch UP sends expected PTY bytes",
+      "automated": true,
+      "group": "KEY"
+    },
+    {
+      "id": "LIFE-01",
+      "title": "Home/resume clears draft/Ctrl and pauses preview for33s",
+      "automated": true,
+      "group": "LIFE"
+    },
+    {
+      "id": "OVERLAY-01",
+      "title": "Composer and management remain accessible above reader",
+      "automated": true,
+      "group": "OVERLAY"
+    },
+    {
+      "id": "PREVIEW-01",
+      "title": "Decoded PNG, real30s ticks, manual update, tab isolation, cleanup",
+      "automated": true,
+      "group": "PREVIEW"
+    },
+    {
+      "id": "PREVIEW-02",
+      "title": "Hide/show image and capture controls without disabling desktop",
+      "automated": true,
+      "group": "PREVIEW"
+    },
+    {
+      "id": "READ-01",
+      "title": "Portrait/landscape resizes live PTY",
+      "automated": true,
+      "group": "READ"
+    },
+    {
+      "id": "READ-02",
+      "title": "Large synthetic ls output scrolls without remote input",
+      "automated": true,
+      "group": "READ"
+    },
+    {
+      "id": "READ-03",
+      "title": "Dropped WSS recovers cursor and scrollable old history",
+      "automated": true,
+      "group": "READ"
+    },
+    {
+      "id": "READ-04",
+      "title": "Detach/reconnect same Shell retains scrollable history",
+      "automated": true,
+      "group": "READ"
+    },
+    {
+      "id": "READ-05",
+      "title": "Incoming output preserves historical reading position",
+      "automated": true,
+      "group": "READ"
+    },
+    {
+      "id": "READ-06",
+      "title": "Native historical reading survives list and tab navigation",
+      "automated": true,
+      "group": "READ"
+    },
+    {
+      "id": "SAF-01",
+      "title": "Real document picker, encryption/cancel/badpassword/duplicate/restart",
+      "automated": true,
+      "group": "SAF"
+    },
+    {
+      "id": "SAF-02",
+      "title": "Metadata export, password mismatch, missing credential supplement",
+      "automated": true,
+      "group": "SAF"
+    },
+    {
+      "id": "SETUP-TRANSFER",
+      "title": "Create dedicated transfer profile",
+      "automated": true,
+      "group": "SETUP"
+    },
+    {
+      "id": "SHELL-01",
+      "title": "Invalid Shell names rejected; maxlength32 enforced",
+      "automated": true,
+      "group": "SHELL"
+    },
+    {
+      "id": "SHELL-02",
+      "title": "Create and connect work-a through UI",
+      "automated": true,
+      "group": "SHELL"
+    },
+    {
+      "id": "SHELL-03",
+      "title": "Refresh/attached warning/duplicate conflict/return/primary entry",
+      "automated": true,
+      "group": "SHELL"
+    },
+    {
+      "id": "TAB-01",
+      "title": "Second Shell and tab switching isolate output",
+      "automated": true,
+      "group": "TAB"
+    },
+    {
+      "id": "TAB-02",
+      "title": "Close tab detaches, keeps remote Shell and other tab",
+      "automated": true,
+      "group": "TAB"
+    },
+    {
+      "id": "TAB-03",
+      "title": "Close last tab and return to connection list",
+      "automated": true,
+      "group": "TAB"
+    },
+    {
+      "id": "TAB-04",
+      "title": "Active tab label and composer destination agree",
+      "automated": true,
+      "group": "TAB"
+    },
+    {
+      "id": "UPDATE-01",
+      "title": "Same APK reinstall preserves credential and profile",
+      "automated": true,
+      "group": "UPDATE"
+    },
+    {
+      "id": "VOICE-01",
+      "title": "Gear swaps preview/radios; native reader stays visible",
+      "automated": true,
+      "group": "VOICE"
+    },
+    {
+      "id": "VOICE-02",
+      "title": "Missing recognition service has disabled mic and feedback",
+      "automated": true,
+      "group": "VOICE"
+    },
+    {
+      "id": "VOICE-03",
+      "title": "Voice modes and language option survive APK restart",
+      "automated": true,
+      "group": "VOICE"
+    },
+    {
+      "id": "VOICE-RECOGNITION",
+      "title": "Tap/hold speech, permission denial, partial/final/cancel/download",
+      "automated": false,
+      "group": "VOICE"
+    },
+    {
+      "id": "X-TRANSFER",
+      "title": "Windows APK bidirectional transfer",
+      "automated": false,
+      "group": "X"
+    }
+  ]
+}

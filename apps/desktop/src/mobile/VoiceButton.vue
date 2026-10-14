@@ -122,7 +122,7 @@ onBeforeUnmount(() => {
       :disabled="micDisabled"
       :aria-label="micLabel"
       :aria-pressed="state.phase === 'listening'"
-      :aria-describedby="'voice-status'"
+      :aria-describedby="settingsOpen ? undefined : 'voice-status'"
       @click="onClick"
       @pointerdown="onPointerDown"
       @pointerup="endPointer"
@@ -148,25 +148,45 @@ onBeforeUnmount(() => {
       @click="voice.cancel('user')"
     >取消</button>
 
-    <div class="voice-feedback">
-      <div v-if="state.partialText && state.phase === 'listening'" class="voice-partial" data-testid="voice-partial">
-        {{ state.partialText }}
+    <div class="voice-content">
+      <div v-if="!settingsOpen" class="voice-feedback" data-testid="voice-preview">
+        <div v-if="state.partialText && state.phase === 'listening'" class="voice-partial" data-testid="voice-partial">
+          {{ state.partialText }}
+        </div>
+        <div
+          id="voice-status"
+          class="voice-status"
+          :class="{ error: !!state.noticeCode, sent: !!state.sentText }"
+          data-testid="voice-status"
+          role="status"
+          aria-live="polite"
+        >{{ statusText }}</div>
+        <button
+          v-if="state.downloadRequired"
+          class="voice-download"
+          type="button"
+          data-testid="voice-download"
+          @click="voice.downloadLanguage()"
+        >{{ state.downloadProgress === null ? '下載語言包' : `下載中 ${state.downloadProgress}%` }}</button>
       </div>
-      <div
-        id="voice-status"
-        class="voice-status"
-        :class="{ error: !!state.noticeCode, sent: !!state.sentText }"
-        data-testid="voice-status"
-        role="status"
-        aria-live="polite"
-      >{{ statusText }}</div>
-      <button
-        v-if="state.downloadRequired"
-        class="voice-download"
-        type="button"
-        data-testid="voice-download"
-        @click="voice.downloadLanguage()"
-      >{{ state.downloadProgress === null ? '下載語言包' : `下載中 ${state.downloadProgress}%` }}</button>
+      <div v-else class="voice-settings" data-testid="voice-settings">
+        <fieldset :disabled="state.phase !== 'idle'">
+          <legend>錄音方式</legend>
+          <label>
+            <input type="radio" name="voice-mode" value="tap" :checked="state.settings.mode === 'tap'" @change="updateMode">
+            點按開始／結束
+          </label>
+          <label>
+            <input type="radio" name="voice-mode" value="hold" :checked="state.settings.mode === 'hold'" @change="updateMode">
+            按住說話
+          </label>
+        </fieldset>
+        <label class="language-switch">
+          <input type="checkbox" :checked="state.settings.allowLanguageSwitch" @change="updateLanguageSwitch">
+          允許中英文切換
+        </label>
+        <p v-if="!state.languageSwitchSupported" class="voice-settings-hint">此裝置不支援辨識時切換語言。</p>
+      </div>
     </div>
 
     <button
@@ -182,25 +202,6 @@ onBeforeUnmount(() => {
         <path d="m19.4 13.5 1.1.8-1.2 2.1-1.3-.4a7.9 7.9 0 0 1-1.7 1l-.2 1.4h-2.4l-.4-1.3a7.4 7.4 0 0 1-2 0l-.7 1.1-2.1-1.2.4-1.3a7.9 7.9 0 0 1-1-1.7l-1.4-.2v-2.4l1.3-.4a7.4 7.4 0 0 1 0-2l-1.1-.7 1.2-2.1 1.3.4a7.9 7.9 0 0 1 1.7-1l.2-1.4h2.4l.4 1.3a7.4 7.4 0 0 1 2 0l.7-1.1 2.1 1.2-.4 1.3a7.9 7.9 0 0 1 1 1.7l1.4.2v2.4l-1.3.4a7.4 7.4 0 0 1 0 2Z" />
       </svg>
     </button>
-
-    <div v-if="settingsOpen" class="voice-settings" data-testid="voice-settings">
-      <fieldset :disabled="state.phase !== 'idle'">
-        <legend>錄音方式</legend>
-        <label>
-          <input type="radio" name="voice-mode" value="tap" :checked="state.settings.mode === 'tap'" @change="updateMode">
-          點一下開始，再點一下結束
-        </label>
-        <label>
-          <input type="radio" name="voice-mode" value="hold" :checked="state.settings.mode === 'hold'" @change="updateMode">
-          按住說話，放開結束
-        </label>
-      </fieldset>
-      <label class="language-switch">
-        <input type="checkbox" :checked="state.settings.allowLanguageSwitch" @change="updateLanguageSwitch">
-        允許中英文切換
-      </label>
-      <p v-if="!state.languageSwitchSupported" class="voice-settings-hint">此裝置不支援辨識時切換語言。</p>
-    </div>
   </section>
 </template>
 
@@ -341,32 +342,29 @@ onBeforeUnmount(() => {
   stroke-linejoin: round;
 }
 
+.voice-content {
+  flex: 1;
+  min-width: 0;
+  height: 72px;
+  overflow: auto;
+}
+.voice-content .voice-feedback { min-height: 100%; }
 .voice-settings {
-  position: absolute;
-  z-index: 8;
-  right: 8px;
-  bottom: calc(100% + 5px);
-  width: min(300px, calc(100vw - 24px));
-  padding: 12px;
-  border: 1px solid var(--border, #33353d);
-  border-radius: 10px;
-  background: var(--bg-panel, #1d1f24);
   color: var(--text, #d7d7dc);
-  box-shadow: 0 8px 22px rgb(0 0 0 / 32%);
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .voice-settings fieldset {
   display: grid;
-  gap: 9px;
+  gap: 2px;
   margin: 0;
-  padding: 0 0 10px;
+  padding: 0 0 4px;
   border: 0;
 }
-.voice-settings legend { margin-bottom: 8px; color: var(--text-dim, #9a9ca6); }
-.voice-settings label { display: flex; align-items: center; gap: 8px; min-height: 36px; }
+.voice-settings legend { margin-bottom: 2px; color: var(--text-dim, #9a9ca6); }
+.voice-settings label { display: flex; align-items: center; gap: 6px; min-height: 24px; }
 .voice-settings input { width: 18px; height: 18px; accent-color: #7da4f0; }
-.language-switch { border-top: 1px solid var(--border, #33353d); padding-top: 8px; }
+.language-switch { border-top: 1px solid var(--border, #33353d); padding-top: 4px; }
 .voice-settings-hint { margin: 4px 0 0 26px; color: var(--text-dim, #9a9ca6); font-size: 11px; }
 
 @keyframes mic-pulse {

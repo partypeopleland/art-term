@@ -24,6 +24,8 @@
 
 W- 前綴對應四組 Windows 原生流程。A- 前綴對應六組 APK 流程；X-TRANSFER 是跨裝置流程。L- 前綴區分真 Runtime、真 helper、Host fixture 與選配現場 MCP；每列內有多個斷言，不把斷言數當作獨立 E2E 數量。
 
+另有 [APK UI 操作矩陣](../../scripts/android-regression/ui-matrix.md)與 [Linux runner](../../scripts/android-regression/ui_matrix.py)，細分介面／操作／狀態的 ID，重用上述 Android Suite。新增原生拖曳、兩種重連、語音設定切換、軟鍵盤顯示不變、取消／錯誤／邊界與最後分頁等 UI 情境；每次結果獨立記錄 PASS／FAIL／BLOCKED／NOT_RUN，測試存在不代表產品已通過。
+
 ## 哪些是真實環境
 
 | 層級 | 真實部分 | 模擬或尚未涵蓋部分 |

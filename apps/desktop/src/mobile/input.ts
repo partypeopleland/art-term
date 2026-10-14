@@ -193,6 +193,7 @@ export function createMobileInput(): MobileInput {
       },
       fit: () => real.fit(),
       focus: () => real.focus(),
+      suppressSoftKeyboard: () => real.suppressSoftKeyboard?.(),
       reset: () => real.reset(),
       dispose: () => {
         if (disposed) return

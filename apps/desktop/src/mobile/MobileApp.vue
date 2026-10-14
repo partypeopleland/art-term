@@ -3,9 +3,9 @@
 // saved runtime Host profiles) + narrow-screen multi-tab sessions and
 // shared runtime Host settings. Tabs/poll/preview rules live in the
 // shared createAppController.
-import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
-import { NativeHistoryKey } from '../terminal/native'
-import { createNativeHistoryReader } from './history'
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
+import { NativeHistoryKey, NativeKeyboardKey } from '../terminal/native'
+import { createNativeHistoryReader, listenKeyboardVisibility } from './history'
 import { createMobileInput, type SpecialKey } from './input'
 import {
   createAppController,
@@ -128,6 +128,13 @@ const KEYBAR: { id: SpecialKey; label: string }[] = [
 ]
 
 const activeTab = controller.activeTab
+const keyboardVisible = ref<boolean | null>(null)
+const subscribeKeyboard = inject(NativeKeyboardKey, listenKeyboardVisibility)
+let removeKeyboard: (() => Promise<void>) | undefined
+let disposed = false
+function keepKeyboardState(): void {
+  if (keyboardVisible.value === false) activeTab.value?.term?.suppressSoftKeyboard?.()
+}
 const voiceTarget = computed<VoiceTarget | null>(() => {
   const tab = activeTab.value
   if (!tab || phase.value !== 'session') return null
@@ -186,12 +193,10 @@ function tapKey(id: SpecialKey): void {
     return
   }
   controller.sendInput(tab, input.bytesFor(id))
-  tab.term?.focus()
 }
 
 function tapCtrl(): void {
   input.toggleCtrl()
-  activeTab.value?.term?.focus()
 }
 
 function composerSend(withEnter: boolean): void {
@@ -267,6 +272,10 @@ function onVisibility(): void {
 }
 
 onMounted(() => {
+  void subscribeKeyboard(visible => { if (!disposed) keyboardVisible.value = visible }).then(remove => {
+    if (disposed) return remove()
+    else removeKeyboard = remove
+  }).catch(() => { /* Keyboard state is unavailable outside the native plugin. */ })
   syncViewport()
   void voice.initialize()
   if (document.hidden) onVisibility()
@@ -280,6 +289,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  disposed = true
+  if (removeKeyboard) void removeKeyboard().catch(() => {})
   input.setSuspended(true)
   voice.dispose()
   window.removeEventListener('keydown', onGlobalKey, true)
@@ -402,6 +413,7 @@ onBeforeUnmount(() => {
           class="kbtn"
           :class="{ on: input.ctrlLatch.value }"
           data-testid="k-ctrl"
+          @pointerdown.prevent="keepKeyboardState"
           @click="tapCtrl"
         >Ctrl</button>
         <button
@@ -409,6 +421,7 @@ onBeforeUnmount(() => {
           :key="k.id"
           class="kbtn"
           :data-testid="`k-${k.id}`"
+          @pointerdown.prevent="keepKeyboardState"
           @click="tapKey(k.id)"
         >{{ k.label }}</button>
         <button class="kbtn" data-testid="k-composer" @click="composerOpen = true">輸入</button>

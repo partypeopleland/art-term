@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-keyboardStatus"
+description = "Enables the keyboardStatus command without any pre-configured scope."
+commands.allow = ["keyboardStatus"]
+
+[[permission]]
+identifier = "deny-keyboardStatus"
+description = "Denies the keyboardStatus command without any pre-configured scope."
+commands.deny = ["keyboardStatus"]

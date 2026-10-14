@@ -17,3 +17,5 @@ export interface NativeHistoryReader {
   close(readerId: string): Promise<void>
 }
 export const NativeHistoryKey: InjectionKey<() => NativeHistoryReader> = Symbol('NativeTerminalReader')
+export type NativeKeyboardListener = (receive: (visible: boolean) => void) => Promise<() => Promise<void>>
+export const NativeKeyboardKey: InjectionKey<NativeKeyboardListener> = Symbol('NativeKeyboardVisibility')

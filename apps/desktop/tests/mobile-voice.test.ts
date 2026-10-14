@@ -433,6 +433,20 @@ describe('mobile voice button', () => {
     expect(mock.plugin.stop).toHaveBeenCalledOnce()
   })
 
+  it('swaps the preview for inline modes and restores it on a second settings click', async () => {
+    const voice = await readyController(mockPlugin().plugin)
+    const wrapper = mountVoiceButton(voice, mockTarget().target)
+    expect(wrapper.find('[data-testid="voice-preview"]').exists()).toBe(true)
+    await wrapper.get('[data-testid="voice-settings-toggle"]').trigger('click')
+    expect(wrapper.find('[data-testid="voice-preview"]').exists()).toBe(false)
+    expect(wrapper.get('.voice-content [data-testid="voice-settings"]').findAll('input[type="radio"]')).toHaveLength(2)
+    expect(wrapper.get('[data-testid="voice-settings-toggle"]').attributes('aria-expanded')).toBe('true')
+    await wrapper.get('[data-testid="voice-settings-toggle"]').trigger('click')
+    expect(wrapper.find('[data-testid="voice-settings"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="voice-preview"]').exists()).toBe(true)
+    expect(wrapper.emitted('settings-visibility')).toBeUndefined()
+  })
+
   it('saves both preferences through the settings panel', async () => {
     const mock = mockPlugin()
     const voice = await readyController(mock.plugin)

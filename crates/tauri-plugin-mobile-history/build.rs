@@ -3,6 +3,7 @@ fn main() {
         "open",
         "update",
         "close",
+        "keyboardStatus",
         "register_listener",
         "registerListener",
         "remove_listener",
