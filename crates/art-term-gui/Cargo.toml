@@ -43,6 +43,7 @@ futures-util = { version = "0.3", features = ["sink"] }
 art-term-core = { path = "../art-term-core" }
 tauri-plugin-mobile-vault = { path = "../tauri-plugin-mobile-vault" }
 tauri-plugin-mobile-voice = { path = "../tauri-plugin-mobile-voice" }
+tauri-plugin-mobile-history = { path = "../tauri-plugin-mobile-history" }
 
 [features]
 openab-fixture = ["art-term-core/openab-fixture"]

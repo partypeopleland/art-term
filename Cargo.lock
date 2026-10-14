@@ -163,6 +163,7 @@ dependencies = [
  "tauri-plugin-clipboard-manager",
  "tauri-plugin-dialog",
  "tauri-plugin-fs",
+ "tauri-plugin-mobile-history",
  "tauri-plugin-mobile-vault",
  "tauri-plugin-mobile-voice",
  "tempfile",
@@ -3983,6 +3984,14 @@ dependencies = [
  "thiserror 2.0.21",
  "toml 1.1.6+spec-1.1.0",
  "url",
+]
+
+[[package]]
+name = "tauri-plugin-mobile-history"
+version = "0.1.0"
+dependencies = [
+ "tauri",
+ "tauri-plugin",
 ]
 
 [[package]]

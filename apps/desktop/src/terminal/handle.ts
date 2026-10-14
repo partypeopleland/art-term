@@ -1,3 +1,4 @@
+import { createNativeBufferProjection, type NativeTerminalBuffer } from './native-buffer'
 // Terminal handle abstraction. The controller only sees this interface, so
 // tests can inject a fake without xterm.js or a real DOM renderer.
 import type { InjectionKey } from 'vue'
@@ -14,6 +15,8 @@ export interface TerminalHandle {
   readonly rows: number
   /** Whether xterm currently has remote bracketed paste mode enabled. */
   bracketedPasteMode?(): boolean
+  readStyledText?(): NativeTerminalBuffer
+  setNativeReaderActive?(active: boolean): void
   /** Resolves when xterm has parsed the chunk (write-callback backpressure). */
   write(data: Uint8Array, historical?: boolean): Promise<void>
   onData(cb: (text: string) => void): void
@@ -73,7 +76,9 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
   const fitAddon = new FitAddon()
   term.loadAddon(fitAddon)
   term.open(el)
-  const disposeScroll = mobileScroll ? attachMobileScroll(el, term) : null
+  let disposeScroll = mobileScroll ? attachMobileScroll(el, term) : null
+  let terminalDisposed = false
+  const projection = mobileScroll ? createNativeBufferProjection(term) : null
   const links = attachTerminalLinks(el, term, writeClipboard)
   let historicalParsing = false
   // A query may start in replay and finish in a live frame. Keep its replay
@@ -132,6 +137,12 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
       return term.rows
     },
     bracketedPasteMode: () => term.modes.bracketedPasteMode,
+    readStyledText: () => projection?.read() ?? { records: [], supported: false },
+    setNativeReaderActive(active) {
+      if (!mobileScroll || terminalDisposed) return
+      if (active) { disposeScroll?.dispose(); disposeScroll = null; el.classList.add('mobile-terminal') }
+      else if (!disposeScroll) disposeScroll = attachMobileScroll(el, term)
+    },
     async write(data, historical = false) {
       for (const segment of replySegments(data, historical)) {
         historicalParsing = segment.suppress
@@ -162,6 +173,7 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
       term.focus()
     },
     reset() {
+      projection?.reset()
       parserState = 'ground'
       historicalSequence = false
       disposeScroll?.reset()
@@ -169,6 +181,8 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
       term.reset()
     },
     dispose() {
+      terminalDisposed = true
+      projection?.dispose()
       links.dispose()
       disposeScroll?.dispose()
       term.dispose()
