@@ -28,7 +28,7 @@
 | 原生 Runtime 邊界的決策理由 | [ADR-001](adr/ADR-001-client-boundaries.md) |
 | Android 語音輸入現況、決策與待觀察事項 | [BDR-001](bdr/BDR-001-android-voice-input.md) |
 | 未排程候選及保護條件 | [BDR-002](bdr/BDR-002-future-directions.md) |
-| 版本差異、遷移與本版驗證限制 | [0.1.24 release note](report/0.1.24.md)（前一版紀錄 [0.1.19](report/0.1.19.md)） |
+| 版本差異、遷移與本版驗證限制 | [0.1.25 release note](report/0.1.25.md)（前一版紀錄 [0.1.24](report/0.1.24.md)） |
 | 文件寫法、拆篇與載入原則 | [文件規則](steering/documentation.md) |
 | 第三方散布義務 | [第三方說明](third-party-notices.md) |
 

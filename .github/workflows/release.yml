@@ -143,6 +143,10 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
       - uses: actions/download-artifact@v4
         with:
           path: release
@@ -156,5 +160,7 @@ jobs:
         working-directory: release
         run: |
           sha256sum ./*.exe ./*.zip ./*.apk > SHA256SUMS.txt
+          notes="$GITHUB_WORKSPACE/docs/report/${RELEASE_TAG#v}.md"
+          test -s "$notes"
           gh release create "$RELEASE_TAG" ./*.exe ./*.zip ./*.apk SHA256SUMS.txt \
-            --verify-tag --title "art-term $RELEASE_TAG" --generate-notes
+            --verify-tag --title "art-term $RELEASE_TAG" --notes-file "$notes"
