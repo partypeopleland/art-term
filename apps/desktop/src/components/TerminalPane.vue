@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import NativeTerminalReader from './NativeTerminalReader.vue'
+import { NativeHistoryKey } from '../terminal/native'
 import type { AppController, TabState } from '../state/controller'
 import { TerminalFactoryKey, createDesktopXtermTerminal } from '../terminal/handle'
 
@@ -7,9 +9,11 @@ const props = defineProps<{
   tab: TabState
   active: boolean
   controller: AppController
+  readerVisible?: boolean
 }>()
 
 const el = ref<HTMLElement | null>(null)
+const nativeReader = inject(NativeHistoryKey, null) !== null
 const factory = inject(TerminalFactoryKey, createDesktopXtermTerminal)
 let observer: ResizeObserver | null = null
 let disposed = false
@@ -57,6 +61,9 @@ onBeforeUnmount(() => {
 <template>
   <div class="pane" v-show="active">
     <div ref="el" class="term-host" />
+    <NativeTerminalReader v-if="nativeReader && active && tab.status === 'live'"
+      :key="tab.sessionId ?? tab.key" :terminal="tab.term"
+      :visible="active && readerVisible !== false" />
     <div v-if="tab.status === 'connecting'" class="overlay">
       <span>連線中…</span>
     </div>

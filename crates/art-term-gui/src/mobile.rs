@@ -175,6 +175,7 @@ pub fn run() {
         .manage(Arc::new(crate::runtime_transfer::RuntimeTransfer::default()))
         .plugin(tauri_plugin_mobile_vault::init())
         .plugin(tauri_plugin_mobile_voice::init())
+        .plugin(tauri_plugin_mobile_history::init())
         .plugin(
             tauri::plugin::Builder::<tauri::Wry, ()>::new("mobile-navigation")
                 .on_navigation(|_, url| {

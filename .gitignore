@@ -42,3 +42,6 @@ Thumbs.db
 # Private coordination records and agent rules (not part of the public repo)
 /.coordination/
 /AGENTS.md
+
+/crates/tauri-plugin-mobile-history/android/build/
+/crates/tauri-plugin-mobile-history/android/.tauri/

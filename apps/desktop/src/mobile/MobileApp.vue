@@ -4,6 +4,8 @@
 // shared runtime Host settings. Tabs/poll/preview rules live in the
 // shared createAppController.
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
+import { NativeHistoryKey } from '../terminal/native'
+import { createNativeHistoryReader } from './history'
 import { createMobileInput, type SpecialKey } from './input'
 import {
   createAppController,
@@ -42,6 +44,7 @@ const controller: AppController = createAppController(
 // MobileApp is only loaded after gui_platform identifies Android in main.ts.
 const voice = createVoiceController(createTauriVoicePlugin())
 const input = createMobileInput()
+provide(NativeHistoryKey, createNativeHistoryReader)
 defineExpose({ controller })
 
 // The injected factory wraps every real terminal with the IME/latch adapter,
@@ -375,6 +378,7 @@ onBeforeUnmount(() => {
           :tab="tab"
           :active="tab.key === controller.activeKey.value"
           :controller="controller"
+          :reader-visible="phase === 'session' && !composerOpen && !runtimeHostsOpen && !runtimeDialogProfile"
         />
         <div v-if="!controller.tabs.length" class="cover" data-testid="no-tabs">
           <div class="done">

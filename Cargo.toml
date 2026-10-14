@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/art-term-core", "crates/art-term-gui", "crates/tauri-plugin-mobile-vault", "crates/tauri-plugin-mobile-voice"]
+members = ["crates/art-term-core", "crates/art-term-gui", "crates/tauri-plugin-mobile-vault", "crates/tauri-plugin-mobile-voice", "crates/tauri-plugin-mobile-history"]
 
 [workspace.package]
 edition = "2021"
