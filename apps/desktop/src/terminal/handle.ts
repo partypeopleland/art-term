@@ -24,6 +24,7 @@ export interface TerminalHandle {
   setKeyInterceptor(fn: (ev: KeyboardEvent) => boolean): void
   fit(): void
   focus(): void
+  suppressSoftKeyboard?(): void
   reset(): void
   dispose(): void
 }
@@ -170,7 +171,17 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
       }
     },
     focus() {
+      const textarea = term.textarea
+      if (textarea?.inputMode === 'none') {
+        textarea.inputMode = 'text'
+        textarea.blur()
+      }
       term.focus()
+    },
+    suppressSoftKeyboard() {
+      // Keep hardware input available, but prevent WebView's implicit IME
+      // request when touching a toolbar with a focused terminal textarea.
+      if (term.textarea) term.textarea.inputMode = 'none'
     },
     reset() {
       projection?.reset()

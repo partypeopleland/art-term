@@ -7,6 +7,7 @@ import { ConnectionError } from '../src/transport/types'
 import { FakeMobileTransport, makeCatalogTarget, makeGroup, makeProfile } from './mobile.fake'
 import { FakeTerm, deferred } from './fake'
 import type { RuntimeHostDto } from '../src/transport/types'
+import { NativeKeyboardKey, type NativeKeyboardListener } from '../src/terminal/native'
 
 // jsdom lacks ResizeObserver; TerminalPane observes its element.
 vi.stubGlobal(
@@ -32,7 +33,7 @@ interface Mounted {
   terms: FakeTerm[]
 }
 
-function mountMobile(transport: FakeMobileTransport): Mounted {
+function mountMobile(transport: FakeMobileTransport, keyboard?: NativeKeyboardListener): Mounted {
   const terms: FakeTerm[] = []
   const wrapper = mount(MobileApp, {
     props: {
@@ -44,6 +45,7 @@ function mountMobile(transport: FakeMobileTransport): Mounted {
       },
       controllerOptions: { idlePollMs: 0, autoCaptureMs: 30_000 }
     },
+    global: { provide: keyboard ? { [NativeKeyboardKey as symbol]: keyboard } : {} },
     attachTo: document.body
   })
   const vm = wrapper.vm as unknown as { controller: AppController }
@@ -415,6 +417,41 @@ describe('mobile App runtime connection list (no Tauri)', () => {
     await flush()
     expect(tabA.shot).toBeNull()
     m.wrapper.unmount()
+  })
+
+  it('suppresses only a hidden soft keyboard before quick-key touches', async () => {
+    let visibility!: (visible: boolean) => void
+    const m = mountMobile(runtime(), async receive => { visibility = receive; return async () => {} })
+    try {
+      await flush(); await tapTarget(m, 'nuc')
+      const suppress = vi.fn()
+      Object.assign(m.terms[0], { suppressSoftKeyboard: suppress })
+      visibility(false)
+      await m.wrapper.get('[data-testid=k-left]').trigger('pointerdown')
+      await m.wrapper.get('[data-testid=k-left]').trigger('click')
+      expect(suppress).toHaveBeenCalledOnce()
+      visibility(true)
+      await m.wrapper.get('[data-testid=k-right]').trigger('pointerdown')
+      await m.wrapper.get('[data-testid=k-right]').trigger('click')
+      expect(suppress).toHaveBeenCalledOnce()
+      expect(m.transport.sessions.get('m1')!.writes.flat()).toEqual([0x1b,0x5b,0x44,0x1b,0x5b,0x43])
+    } finally { m.wrapper.unmount() }
+  })
+
+  it('sends quick keys and toggles Ctrl without requesting terminal keyboard focus', async () => {
+    const m = mountMobile(runtime())
+    try {
+      await flush(); await tapTarget(m, 'nuc')
+      const focus = vi.spyOn(m.terms[0], 'focus')
+      for (const id of ['esc', 'tab', 'left', 'up', 'down', 'right', 'shiftleft', 'ctrlc', 'ctrl']) {
+        await m.wrapper.get(`[data-testid="k-${id}"]`).trigger('click')
+      }
+      await flush()
+      expect(focus).not.toHaveBeenCalled()
+      expect(m.transport.sessions.get('m1')!.writes.flat()).toContain(0x1b)
+      await m.wrapper.get('[data-testid="k-keyboard"]').trigger('click')
+      expect(focus).toHaveBeenCalledOnce()
+    } finally { m.wrapper.unmount() }
   })
 
   it('keybar sends exact bytes; Ctrl latch converts single chars; Detach keeps the tab', async () => {

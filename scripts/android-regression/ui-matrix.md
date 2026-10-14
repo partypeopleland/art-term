@@ -18,11 +18,11 @@
 | INPUT-01～03 | Composer 取消、不加 Enter、加 Enter，使用繁體字 | 取消不送；送出 bytes 精確；原生可見文字含繁體字 |
 | INPUT-04、05 | Ctrl 開／關；啟動已設定 CLI（含空格參數） | 真輸入轉 control byte；CLI 參數界線正確。fixture 不執行 CLI |
 | KEY-ESC/TAB/LEFT/UP/DOWN/RIGHT/SHIFTLEFT/CTRLC | live 時逐個觸控快速鍵 | PTY 收到規定的 escape/control bytes |
-| KEY-IME | Android 軟鍵盤隱藏及顯示時，按四個方向鍵 | 實際系統 IME 顯示狀態不變；兩個起始狀態都須測到 |
+| KEY-IME | Android 軟鍵盤隱藏及顯示時，按四個方向鍵 | 系統 IME 最終狀態及操作期間的原生可見性事件均不反向切換；兩種起始狀態都須測到，事件觀察器也須收到刻意開／關鍵盤的訊號 |
 | TAB-01～03 | 兩個工作切換；關其中一個；關最後一個再選連線 | 輸出不串線；只 detach、不刪遠端；空分頁導回列表 |
 | TAB-04 | 切回第一分頁後，核對 active 標籤／遠端名稱並送 Composer 文字 | 畫面名稱一致；只送至選定 Shell，另一工作沒有該段輸入 |
 | READ-01 | live 時直向↔橫向 | Android viewport 與 PTY 尺寸同步 |
-| READ-02 | 模擬180行 `ls -al` 類輸出；實際手指拖曳 | 原生 ScrollView 可捲；截圖有位移；拖曳不送遠端輸入 |
+| READ-02 | 模擬180行 `ls -al` 類輸出；實際手指拖曳 | 由可及性節點或 Android 實際 View hierarchy 確認可見原生 ScrollView／位置；截圖有位移；拖曳不送遠端輸入 |
 | READ-03 | 上述歷史存在時，伺服器中斷 WSS | 同 token/cursor 恢復、不重送命令；原歷史仍可實際捲動 |
 | READ-04 | 本機 detach→重新連線同一目標 | 新本機 binding、同遠端 Shell；新收到的原生 snapshot 仍含舊文字且可捲 |
 | READ-05 | 停在歷史位置時伺服器追加輸出 | 畫面停在閱讀處，不跳到底。截圖比較 |
@@ -54,11 +54,15 @@ target/android-regression/venv/bin/python scripts/android-regression/ui_matrix.p
   --apk crates/art-term-gui/gen/android/app/build/outputs/apk/x86_64/debug/app-x86_64-debug.apk
 ```
 
-同一命令可加 `--focus history`、`--focus voice` 或 `--focus navigation`，只跑宣告的情境及必要的 UI 前置操作。結果會註明 subset scope；子集通過不能當成完整矩陣通過。完整流程先驗單一工作歷史，再驗清單／分頁組合，避免把 resize fallback 導致的原生閱讀消失誤稱為單純斷線丟歷史。
+同一命令可加 `--focus history`、`--focus voice`、`--focus navigation`、`--focus keys` 或 `--focus regressions`，只跑宣告的情境及必要 UI 前置操作。`regressions` 包含導航／輸入目標／歷史及鍵盤狀態。結果註明 subset scope；子集通過不能當成完整矩陣通過。
+
+Linux runner 以程序鎖序列化自有 AVD 的生命週期；並行啟動的命令會排隊，避免挑到同一個連接埠。ADB 不可用時也會回收自己建立的 Popen，保留失敗紀錄。
 
 總時限1100秒。每個案例輸出 PASS／FAIL／BLOCKED／NOT_RUN；未到達的案例仍保留，不消失。失敗不隱藏；後續有獨立前置條件的群組繼續執行。每次結果另存 `target/android-regression/run-ui-*/cases.json`／`result.json`／截圖，附 APK hash、版本、source HEAD 與 runner hash。清理只作用於本次建立的 AVD、forward/reverse 與 fixture，不選現有手機。
 
 案例曾由 agy 審查，採納首頁／取消／邊界／最後分頁／純設定搬移／設定持久化等缺口。針對審查指出的假陽性，文字除傳輸外也查原生可見文字；手動預覽使用不同的有效 PNG，要求新圖實際解碼；重連清除測試觀察後等新 snapshot，不能沿用舊觀察；無辨識服務的 disabled 狀態不算語音成功。
+
+Android14 的 UIAutomator 可能省略剛替換的原生閱讀器。缺少可及性節點時，工具改查實際 Android View hierarchy：必須是這個 plugin 的原生 ScrollView，元件及父層均可見且非零尺寸，父層位置須符合截圖中的終端範圍。接著仍須實際拖曳、畫面位移、舊內容存在且不送遠端輸入。兩個階層都沒有元件，或手勢無效，仍會失敗；不再單憑可及性快照宣稱原生捲動退出。
 
 ## 範圍限制與待補案例
 

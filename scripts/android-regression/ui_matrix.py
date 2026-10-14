@@ -66,6 +66,13 @@ class Matrix(Suite):
             except Exception:
                 row['captureUnavailable'] = True
         row['seconds'] = round(time.monotonic()-started, 2)
+        if identifier in ['SHELL-02','READ-02','SHELL-03','TAB-01','READ-06']:
+            try:
+                row['ptyResizes'] = {name:value['resizes'] for name,value in self.fixture.snapshot()['sessions'].items() if name.startswith('work-')}
+                row['nativeSnapshots'] = self.app.evaluate('window.__scrollTest.nativeSnapshots')
+                row['nativeErrors'] = self.app.evaluate('window.__scrollTest.nativeErrors')
+            except Exception as error:
+                row['diagnosticUnavailable'] = type(error).__name__
         self.results[identifier] = row
         self.save()
         print(identifier+' '+row['status']+' '+title, flush=True)
@@ -436,6 +443,20 @@ class Matrix(Suite):
 
     def keyboard_keys(self):
         a = self.app; d = self.device
+        # Observe the existing native keyboard channel without registering
+        # test UI behavior or changing any event value/callback result.
+        a.evaluate(r'''(()=>{
+          window.__imeEvents=[];
+          for(const [id,callback] of window.__TAURI_INTERNALS__.callbacks){
+            if(typeof callback!=='function')continue;
+            window.__TAURI_INTERNALS__.callbacks.set(id,value=>{
+              const event=value?.message;
+              if(typeof event?.visible==='boolean'&&!('readerId' in event))
+                window.__imeEvents.push({visible:event.visible,time:performance.now()});
+              return callback(value);
+            });
+          }
+        })()''')
         d.call('shell','settings','put','secure','show_ime_with_hard_keyboard','1')
         evidence = []
         try:
@@ -445,12 +466,17 @@ class Matrix(Suite):
                         if visible: a.tap('k-keyboard')
                         else: d.key('KEYCODE_BACK')
                     wait(lambda:self.ime()==visible)
+                    event_start = a.evaluate('window.__imeEvents.length')
                     a.tap(testid); time.sleep(.3)
                     observed = self.ime()
-                    evidence.append({'key':testid,'initialVisible':visible,'actualVisible':observed,'preserved':observed==visible})
+                    events = a.evaluate(f'window.__imeEvents.slice({event_start})')
+                    evidence.append({'key':testid,'initialVisible':visible,'actualVisible':observed,
+                                     'nativeVisibilityEvents':events,
+                                     'preserved':observed==visible and all(e['visible']==visible for e in events)})
         finally:
             if self.ime(): d.key('KEYCODE_BACK'); wait(lambda:not self.ime())
             d.call('shell','settings','put','secure','show_ime_with_hard_keyboard','0')
+        wait(lambda: a.evaluate('window.__imeEvents.some(e=>e.visible)&&window.__imeEvents.some(e=>!e.visible)'),5)
         if not all(e['preserved'] for e in evidence):
             raise CaseFailure('Quick keys changed Android IME visibility',evidence)
         return evidence
@@ -476,12 +502,16 @@ def execute(s, focus=None):
             s.case('READ-04','Detach/reconnect same Shell retains scrollable history',s.detach)
             s.case('OVERLAY-01','Composer/management hide native reader',s.modal_reader)
             s.case('VOICE-02','Unavailable recognizer has specific feedback',s.voice_unavailable)
-        elif focus == 'navigation':
+        elif focus in ['navigation','regressions']:
             if not s.case('READ-02','Fresh single-Shell native scroll with synthetic ls output',s.history_seed): return
             s.case('SHELL-03','Shell list refresh/conflict/return',s.shell_listing)
             s.case('TAB-01','Second Shell and isolated tabs',s.tabs)
             s.case('TAB-04','Active tab label and composer destination agree',s.tab_target)
             s.case('READ-06','Native historical reading survives list and tab navigation',lambda:s.history_test().scroll('after-navigation'))
+            if focus == 'regressions':
+                s.case('KEY-IME','Quick keys preserve hidden and visible Android keyboard',s.keyboard_keys)
+        elif focus == 'keys':
+            s.case('KEY-IME','Quick keys preserve hidden and visible Android keyboard',s.keyboard_keys)
         else:
             s.case('VOICE-01','Voice settings swap while native reader remains visible',s.voice_swap)
             s.case('VOICE-02','Unavailable recognizer has specific feedback',s.voice_unavailable)
@@ -545,7 +575,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--sdk',type=Path,default=Path('/home/art/Android/Sdk'))
     parser.add_argument('--apk',type=Path,required=True)
-    parser.add_argument('--focus',choices=['history','voice','navigation'],help='Run a declared subset plus UI prerequisites')
+    parser.add_argument('--focus',choices=['history','voice','navigation','keys','regressions'],help='Run a declared subset plus UI prerequisites')
     args = parser.parse_args()
     require(args.apk.is_file(),'APK missing')
     badging = subprocess.check_output([str(args.sdk/'build-tools/35.0.0/aapt'),'dump','badging',str(args.apk)],text=True)
@@ -568,7 +598,9 @@ def main():
         selected = None
         if args.focus:
             selected = ['HOST-03','SHELL-02','VOICE-02','OVERLAY-01'] + (['READ-02','READ-03','READ-04','READ-05'] if args.focus=='history' else ['VOICE-01','VOICE-03'])
-            if args.focus == 'navigation': selected = ['HOST-03','SHELL-02','READ-02','SHELL-03','TAB-01','TAB-04','READ-06']
+            if args.focus in ['navigation','regressions']:
+                selected = ['HOST-03','SHELL-02','READ-02','SHELL-03','TAB-01','TAB-04','READ-06'] + (['KEY-IME'] if args.focus=='regressions' else [])
+            if args.focus == 'keys': selected = ['HOST-03','SHELL-02','KEY-IME']
         s = Matrix(d,f,args.apk,run,selected); s.reset()
         execute(s, args.focus)
     except (Exception, KeyboardInterrupt) as error:

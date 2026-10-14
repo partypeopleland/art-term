@@ -7,6 +7,7 @@ Local terminal text projection and native touch events. No network or credential
 - `allow-open`
 - `allow-update`
 - `allow-close`
+- `allow-keyboardStatus`
 - `allow-register-listener`
 - `allow-registerListener`
 - `allow-remove-listener`
@@ -43,6 +44,32 @@ Enables the close command without any pre-configured scope.
 <td>
 
 Denies the close command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`mobile-history:allow-keyboardStatus`
+
+</td>
+<td>
+
+Enables the keyboardStatus command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`mobile-history:deny-keyboardStatus`
+
+</td>
+<td>
+
+Denies the keyboardStatus command without any pre-configured scope.
 
 </td>
 </tr>

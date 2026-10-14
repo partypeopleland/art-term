@@ -1,5 +1,6 @@
 """An isolated Linux/KVM AVD; never selects or resets an existing device."""
 import json
+import fcntl
 import os
 from pathlib import Path
 import re
@@ -16,6 +17,11 @@ class LinuxEmulator(Device):
         self.sdk, self.run = Path(sdk).resolve(), Path(run).resolve()
         require(self.run.is_relative_to((ROOT / 'target/android-regression').resolve()), 'AVD must be under test target')
         self.run.mkdir(parents=True, exist_ok=False, mode=0o700)
+        # Serialize owned AVD lifetimes. Checking then releasing a free TCP
+        # port races another runner during avdmanager/boot, and concurrent
+        # software-rendered AVDs can also stall accessibility dumps.
+        self.lock = (ROOT/'target/android-regression/.linux-emulator.lock').open('a')
+        fcntl.flock(self.lock, fcntl.LOCK_EX)
         self.name = 'art-term-scroll-' + uuid.uuid4().hex
         self.adb = self.sdk / 'platform-tools/adb'
         self.forward_ports, self.reverse_ports = [], []
@@ -68,8 +74,11 @@ class LinuxEmulator(Device):
                                             'avdPath': str(self.avd), 'pid': self.process.pid}, indent=2)+'\n')
         def booted():
             require(self.process.poll() is None, 'Owned emulator exited')
-            p = subprocess.run([str(self.adb), '-s', self.serial, 'shell', 'getprop', 'sys.boot_completed'],
-                               capture_output=True, timeout=5)
+            try:
+                p = subprocess.run([str(self.adb), '-s', self.serial, 'shell', 'getprop', 'sys.boot_completed'],
+                                   capture_output=True, timeout=5)
+            except subprocess.TimeoutExpired:
+                return False
             return p.returncode == 0 and p.stdout.strip() == b'1'
         wait(booted, 180)
         self.verify()
@@ -86,13 +95,19 @@ class LinuxEmulator(Device):
     def shutdown(self):
         try:
             if self.process and self.process.poll() is None:
-                self.verify()
-                subprocess.run([str(self.adb), '-s', self.serial, 'emu', 'kill'], capture_output=True, timeout=10)
-                try: self.process.wait(timeout=15)
-                except subprocess.TimeoutExpired:
-                    self.process.terminate(); self.process.wait(timeout=10)
+                try:
+                    self.verify()
+                    subprocess.run([str(self.adb), '-s', self.serial, 'emu', 'kill'], capture_output=True, timeout=10)
+                finally:
+                    # Even if ADB is unavailable, this exact Popen belongs to
+                    # us. Reap it rather than leaving an orphaned emulator.
+                    try: self.process.wait(timeout=15)
+                    except subprocess.TimeoutExpired:
+                        self.process.terminate(); self.process.wait(timeout=10)
         finally:
             if self.log: self.log.close()
+            fcntl.flock(self.lock, fcntl.LOCK_UN)
+            self.lock.close()
 
     def screenshot(self, path):
         Path(path).write_bytes(self.call('exec-out', 'screencap', '-p'))

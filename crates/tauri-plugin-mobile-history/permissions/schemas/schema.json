@@ -307,6 +307,18 @@
           "markdownDescription": "Denies the close command without any pre-configured scope."
         },
         {
+          "description": "Enables the keyboardStatus command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-keyboardStatus",
+          "markdownDescription": "Enables the keyboardStatus command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the keyboardStatus command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-keyboardStatus",
+          "markdownDescription": "Denies the keyboardStatus command without any pre-configured scope."
+        },
+        {
           "description": "Enables the open command without any pre-configured scope.",
           "type": "string",
           "const": "allow-open",
@@ -379,10 +391,10 @@
           "markdownDescription": "Denies the update command without any pre-configured scope."
         },
         {
-          "description": "Local terminal text projection and native touch events. No network or credentials.\n#### This default permission set includes:\n\n- `allow-open`\n- `allow-update`\n- `allow-close`\n- `allow-register-listener`\n- `allow-registerListener`\n- `allow-remove-listener`\n- `allow-removeListener`",
+          "description": "Local terminal text projection and native touch events. No network or credentials.\n#### This default permission set includes:\n\n- `allow-open`\n- `allow-update`\n- `allow-close`\n- `allow-keyboardStatus`\n- `allow-register-listener`\n- `allow-registerListener`\n- `allow-remove-listener`\n- `allow-removeListener`",
           "type": "string",
           "const": "default",
-          "markdownDescription": "Local terminal text projection and native touch events. No network or credentials.\n#### This default permission set includes:\n\n- `allow-open`\n- `allow-update`\n- `allow-close`\n- `allow-register-listener`\n- `allow-registerListener`\n- `allow-remove-listener`\n- `allow-removeListener`"
+          "markdownDescription": "Local terminal text projection and native touch events. No network or credentials.\n#### This default permission set includes:\n\n- `allow-open`\n- `allow-update`\n- `allow-close`\n- `allow-keyboardStatus`\n- `allow-register-listener`\n- `allow-registerListener`\n- `allow-remove-listener`\n- `allow-removeListener`"
         }
       ]
     }

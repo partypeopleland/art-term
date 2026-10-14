@@ -473,5 +473,10 @@
   "remainingKnownFailures": [
     "KEY-IME",
     "READ-06"
-  ]
+  ],
+  "historical": true,
+  "supersededBy": "apk-ui-fixes-20261014.md",
+  "classificationCorrection": {
+    "READ-06": "UIAutomator omitted the replacement reader; actual Android View hierarchy and gestures confirmed native scrolling remained available. The original functional failure classification was incorrect."
+  }
 }

@@ -25,6 +25,8 @@ import android.widget.FrameLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
@@ -135,7 +137,25 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
             if (page != null) applyPage(page)
         }
     }
-    override fun load(webView: WebView) { this.webView = webView }
+    private var lastKeyboardVisible: Boolean? = null
+    private fun keyboardVisible(): Boolean = webView?.let {
+        ViewCompat.getRootWindowInsets(it)?.isVisible(WindowInsetsCompat.Type.ime())
+    } ?: false
+    private val keyboardLayout = ViewTreeObserver.OnGlobalLayoutListener {
+        val visible = keyboardVisible()
+        if (visible != lastKeyboardVisible) {
+            lastKeyboardVisible = visible
+            trigger("keyboard", JSObject().apply { put("visible", visible) })
+        }
+    }
+    override fun load(webView: WebView) {
+        this.webView = webView
+        webView.viewTreeObserver.addOnGlobalLayoutListener(keyboardLayout)
+    }
+    @Command
+    fun keyboardStatus(invoke: Invoke) {
+        main.post { invoke.resolve(JSObject().apply { put("visible", keyboardVisible()) }) }
+    }
     private fun dp(value: Int) = (value * activity.resources.displayMetrics.density).toInt()
     private fun send(kind: String, id: String = readerId, fill: JSObject.() -> Unit = {}) {
         if (id.isEmpty()) return
@@ -365,5 +385,8 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
         root?.visibility = if (pageVisible) View.VISIBLE else View.GONE
         send("visibility") { put("visible", true) }
     }
-    override fun onDestroy(activity: AppCompatActivity) { closeReader() }
+    override fun onDestroy(activity: AppCompatActivity) {
+        webView?.viewTreeObserver?.takeIf { it.isAlive }?.removeOnGlobalLayoutListener(keyboardLayout)
+        closeReader()
+    }
 }

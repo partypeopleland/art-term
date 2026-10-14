@@ -1,5 +1,20 @@
-import { addPluginListener, invoke } from '@tauri-apps/api/core'
+import { addPluginListener, invoke, isTauri } from '@tauri-apps/api/core'
 import type { NativeHistoryEvent, NativeHistoryReader } from '../terminal/native'
+
+export async function listenKeyboardVisibility(receive: (visible: boolean) => void): Promise<() => Promise<void>> {
+  if (!isTauri()) return async () => {}
+  let version = 0
+  const listener = await addPluginListener<{ visible: boolean }>('mobile-history', 'keyboard', value => {
+    version++
+    receive(value.visible)
+  })
+  try {
+    const before = version
+    const status = await invoke<{ visible: boolean }>('plugin:mobile-history|keyboardStatus')
+    if (version === before) receive(status.visible)
+    return () => listener.unregister()
+  } catch (error) { await listener.unregister(); throw error }
+}
 
 export function createNativeHistoryReader(): NativeHistoryReader {
   let epoch = 0

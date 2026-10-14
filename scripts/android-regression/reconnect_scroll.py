@@ -27,9 +27,17 @@ from linux_emulator import LinuxEmulator
 OBSERVE = r'''(()=>{
  const native=window.ipc.postMessage.bind(window.ipc);
  const callbacks=window.__TAURI_INTERNALS__.callbacks;
- const s=window.__scrollTest={records:[],readerId:'',updates:0,writes:0,opens:[]};
+ const s=window.__scrollTest={records:[],readerId:'',updates:0,writes:0,opens:[],nativeSnapshots:[],nativeErrors:[]};
  window.ipc={postMessage:data=>{
   const m=JSON.parse(data),cmd=m.cmd,cb=callbacks.get(m.callback);
+  if(cmd.startsWith('plugin:mobile-history|')){
+   const p=m.payload;
+   s.nativeSnapshots.push({cmd,readerId:p.readerId,visible:p.visible,bounds:p.bounds,
+      records:p.records?.length,first:p.records?.[0]?.id,last:p.records?.at(-1)?.id});
+   s.nativeSnapshots=s.nativeSnapshots.slice(-80);
+   const fail=callbacks.get(m.error);
+   if(fail)callbacks.set(m.error,value=>{s.nativeErrors.push({cmd,error:String(value).slice(0,200)});return fail(value)});
+  }
   if(cmd==='mobile_write')s.writes++;
   if(cb&&(cmd==='mobile_open'||cmd==='plugin:mobile-history|open'||cmd==='plugin:mobile-history|update')){
    const p=m.payload;
@@ -93,11 +101,30 @@ class ReconnectTest:
         return image, box
 
     def scroll(self, label):
-        nodes = self.device.ui()
-        require(any(n.get('class') == 'android.widget.ScrollView' and n.get('scrollable') == 'true'
-                    for n in nodes.iter('node')), 'Native ScrollView not visible/scrollable')
-        require(self.has_old_content(), 'Previous output missing from current native snapshot')
         before, box = self.capture_crop(label+'-before')
+        nodes = self.device.ui()
+        accessible = any(n.get('class') == 'android.widget.ScrollView' and n.get('scrollable') == 'true'
+                         for n in nodes.iter('node'))
+        hierarchy = False
+        if not accessible:
+            # Android14 accessibility can omit a newly replaced reader even
+            # though the actual native ScrollView is visible and draggable.
+            # Verify the concrete Android View and its visible parent bounds
+            # instead of mistaking an accessibility snapshot for loss of UI.
+            lines = self.device.text('shell','dumpsys','activity','top').splitlines()
+            for index, line in enumerate(lines):
+                if not re.search(r'net\.missart\.artterm\.history\.MobileHistoryPlugin\$open[^\s{]*\{\S+ V',line): continue
+                child = re.search(r' (\d+),(\d+)-(\d+),(\d+)(?:\s|\})',line)
+                if not child or index == 0: continue
+                parent = re.search(r'android\.widget\.FrameLayout\{\S+ V\S* \S* (-?\d+),(-?\d+)-(-?\d+),(-?\d+)(?:\s|\})',lines[index-1])
+                if not parent: continue
+                bounds = tuple(map(int,parent.groups()))
+                extent = tuple(map(int,child.groups()))
+                if (all(abs(actual-expected)<=2 for actual,expected in zip(bounds,box))
+                        and extent[2]>extent[0] and extent[3]>extent[1]):
+                    hierarchy = True; break
+        require(accessible or hierarchy, 'Visible native Android ScrollView missing from accessibility and actual View hierarchy')
+        require(self.has_old_content(), 'Previous output missing from current native snapshot')
         writes = self.app.evaluate('window.__scrollTest.writes')
         x0, y0, x1, y1 = box
         x = (x0+x1)//2
@@ -111,6 +138,7 @@ class ReconnectTest:
         require(ratio > .005, 'Drag did not visibly move historical text')
         require(self.app.evaluate('window.__scrollTest.writes') == writes, 'Reading gesture sent remote input')
         return {'oldOutputInNativeSnapshot': True, 'nativeScrollView': True,
+                'accessibilityScrollView': accessible, 'actualViewHierarchyFallback': hierarchy,
                 'trustedAdbSwipe': True, 'changedPixelRatio': ratio, 'remoteInputFromSwipe': False}
 
     def populate(self):
