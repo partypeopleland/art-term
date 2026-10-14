@@ -19,6 +19,7 @@
 | 功能回歸、unit／原生 E2E、測試計畫與本機執行 | [Windows 回歸測試](platforms/windows-regression.md) |
 | 哪些操作受保護、跨平台案例與驗收界線 | [功能測試矩陣](refarch/test-matrix.md) |
 | 真 APK／模擬器／Keystore／系統選檔／跨裝置搬移 | [Android APK 原生 E2E](platforms/android-regression.md) |
+| APK 全介面操作案例、Linux 模擬器與逐案結果 | [UI 操作矩陣](../scripts/android-regression/ui-matrix.md)、[2026-10-14 執行報告](report/apk-ui-20261014.md) |
 | Linux 真官方 Runtime／helper／Host fixture驗收 | [Linux 回歸測試](platforms/linux-regression.md) |
 | Android 工具鏈、觸控／背景、原簽章與驗收 | [Android](platforms/android.md) |
 | 使用者：必要依賴與交給 AI 的安裝 prompt | [使用前準備](openab-host-setup.md) |
