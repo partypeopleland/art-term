@@ -1,3 +1,4 @@
+import { attachMobileProfile, showMobileMain } from './mobile-actions'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
@@ -93,17 +94,18 @@ describe('explicit coding CLI action', () => {
       expect(button.text()).toBe('My Assistant')
       await button.trigger('click'); await flush()
       expect(m.transport.sessions.get(first)!.writes.map(b => new TextDecoder().decode(Uint8Array.from(b)))).toEqual(["'assistant' '--label' 'owner'\\''s workspace' '$(ignored)'\r"])
+      const initialWrites = m.transport.sessions.get(first)!.writes.slice()
       await m.controller.setHidden(true)
-      m.transport.feed(first, { bytes: [], exitCode: 255 }); await flush()
+      m.transport.feed(first, { bytes: [], exitCode: null, runtime: { batchId: 0, localGeneration: 1, events: [], ended: 'transport' } }); await flush()
       await m.controller.setHidden(false); await flush()
-      expect(m.transport.sessions.get(tab.sessionId!)!.writes).toEqual([])
+      expect(m.transport.sessions.get(tab.sessionId!)!.writes).toEqual(initialWrites)
     } finally { m.wrapper.unmount() }
   })
 })
 
-/** Click a profile row by its display label (quick-connects its single ready Shell). */
+/** Attach the listed Shell for the named profile. */
 async function tapTarget(m: Mounted, label: string): Promise<void> {
-  await m.wrapper.find(`[data-runtime-label="${label}"]`).trigger('click')
+  await attachMobileProfile(m.wrapper, label)
   await flush()
 }
 
@@ -136,6 +138,9 @@ describe('mobile App runtime connection list (no Tauri)', () => {
     // Category groups with names + tool subtitles.
     expect(wrapper.find('[data-testid="cat-agents"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="cat-computers"]').exists()).toBe(true)
+    expect(wrapper.findAll('.connection-section h2').map(heading => heading.text())).toEqual(['Computers', 'Agents', 'Screens'])
+    expect(wrapper.find('[data-testid="cat-screens"]').text()).toContain('尚未開放使用')
+    expect(wrapper.find('[data-testid="cat-screens"] .attach-button').exists()).toBe(false)
     const text = wrapper.text()
     for (const name of ['hana', 'beta', 'gamma', 'nuc']) expect(text).toContain(name)
     for (const sub of ['Codex', 'Devin', 'Kiro', 'openab-pty'])
@@ -146,9 +151,20 @@ describe('mobile App runtime connection list (no Tauri)', () => {
     expect(wrapper.find('[data-testid="pubkey"]').exists()).toBe(false)
     expect(text).not.toContain('SHA256:identityfp')
 
-    // No automatic anything: no discovery, no session listing, no open.
+    // Read-only Shell lists load automatically, without opening a session.
     expect(t.openCalls).toHaveLength(0)
     expect(controller.runtimeProfilesError.value).toBe('')
+    wrapper.unmount()
+  })
+
+  it('keeps all dashboard sections visible with no profiles or remote queries', async () => {
+    const t = new FakeMobileTransport()
+    const { wrapper } = mountMobile(t)
+    await flush()
+    expect(wrapper.find('[data-testid="cat-computers"]').text()).toContain('尚未新增主機連線')
+    expect(wrapper.find('[data-testid="cat-agents"]').text()).toContain('尚未新增工作助理')
+    expect(wrapper.find('[data-testid="cat-screens"]').exists()).toBe(true)
+    expect(t.openCalls).toHaveLength(0)
     wrapper.unmount()
   })
 
@@ -163,13 +179,13 @@ describe('mobile App runtime connection list (no Tauri)', () => {
 
     t.runtimeHostsError = null
     seed(t).runtimeHostsData.push(...PROFILES)
-    await wrapper.find('[data-testid="refresh-catalog"]').trigger('click')
+    await controller.loadCatalog()
     await flush()
     expect(wrapper.text()).toContain('hana')
     wrapper.unmount()
   })
 
-  it('tapping an agent quick-connects its single ready Shell', async () => {
+  it('explicitly attaching an Agent opens its listed ready Shell', async () => {
     const t = runtime()
     const m = mountMobile(t)
     await flush()
@@ -180,11 +196,11 @@ describe('mobile App runtime connection list (no Tauri)', () => {
     const tab = m.controller.tabs[0]
     expect(tab.status).toBe('live')
     expect(tab.targetId).toBe('opq-a1')
-    expect(m.wrapper.find('[data-testid="link-status"]').text()).toContain('已連線')
+    expect(m.wrapper.get('[data-testid="runtime-status-hana"]').classes()).toContain('on')
     m.wrapper.unmount()
   })
 
-  it('tapping the computer profile opens its host shell', async () => {
+  it('explicitly attaching a Computer opens its listed Shell', async () => {
     const t = runtime()
     const m = mountMobile(t)
     await flush()
@@ -242,7 +258,7 @@ describe('mobile App runtime connection list (no Tauri)', () => {
     expect(m.controller.tabs).toHaveLength(1)
 
     // Back to the list and connect the computer — tabs keep living.
-    await m.wrapper.find('[data-testid="to-list"]').trigger('click')
+    await showMobileMain(m.wrapper)
     await flush()
     await tapTarget(m, 'nuc')
     await flush()
@@ -399,7 +415,7 @@ describe('mobile App runtime connection list (no Tauri)', () => {
     tabA.shot = null
 
     // Open an agent — the active tab switches.
-    await m.wrapper.find('[data-testid="to-list"]').trigger('click')
+    await showMobileMain(m.wrapper)
     await flush()
     await tapTarget(m, 'gamma')
     await flush()
@@ -438,12 +454,12 @@ describe('mobile App runtime connection list (no Tauri)', () => {
     } finally { m.wrapper.unmount() }
   })
 
-  it('sends quick keys and toggles Ctrl without requesting terminal keyboard focus', async () => {
+  it('sends quick keys without requesting terminal keyboard focus', async () => {
     const m = mountMobile(runtime())
     try {
       await flush(); await tapTarget(m, 'nuc')
       const focus = vi.spyOn(m.terms[0], 'focus')
-      for (const id of ['esc', 'tab', 'left', 'up', 'down', 'right', 'shiftleft', 'ctrlc', 'ctrl']) {
+      for (const id of ['esc', 'tab', 'left', 'up', 'down', 'right', 'shiftleft', 'ctrlc', 'enter']) {
         await m.wrapper.get(`[data-testid="k-${id}"]`).trigger('click')
       }
       await flush()
@@ -454,7 +470,7 @@ describe('mobile App runtime connection list (no Tauri)', () => {
     } finally { m.wrapper.unmount() }
   })
 
-  it('keybar sends exact bytes; Ctrl latch converts single chars; Detach keeps the tab', async () => {
+  it('keybar sends exact bytes and controller detach keeps the tab', async () => {
     const t = runtime()
     const m = mountMobile(t)
     await flush()
@@ -462,8 +478,8 @@ describe('mobile App runtime connection list (no Tauri)', () => {
     const flat = () => t.sessions.get('m1')!.writes.flat()
 
     expect(m.wrapper.findAll('.keybar button').map(button => button.attributes('data-testid'))).toEqual([
-      'k-ctrl', 'k-esc', 'k-tab', 'k-left', 'k-up', 'k-down', 'k-right',
-      'k-shiftleft', 'k-ctrlc', 'k-detach', 'k-composer', 'k-keyboard'
+      'k-tab', 'k-esc', 'k-shiftleft', 'k-up', 'k-down', 'k-left', 'k-right',
+      'k-enter', 'k-ctrlc', 'k-keyboard'
     ])
     expect(m.wrapper.find('[data-testid="k-shiftleft"]').text()).toBe('⇧←')
 
@@ -481,18 +497,9 @@ describe('mobile App runtime connection list (no Tauri)', () => {
       0x03
     ])
 
-    // Ctrl latch: single char becomes a control byte; multi-char paste is raw.
-    await m.wrapper.find('[data-testid="k-ctrl"]').trigger('click')
-    const b2 = flat().length
-    m.terms[0].emitData('c')
-    m.terms[0].emitData('ab')
-    await flush()
-    expect(flat().slice(b2)).toEqual([0x03, 0x61, 0x62])
-    await m.wrapper.find('[data-testid="k-ctrl"]').trigger('click')
-
     // Detach is a local detach — no bytes are sent, remote session survives,
     // and the tab keeps its target for a one-tap reconnect.
-    await m.wrapper.find('[data-testid="k-detach"]').trigger('click')
+    await m.controller.detachTab(m.controller.tabs[0])
     await flush()
     expect(m.controller.tabs).toHaveLength(1)
     expect(m.controller.tabs[0].status).toBe('exited')
@@ -500,22 +507,14 @@ describe('mobile App runtime connection list (no Tauri)', () => {
     m.wrapper.unmount()
   })
 
-  it('hardware keydown with latched Ctrl is swallowed; real Ctrl passes through', async () => {
-    const t = runtime()
-    const m = mountMobile(t)
-    await flush()
-    await tapTarget(m, 'nuc')
-
-    // Terms are wrapped: the recorded keyInterceptor is the composed one.
-    await m.wrapper.find('[data-testid="k-ctrl"]').trigger('click')
-    const ev = new KeyboardEvent('keydown', { key: 'd' })
-    expect(m.terms[0].keyInterceptor!(ev)).toBe(false)
-    await flush()
-    expect(t.sessions.get('m1')!.writes.flat()).toEqual([0x04])
-    expect(
-      m.terms[0].keyInterceptor!(new KeyboardEvent('keydown', { key: 'c', ctrlKey: true }))
-    ).toBe(true)
-    m.wrapper.unmount()
+  it('hardware Ctrl continues through the terminal input adapter', async () => {
+    const m = mountMobile(runtime())
+    try {
+      await flush(); await tapTarget(m, 'nuc')
+      expect(m.terms[0].keyInterceptor!(new KeyboardEvent('keydown', { key: 'c', ctrlKey: true }))).toBe(true)
+      m.terms[0].emitData('\x03'); await flush()
+      expect(m.transport.sessions.get('m1')!.writes.flat()).toEqual([0x03])
+    } finally { m.wrapper.unmount() }
   })
 
   it('IME composition commits once even when fragments repeat', async () => {
@@ -553,22 +552,14 @@ describe('mobile App runtime connection list (no Tauri)', () => {
     m.wrapper.unmount()
   })
 
-  it('multiline composer sends raw bytes, optionally with Enter', async () => {
-    const t = runtime()
-    const m = mountMobile(t)
-    await flush()
-    await tapTarget(m, 'nuc')
-
-    await m.wrapper.find('[data-testid="k-composer"]').trigger('click')
-    await flush()
-    await m.wrapper.find('[data-testid="composer-text"]').setValue('echo 一\necho 二')
-    await m.wrapper.find('[data-testid="composer-send-enter"]').trigger('click')
-    await flush()
-    expect(t.sessions.get('m1')!.writes.flat()).toEqual(
-      Array.from(new TextEncoder().encode('echo 一\necho 二\r'))
-    )
-    expect(m.controller.tabs[0].status).toBe('live')
-    m.wrapper.unmount()
+  it('terminal paste sends multiline UTF-8 bytes without injecting Enter', async () => {
+    const m = mountMobile(runtime())
+    try {
+      await flush(); await tapTarget(m, 'nuc')
+      m.terms[0].emitData('echo 一\necho 二'); await flush()
+      expect(m.transport.sessions.get('m1')!.writes.flat()).toEqual([...new TextEncoder().encode('echo 一\necho 二')])
+      expect(m.controller.tabs[0].status).toBe('live')
+    } finally { m.wrapper.unmount() }
   })
 
   it('no-tabs fallback returns to the list and a tap opens a new tab', async () => {
@@ -578,7 +569,7 @@ describe('mobile App runtime connection list (no Tauri)', () => {
     await tapTarget(m, 'nuc')
 
     // Detach leaves one exited tab; closing it triggers the no-tabs cover.
-    await m.wrapper.find('[data-testid="k-detach"]').trigger('click')
+    await m.controller.detachTab(m.controller.tabs[0])
     await flush()
     const tab = m.controller.tabs[0]
     await m.controller.closeTab(tab)
@@ -591,7 +582,7 @@ describe('mobile App runtime connection list (no Tauri)', () => {
     expect(list.exists()).toBe(true)
     expect(list.text()).toContain('hana')
 
-    await list.find('[data-runtime-label="hana"]').trigger('click')
+    await attachMobileProfile(m.wrapper, 'hana')
     await flush()
     expect(t.openCalls.at(-1)?.targetId).toBe('opq-a1')
     expect(m.controller.tabs).toHaveLength(1)
@@ -611,5 +602,26 @@ describe('mobile App runtime connection list (no Tauri)', () => {
     t.feed('m1', { bytes: [65], exitCode: null })
     await flush()
     expect(m.terms[0].chunks).toHaveLength(0)
+  })
+})
+
+
+describe('mobile finished Shell cleanup', () => {
+  it.each(['exit-code', 'runtime-exited'] as const)('returns Connect to target selection after %s', async (ending) => {
+    const m = mountMobile(runtime())
+    try {
+      await flush(); await tapTarget(m, 'nuc')
+      const tab = m.controller.activeTab.value!
+      const session = tab.sessionId!
+      expect(m.wrapper.find('[data-testid="no-tabs"]').exists()).toBe(false)
+      if (ending === 'exit-code') m.transport.feed(session, { bytes: [], exitCode: 0 })
+      else m.transport.feed(session, { bytes: [], exitCode: null, runtime: { batchId: 0, localGeneration: 1, events: [], ended: 'exited' } })
+      await flush()
+      expect(m.controller.tabs).toHaveLength(0)
+      expect(m.wrapper.find('[data-testid="no-tabs"]').exists()).toBe(true)
+      expect(m.wrapper.find('.term-host').exists()).toBe(false)
+      expect(m.wrapper.get('#terminal-panel').isVisible()).toBe(true)
+      expect(m.terms[0].disposed).toBe(true)
+    } finally { m.wrapper.unmount() }
   })
 })

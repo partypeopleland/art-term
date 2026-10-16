@@ -7,15 +7,16 @@ import RuntimeSessions from './RuntimeSessions.vue'
 import RuntimeTransfer from './RuntimeTransfer.vue'
 import { getTestComputerPrefill } from '../test-computer-prefill'
 
-const props = withDefaults(defineProps<{ transport: Transport; initialView?: 'list' | 'create' }>(), { initialView: 'list' })
+const props = withDefaults(defineProps<{ transport: Transport; initialView?: 'list' | 'create'; initialCategory?: 'host' | 'agent'; categoryFilter?: 'host' | 'agent'; embedded?: boolean }>(), { initialView: 'list' })
 const view = ref<'list' | 'form'>(props.initialView === 'create' ? 'form' : 'list')
-const category = ref<'host' | 'agent'>('host')
+const category = ref<'host' | 'agent'>(props.initialCategory ?? 'host')
 const dialog = ref<HTMLElement | null>(null)
-useModalFocus(dialog, close)
+if (!props.embedded) useModalFocus(dialog, close)
 const emit = defineEmits<{ close: []; changed: []; picker: [active: boolean]; open: [host: HostDto, target: TargetDto] }>()
 const transferMode = ref<'import' | 'export' | null>(null)
 const sessionHost = ref<RuntimeHostDto | null>(null)
 const hosts = ref<RuntimeHostDto[]>([])
+const visibleHosts = computed(() => hosts.value.filter(host => !props.categoryFilter || (host.category === 'agent' ? 'agent' : 'host') === props.categoryFilter))
 const editing = ref<RuntimeHostDto | null>(null)
 const name = ref('')
 const baseUrl = ref('')
@@ -52,13 +53,13 @@ function reset(): void {
   formTouched.value = false
   editing.value = null
   deleting.value = null
-  category.value = 'host'
+  category.value = props.initialCategory ?? 'host'
   name.value = ''
   baseUrl.value = ''
   error.value = ''
 }
 function create(): void { reset(); view.value = 'form'; notice.value = ''; void nextTick(() => dialog.value?.querySelector<HTMLInputElement>('[data-testid=name]')?.focus()) }
-function cancel(): void { reset(); view.value = 'list'; void nextTick(() => dialog.value?.querySelector<HTMLButtonElement>('[data-testid=runtime-create]')?.focus()) }
+function cancel(): void { if (props.embedded) { reset(); view.value = 'form'; return } reset(); view.value = props.embedded ? 'form' : 'list'; void nextTick(() => dialog.value?.querySelector<HTMLButtonElement>('[data-testid=runtime-create]')?.focus()) }
 function edit(host: RuntimeHostDto): void {
   reset()
   view.value = 'form'
@@ -214,9 +215,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="runtime-host-backdrop">
-    <section ref="dialog" tabindex="-1" class="runtime-hosts" role="dialog" aria-modal="true" aria-labelledby="runtime-host-heading">
-      <header><h2 id="runtime-host-heading">{{ view === 'list' ? '管理 openab-pty 連線' : editing ? '編輯 openab-pty 連線' : '新增 openab-pty 連線' }}</h2><button type="button" @click="close">關閉</button></header>
+  <div class="runtime-host-backdrop" :class="{ 'embedded-host-page': embedded }">
+    <section ref="dialog" tabindex="-1" class="runtime-hosts" :role="embedded ? 'region' : 'dialog'" :aria-modal="embedded ? undefined : true" aria-labelledby="runtime-host-heading">
+      <header><h2 id="runtime-host-heading">{{ view === 'list' ? '管理 openab-pty 連線' : editing ? '編輯 openab-pty 連線' : '新增 openab-pty 連線' }}</h2><button v-if="!embedded" type="button" @click="close">關閉</button></header>
       <RuntimeTransfer v-if="transferMode" :mode="transferMode" :transport="transport" :hosts="hosts" @close="transferMode = null; void reload()" @changed="emit('changed'); void reload()" @picker="emit('picker', $event)" />
       <RuntimeSessions v-else-if="sessionHost" :host="sessionHost" :transport="transport" @close="sessionHost = null" @open="(host, target) => emit('open', host, target)" />
       <template v-else>
@@ -227,12 +228,12 @@ onBeforeUnmount(() => {
         <p v-if="notice" role="status">{{ notice }}</p>
         <p v-if="testPrefillApplied" role="status">私人測試預填：尚未儲存，請手動儲存後再測試。</p>
         <div v-if="view === 'list'" data-testid="runtime-host-list">
-        <div class="transfer-actions"><button type="button" :disabled="busy" data-testid="runtime-import" @click="reset(); transferMode = 'import'">匯入連線</button><button type="button" :disabled="busy || !hosts.length" data-testid="runtime-export" @click="reset(); transferMode = 'export'">匯出連線</button></div>
+        <div class="transfer-actions"><button type="button" :disabled="busy" data-testid="runtime-import" @click="reset(); transferMode = 'import'">匯入連線</button><button type="button" :disabled="busy || !visibleHosts.length" data-testid="runtime-export" @click="reset(); transferMode = 'export'">匯出連線</button></div>
         <button type="button" data-testid="runtime-create" :disabled="busy" @click="create">新增 openab-pty 連線</button>
         <p v-if="busy" role="status">處理中…</p>
-        <p v-else-if="!hosts.length">尚未儲存連線。選擇新增連線開始設定。</p>
+        <p v-else-if="!visibleHosts.length">尚未儲存連線。選擇新增連線開始設定。</p>
         <ul>
-          <li v-for="host in hosts" :key="host.id" :data-host-id="host.id">
+          <li v-for="host in visibleHosts" :key="host.id" :data-host-id="host.id">
             <strong>{{ host.name }}</strong> <span>{{ host.category === 'agent' ? 'Agent' : 'Host' }}</span> <span>{{ host.baseUrl }}</span>
             <span>{{ host.credentialPresent ? '管理憑證已儲存' : '缺少管理憑證' }}</span>
             <button type="button" :disabled="busy" @click="edit(host)">編輯</button>
@@ -285,4 +286,11 @@ h2 { font-size: 18px; margin: 0; } p { line-height: 1.6; }
 button:hover:not(:disabled) { background: var(--bg-hover, #2e3038); }
 :is(button, input, select):focus-visible { outline: 2px solid var(--accent, #5b8def); outline-offset: 3px; }
 @media (max-width: 480px) { .runtime-host-backdrop { padding: 8px; } .runtime-hosts { padding: 16px; max-height: calc(100dvh - 16px); } }
+</style>
+
+<style scoped>
+.runtime-host-backdrop.embedded-host-page.embedded-host-page { position: static; display: block; padding: 14px; background: transparent; }
+.embedded-host-page.embedded-host-page .runtime-hosts { width: 100%; max-width: 600px; max-height: none; margin: 0 auto; padding: 16px; overflow: visible; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 12px; }
+.embedded-host-page input, .embedded-host-page select { background: var(--bg); border-color: var(--border); }
+.embedded-host-page button { border-color: var(--border); }
 </style>

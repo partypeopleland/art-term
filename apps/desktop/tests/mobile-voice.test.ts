@@ -337,16 +337,16 @@ describe('mobile voice controller', () => {
     }
   })
 
-  it('persists mode and language-switch settings in localStorage', async () => {
+  it('persists mode and preview settings while keeping language switching enabled', async () => {
     const mock = mockPlugin()
     const voice = await readyController(mock.plugin)
     expect(voice.state.settings).toEqual(DEFAULT_VOICE_SETTINGS)
-    voice.updateSettings({ mode: 'hold', allowLanguageSwitch: false })
-    expect(JSON.parse(localStorage.getItem(VOICE_SETTINGS_KEY) ?? '{}')).toEqual({ mode: 'hold', allowLanguageSwitch: false })
+    voice.updateSettings({ mode: 'hold', previewMode: 'lightbox', allowLanguageSwitch: false })
+    expect(JSON.parse(localStorage.getItem(VOICE_SETTINGS_KEY) ?? '{}')).toEqual({ mode: 'hold', previewMode: 'lightbox', allowLanguageSwitch: true })
 
     const reopened = createVoiceController(mock.plugin, { isTauri: () => true })
     controllers.push(reopened)
-    expect(reopened.state.settings).toEqual({ mode: 'hold', allowLanguageSwitch: false })
+    expect(reopened.state.settings).toEqual({ mode: 'hold', previewMode: 'lightbox', allowLanguageSwitch: true })
   })
 
   it('does not probe or expose the native plugin outside the Tauri mobile shell', async () => {
@@ -439,12 +439,24 @@ describe('mobile voice button', () => {
     expect(wrapper.find('[data-testid="voice-preview"]').exists()).toBe(true)
     await wrapper.get('[data-testid="voice-settings-toggle"]').trigger('click')
     expect(wrapper.find('[data-testid="voice-preview"]').exists()).toBe(false)
-    expect(wrapper.get('.voice-content [data-testid="voice-settings"]').findAll('input[type="radio"]')).toHaveLength(2)
+    expect(wrapper.get('.voice-content [data-testid="voice-settings"]').findAll('input[type="radio"]')).toHaveLength(4)
     expect(wrapper.get('[data-testid="voice-settings-toggle"]').attributes('aria-expanded')).toBe('true')
     await wrapper.get('[data-testid="voice-settings-toggle"]').trigger('click')
     expect(wrapper.find('[data-testid="voice-settings"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="voice-preview"]').exists()).toBe(true)
     expect(wrapper.emitted('settings-visibility')).toBeUndefined()
+  })
+
+  it('keeps a saved lightbox preference closed on connection mount, but opens for recording', async () => {
+    const mock = mockPlugin()
+    const voice = await readyController(mock.plugin)
+    voice.updateSettings({ previewMode: 'lightbox' })
+    const wrapper = mountVoiceButton(voice, mockTarget().target)
+    await flushPromises()
+    expect(wrapper.find('.voice-lightbox').exists()).toBe(false)
+    await wrapper.get('[data-testid="voice-mic"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.voice-lightbox').exists()).toBe(true)
   })
 
   it('saves both preferences through the settings panel', async () => {
@@ -453,10 +465,10 @@ describe('mobile voice button', () => {
     const wrapper = mountVoiceButton(voice, mockTarget().target)
     await wrapper.get('[data-testid="voice-settings-toggle"]').trigger('click')
     await wrapper.get('input[name="voice-mode"][value="hold"]').setValue(true)
-    await wrapper.get('.language-switch input[type="checkbox"]').setValue(false)
+    await wrapper.get('input[name="voice-preview-mode"][value="lightbox"]').setValue(true)
 
-    expect(voice.state.settings).toEqual({ mode: 'hold', allowLanguageSwitch: false })
-    expect(JSON.parse(localStorage.getItem(VOICE_SETTINGS_KEY) ?? '{}')).toEqual({ mode: 'hold', allowLanguageSwitch: false })
+    expect(voice.state.settings).toEqual({ mode: 'hold', previewMode: 'lightbox', allowLanguageSwitch: true })
+    expect(JSON.parse(localStorage.getItem(VOICE_SETTINGS_KEY) ?? '{}')).toEqual({ mode: 'hold', previewMode: 'lightbox', allowLanguageSwitch: true })
   })
 
   it('locks recording-mode changes until the active recording ends', async () => {
@@ -478,7 +490,9 @@ describe('mobile voice button', () => {
     const wrapper = mountVoiceButton(voice, mockTarget().target)
     await wrapper.get('[data-testid="voice-settings-toggle"]').trigger('click')
     expect(wrapper.get('.voice-settings-hint').text()).toContain('不支援')
-    expect(wrapper.get('[data-testid="voice-mic"]').element.getAttribute('aria-label')).toBe('開始語音輸入')
+    expect(wrapper.find('[data-testid="voice-mic"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="voice-settings-toggle"]').trigger('click')
+    expect(wrapper.get('[data-testid="voice-mic"]').attributes('aria-label')).toBe('開始語音輸入')
   })
 
   it('clears the sent transcript confirmation after five seconds', async () => {

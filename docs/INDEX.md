@@ -13,6 +13,7 @@
 | 匯出／匯入、加密格式、新裝置還原 | [連線搬移](refarch/connection-transfer.md) |
 | DPAPI／Keystore、金鑰遺失、保存與清理 | [憑證與檔案](refarch/credential-storage.md) |
 | App 共享桌面預覽與 binding | [桌面](refarch/desktop.md) |
+| 瀏覽器直接預覽手機 Vue 畫面、假資料與草稿 | [手機畫面預覽](platforms/ui-preview.md) |
 | 官方 Runtime 專用截圖 Shell 與 Host helper | [Runtime 桌面 helper](refarch/runtime-desktop.md) |
 | Clone／fork 後本地打包、自有簽章與品牌調整 | [本地建置與自訂版本](platforms/local-build.md) |
 | Windows 工具鏈、操作差異、打包與驗收 | [Windows](platforms/windows.md) |
@@ -29,7 +30,7 @@
 | 原生 Runtime 邊界的決策理由 | [ADR-001](adr/ADR-001-client-boundaries.md) |
 | Android 語音輸入現況、決策與待觀察事項 | [BDR-001](bdr/BDR-001-android-voice-input.md) |
 | 未排程候選及保護條件 | [BDR-002](bdr/BDR-002-future-directions.md) |
-| 版本差異、遷移與本版驗證限制 | [0.1.26 release note](report/0.1.26.md)（前一版紀錄 [0.1.25](report/0.1.25.md)） |
+| 版本差異、遷移與本版驗證限制 | [0.1.27 release note](report/0.1.27.md)（前一版紀錄 [0.1.26](report/0.1.26.md)） |
 | 文件寫法、拆篇與載入原則 | [文件規則](steering/documentation.md) |
 | 第三方散布義務 | [第三方說明](third-party-notices.md) |
 

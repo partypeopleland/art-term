@@ -14,5 +14,5 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["vite/client"]
   },
-  "include": ["env.d.ts", "src/**/*.ts", "src/**/*.vue", "tests/**/*.ts", "vite.config.ts"]
+  "include": ["env.d.ts", "src/**/*.ts", "src/**/*.vue", "tests/**/*.ts", "vite.config.ts", "ui-preview/**/*.ts", "ui-preview/**/*.vue", "vite.preview.config.ts"]
 }

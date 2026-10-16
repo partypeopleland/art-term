@@ -8,6 +8,7 @@ export type VoicePermission = 'granted' | 'denied' | 'prompt'
 export interface VoiceSettings {
   mode: VoiceMode
   allowLanguageSwitch: boolean
+  previewMode?: 'inline' | 'lightbox'
 }
 
 export interface VoiceStatus {
@@ -86,7 +87,8 @@ export interface VoiceController {
 export const VOICE_SETTINGS_KEY = 'art-term.mobile-voice.settings.v1'
 export const DEFAULT_VOICE_SETTINGS: VoiceSettings = {
   mode: 'tap',
-  allowLanguageSwitch: true
+  allowLanguageSwitch: true,
+  previewMode: 'inline'
 }
 
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g
@@ -105,9 +107,8 @@ export function loadVoiceSettings(storage?: Pick<Storage, 'getItem'>): VoiceSett
     const value = parsed as Partial<VoiceSettings>
     return {
       mode: value.mode === 'hold' ? 'hold' : 'tap',
-      allowLanguageSwitch: typeof value.allowLanguageSwitch === 'boolean'
-        ? value.allowLanguageSwitch
-        : DEFAULT_VOICE_SETTINGS.allowLanguageSwitch
+      previewMode: value.previewMode === 'lightbox' ? 'lightbox' : 'inline',
+      allowLanguageSwitch: true
     }
   } catch {
     return { ...DEFAULT_VOICE_SETTINGS }
@@ -356,7 +357,7 @@ export function createVoiceController(plugin: VoicePlugin, options: VoiceControl
       return initialized
     },
     updateSettings(patch) {
-      state.settings = { ...state.settings, ...patch }
+      state.settings = { ...state.settings, ...patch, allowLanguageSwitch: true }
       try {
         const actualStorage = storage ?? (typeof localStorage === 'undefined' ? undefined : localStorage)
         actualStorage?.setItem(VOICE_SETTINGS_KEY, JSON.stringify(state.settings))
@@ -400,7 +401,7 @@ export function createVoiceController(plugin: VoicePlugin, options: VoiceControl
       const sessionId = makeSessionId(target.tabId, target.generation, nonce)
       active = { sessionId, target }
       try {
-        await plugin.start({ sessionId, language: 'zh-TW', allowLanguageSwitch: state.settings.allowLanguageSwitch })
+        await plugin.start({ sessionId, language: 'zh-TW', allowLanguageSwitch: true })
         if (active?.sessionId === sessionId) {
           if (pendingStop === sessionId) {
             pendingStop = null

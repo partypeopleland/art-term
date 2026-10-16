@@ -1,6 +1,8 @@
 import type { InjectionKey } from 'vue'
 import type { NativeTerminalLine } from './native-buffer'
 export interface NativeHistorySnapshot {
+  foreground?: number
+  background?: number
   readerId: string
   records: NativeTerminalLine[]
   visible: boolean
@@ -10,7 +12,9 @@ export interface NativeHistorySnapshot {
 }
 export interface NativeHistoryEvent {
   readerId: string
-  kind: 'tap' | 'visibility' | 'viewport' | 'position' | 'reading'
+  kind: 'tap' | 'visibility' | 'viewport' | 'position' | 'reading' | 'swipe'
+  phase?: NativeSwipeEvent['phase']
+  dx?: number
   sourceEpoch?: string
   visible?: boolean
   anchorId?: number
@@ -28,6 +32,8 @@ export interface NativeHistoryReader {
   close(readerId: string): Promise<void>
 }
 export const NativeHistoryKey: InjectionKey<() => NativeHistoryReader> = Symbol('NativeTerminalReader')
+export interface NativeSwipeEvent { phase: 'start' | 'move' | 'end' | 'cancel'; dx: number }
+export const NativeSwipeKey: InjectionKey<(event: NativeSwipeEvent) => void> = Symbol('NativeWorkspaceSwipe')
 export type NativeKeyboardListener = (receive: (visible: boolean) => void) => Promise<() => Promise<void>>
 export const NativeKeyboardKey: InjectionKey<NativeKeyboardListener> = Symbol('NativeKeyboardVisibility')
 

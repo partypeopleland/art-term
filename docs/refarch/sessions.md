@@ -23,7 +23,9 @@ Host profile (id + revision + origin + capabilities)
                                       binding -> tab + WSS
 ```
 
-點名稱先重用同 Host 的本機 live runtime 分頁。沒有可重用分頁時，App 使用凍結的 Host id／revision 列一次 Shell：只有一個 ready Shell 就直接連線；零個、多個、已 attached 或未知狀態都顯示選擇介面。右側「Shell」永遠開管理清單。建立及接管都需使用者明確操作；結果不確定時先重新整理，不能自動重試建立而意外多開工作。
+Windows 點名稱先重用同 Host 的本機 live runtime 分頁。沒有可重用分頁時，App 使用凍結的 Host id／revision 列一次 Shell：只有一個 ready Shell 就直接連線；零個、多個、已 attached 或未知狀態都顯示選擇介面。右側「Shell」永遠開管理清單。建立及接管都需使用者明確操作；結果不確定時先重新整理，不能自動重試建立而意外多開工作。
+
+Android Main 直接呈現既有 Shell 按鈕，點名稱才 attach；多筆預設收合，點左側主機名稱展開／收合。已 attached 的項目標示「接管」，沒有 Shell 時不顯示既有連線按鈕。右側 `＋` 明確建立新工作並連線，不沿用 Windows 的右側 Shell 清單入口。兩種畫面都以 backend 核發的 target 連線，不自行組合工作身分。
 
 新建只提供「建立並連線」，由 backend 建立 tmux 工作並產生簡短顯示名稱，例如 `s-12ab34cd`；使用者不需輸入名稱。實際 Runtime 工作識別與顯示名稱分開，重新連線仍使用原識別。舊的一般 Shell 保留連線相容，不會自動遷移；Host 缺少支援檔時建立會失敗，不退回一般 Shell，準備方式見[終端歷史](terminal-history.md)。
 
@@ -54,6 +56,8 @@ Gap -> clear pending input / resize -> reset emulator -> next output
 Gap 表示輸出序列有缺段，不能把後續 bytes 當作完整連續畫面。App 先清 pending input／resize、重置 emulator，再處理補送資料，避免畫面與待送操作建立在已失效的狀態上。
 
 ## 斷線、背景與離開
+
+Android 收到明確的 Shell 正常退出訊號或 exit code 時，清除對應本機分頁及原生閱讀器；沒有其他分頁時，Connect 回到「選擇連線」。這不改變暫時網路中斷的有限重連規則，也不發出刪除遠端工作的操作。
 
 短暫 transport 錯誤、輸出佇列滿或 timeout 最多連續嘗試恢復三次，使用原 attach token 及本機 ACK 游標作為 `since`。token 只留在原生層受保護記憶體，不送進 WebView、日誌或設定檔。恢復連線健康滿 30 秒，且新輸出已成功 ACK 後，才重設這個重試預算。恢復不自動續期、建立或重啟 Shell，也不重播未送出或結果不確定的輸入。認證被拒、存活期限（TTL）到期、接管或 token 撤銷都會停止恢復，使用者需回到清單確認狀態。
 

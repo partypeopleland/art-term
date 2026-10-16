@@ -1,3 +1,4 @@
+import { appInfoPlugin } from './app-info-plugin'
 import { defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
 import { lstatSync, readFileSync } from 'node:fs'
@@ -22,7 +23,7 @@ function privateTestPrefill() {
 const testPrefill = privateTestPrefill()
 
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [vue(), appInfoPlugin()],
   base: './',
   define: { __ART_TERM_TEST_COMPUTER_PREFILL__: JSON.stringify(testPrefill) },
   server: {

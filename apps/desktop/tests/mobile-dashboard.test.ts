@@ -1,0 +1,75 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
+import HostConnections from '../src/mobile/HostConnections.vue'
+import { FakeMobileTransport, makeProfile, makeCatalogTarget, makeGroup } from './mobile.fake'
+import { deferred } from './fake'
+import type { HostDto, TargetDto } from '../src/transport/types'
+
+const wrappers: ReturnType<typeof mount>[] = []
+afterEach(() => wrappers.splice(0).forEach(wrapper => wrapper.unmount()))
+function setup(names: string[] = ['nuc-1', 'nuc-2', 'nuc-3']) {
+  const profile = makeProfile('nuc')
+  const targets = names.map(name => makeCatalogTarget(name, 'nuc', name, ''))
+  const transport = Object.assign(new FakeMobileTransport([profile]), { runtimeCreateHistorySession: vi.fn(async () => targets[0]) })
+  transport.runtimeSessionsData.set('nuc', makeGroup('nuc', targets))
+  const wrapper = mount(HostConnections, { props: { profile, transport, connected: false, active: true } })
+  wrappers.push(wrapper)
+  return { profile, targets, transport, wrapper }
+}
+describe('inline existing connections', () => {
+  it('reads names without opening, expands only on selection and attaches the selected issued id', async () => {
+    const { wrapper, transport } = setup()
+    await flushPromises()
+    expect(wrapper.findAll('.attach-button').map(button => button.text())).toEqual(['連線數:03'])
+    expect(transport.openCalls).toEqual([])
+    await wrapper.get('.host-identity').trigger('click')
+    expect(wrapper.findAll('.attach-button').map(button => button.text())).toEqual(['nuc-1↗', 'nuc-2↗', 'nuc-3↗'])
+    await wrapper.findAll('.attach-button')[1].trigger('click')
+    expect((wrapper.emitted('open')![0][1] as TargetDto).id).toBe('nuc-2')
+    await wrapper.get('.host-identity').trigger('click')
+    expect(wrapper.findAll('.attach-button')).toHaveLength(1)
+  })
+  it('keeps an empty existing-connection slot while allowing an explicit new session', async () => {
+    const { wrapper, transport } = setup([])
+    await flushPromises()
+    expect(wrapper.find('.attach-button').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('尚無連線')
+    expect(wrapper.get('.new-connection').attributes('disabled')).toBeUndefined()
+    expect(transport.runtimeCreateHistorySession).not.toHaveBeenCalled()
+  })
+  it('requires an explicit visibly labeled takeover for an attached target', async () => {
+    const { wrapper, targets } = setup(['nuc-1'])
+    targets[0].phase = 'attached'
+    await flushPromises()
+    expect(wrapper.emitted('open')).toBeUndefined()
+    expect(wrapper.get('.attach-button').text()).toContain('接管')
+    await wrapper.get('.attach-button').trigger('click')
+    expect(wrapper.emitted('open')).toHaveLength(1)
+  })
+  it('drops late list results after leaving the page and a stale profile revision', async () => {
+    const { wrapper, transport, profile } = setup()
+    await flushPromises()
+    const pending = deferred<HostDto>()
+    vi.spyOn(transport, 'runtimeSessions').mockReturnValueOnce(pending.promise)
+    await wrapper.setProps({ profile: { ...profile, revision: 2 } })
+    await wrapper.setProps({ active: false })
+    pending.resolve(makeGroup('nuc', [makeCatalogTarget('late', 'nuc', 'late', '')]))
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('late')
+    expect(wrapper.emitted('open')).toBeUndefined()
+  })
+  it('does not create twice or open a late create reply after navigation', async () => {
+    const { wrapper, transport, targets } = setup()
+    await flushPromises()
+    const pending = deferred<TargetDto>()
+    transport.runtimeCreateHistorySession.mockReturnValueOnce(pending.promise)
+    await wrapper.get('.new-connection').trigger('click')
+    await wrapper.get('.new-connection').trigger('click')
+    await wrapper.setProps({ active: false })
+    await wrapper.setProps({ active: true }); await flushPromises()
+    expect(wrapper.get('.new-connection').attributes('disabled')).toBeDefined()
+    expect(transport.runtimeCreateHistorySession).toHaveBeenCalledOnce()
+    pending.resolve(targets[0]); await flushPromises()
+    expect(wrapper.emitted('open')).toBeUndefined()
+  })
+})

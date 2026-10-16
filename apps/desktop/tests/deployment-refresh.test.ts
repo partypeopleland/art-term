@@ -1,3 +1,4 @@
+import { attachMobileProfile, showMobileMain } from './mobile-actions'
 // Runtime-agent binding retirement: a typed terminal-kind rejection
 // (stateChanged/replacement/…) on a runtime-agent tab closes only that
 // tab, reloads the saved profile list exactly once, and surfaces manual
@@ -333,7 +334,7 @@ function mountMobile(transport: FakeMobileTransport): MountedMobile {
 }
 
 async function tapTarget(m: MountedMobile, label: string): Promise<void> {
-  await m.wrapper.find(`[data-runtime-label="${label}"]`).trigger('click')
+  await attachMobileProfile(m.wrapper, label)
   await flush()
 }
 
@@ -387,7 +388,7 @@ describe('mobile runtime-agent retirement flow', () => {
       expect(m.controller.tabs[0].status).toBe('live')
       const keep = m.controller.tabs[0]
 
-      await m.wrapper.find('[data-testid="to-list"]').trigger('click')
+      await showMobileMain(m.wrapper)
       await flush()
       await tapTarget(m, 'beta')
       await flush()
@@ -403,7 +404,7 @@ describe('mobile runtime-agent retirement flow', () => {
     }
   })
 
-  it('the ended overlay still offers a manual refresh and same-target reconnect', async () => {
+  it('a failed connection still offers a manual refresh and same-target reconnect', async () => {
     const t = mobileRuntime()
     const m = mountMobile(t)
     try {
@@ -411,7 +412,7 @@ describe('mobile runtime-agent retirement flow', () => {
       await tapTarget(m, 'nuc')
       const tab = m.controller.tabs[0]
       expect(tab.status).toBe('live')
-      t.feed('m1', { bytes: [], exitCode: 0 })
+      t.feed('m1', { bytes: [], exitCode: null, runtime: { batchId: 0, localGeneration: 1, events: [], ended: 'auth' } })
       await flush()
 
       const text = m.wrapper.find('.term-page').text()
@@ -427,7 +428,7 @@ describe('mobile runtime-agent retirement flow', () => {
       expect(catalogs).toBe(1)
       expect(m.wrapper.find('[data-testid="catalog-card"]').exists()).toBe(true)
       expect(m.wrapper.find('.term-page').isVisible()).toBe(false)
-      // Ordinary ended state still offers same-target reconnect.
+      // A failed connection remains available for explicit retry.
       expect(m.wrapper.find('.done .btn').text()).toContain('重新連線同一目標')
     } finally {
       m.wrapper.unmount()

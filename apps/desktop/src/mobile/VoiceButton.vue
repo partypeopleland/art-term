@@ -6,9 +6,13 @@ const props = defineProps<{
   voice: VoiceController
   target: VoiceTarget
 }>()
+const emit = defineEmits<{ overlay: [open: boolean] }>()
 
 const state = props.voice.state
 const settingsOpen = ref(false)
+const lightboxOpen = ref(false)
+const lightboxText = ref('')
+watch(lightboxOpen, open => emit('overlay', open), { flush: 'sync' })
 const elapsedSeconds = ref(0)
 let recordingStartedAt = 0
 let timerId: ReturnType<typeof setInterval> | undefined
@@ -30,11 +34,20 @@ const actionLabel = computed(() => {
   }
 })
 
-const statusText = computed(() => state.sentText || state.notice || (state.phase === 'idle' ? '預設使用繁體中文，可在設定中允許中英文切換。' : ''))
+const statusText = computed(() => state.sentText || state.notice)
 const micDisabled = computed(() => state.phase === 'stopping' || !state.recognizerAvailable)
 const micLabel = computed(() => state.phase === 'listening' ? '結束語音輸入' : '開始語音輸入')
 
+watch(() => state.settings.previewMode, mode => { lightboxOpen.value = mode === 'lightbox' })
+watch(() => [state.partialText, state.sentText], ([partial, sent]) => {
+  if (partial || sent) lightboxText.value = partial || sent
+})
+
 watch(() => state.phase, (phase) => {
+  if (phase === 'starting') {
+    lightboxText.value = ''
+    if (state.settings.previewMode === 'lightbox') lightboxOpen.value = true
+  }
   if (phase === 'listening') {
     recordingStartedAt = Date.now()
     elapsedSeconds.value = 0
@@ -101,11 +114,12 @@ function updateMode(event: Event): void {
   props.voice.updateSettings({ mode: value === 'hold' ? 'hold' : 'tap' })
 }
 
-function updateLanguageSwitch(event: Event): void {
-  props.voice.updateSettings({ allowLanguageSwitch: (event.target as HTMLInputElement).checked })
+function updatePreviewMode(event: Event): void {
+  props.voice.updateSettings({ previewMode: (event.target as HTMLInputElement).value === 'lightbox' ? 'lightbox' : 'inline' })
 }
 
 onBeforeUnmount(() => {
+  emit('overlay', false)
   if (heldPointer !== null || keyboardHeld) props.voice.cancel('unmount')
   clearInterval(timerId)
   clearTimeout(resultTimeout)
@@ -113,8 +127,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="voice-input" data-testid="voice-input" :class="`phase-${state.phase}`">
+  <section class="voice-input" data-testid="voice-input" :class="[`phase-${state.phase}`, { 'settings-open': settingsOpen }]">
     <button
+      v-if="!settingsOpen"
       class="voice-mic"
       :class="{ recording: state.phase === 'listening', stopping: state.phase === 'stopping' }"
       data-testid="voice-mic"
@@ -122,7 +137,7 @@ onBeforeUnmount(() => {
       :disabled="micDisabled"
       :aria-label="micLabel"
       :aria-pressed="state.phase === 'listening'"
-      :aria-describedby="settingsOpen ? undefined : 'voice-status'"
+      :aria-describedby="settingsOpen || state.settings.previewMode === 'lightbox' ? undefined : 'voice-status'"
       @click="onClick"
       @pointerdown="onPointerDown"
       @pointerup="endPointer"
@@ -149,7 +164,7 @@ onBeforeUnmount(() => {
     >取消</button>
 
     <div class="voice-content">
-      <div v-if="!settingsOpen" class="voice-feedback" data-testid="voice-preview">
+      <div v-if="!settingsOpen && state.settings.previewMode !== 'lightbox'" class="voice-feedback" data-testid="voice-preview">
         <div v-if="state.partialText && state.phase === 'listening'" class="voice-partial" data-testid="voice-partial">
           {{ state.partialText }}
         </div>
@@ -169,7 +184,8 @@ onBeforeUnmount(() => {
           @click="voice.downloadLanguage()"
         >{{ state.downloadProgress === null ? '下載語言包' : `下載中 ${state.downloadProgress}%` }}</button>
       </div>
-      <div v-else class="voice-settings" data-testid="voice-settings">
+      <div v-else-if="settingsOpen" class="voice-settings" data-testid="voice-settings">
+        <div class="voice-settings-columns">
         <fieldset :disabled="state.phase !== 'idle'">
           <legend>錄音方式</legend>
           <label>
@@ -181,12 +197,15 @@ onBeforeUnmount(() => {
             按住說話
           </label>
         </fieldset>
-        <label class="language-switch">
-          <input type="checkbox" :checked="state.settings.allowLanguageSwitch" @change="updateLanguageSwitch">
-          允許中英文切換
-        </label>
+        <fieldset :disabled="state.phase !== 'idle'">
+          <legend>文字預覽方式</legend>
+          <label><input type="radio" name="voice-preview-mode" value="inline" :checked="state.settings.previewMode !== 'lightbox'" @change="updatePreviewMode">右側預覽</label>
+          <label><input type="radio" name="voice-preview-mode" value="lightbox" :checked="state.settings.previewMode === 'lightbox'" @change="updatePreviewMode">燈箱模式</label>
+        </fieldset>
+        </div>
         <p v-if="!state.languageSwitchSupported" class="voice-settings-hint">此裝置不支援辨識時切換語言。</p>
       </div>
+      <div v-else class="voice-feedback lightbox-hint"><button class="open-lightbox" @click="lightboxOpen = true">開啟文字燈箱 ↗</button><span>{{ state.notice }}</span></div>
     </div>
 
     <button
@@ -203,6 +222,14 @@ onBeforeUnmount(() => {
       </svg>
     </button>
   </section>
+
+  <div v-if="lightboxOpen && state.settings.previewMode === 'lightbox'" class="voice-lightbox-backdrop">
+    <section class="voice-lightbox" role="dialog" aria-label="語音文字預覽" @keydown.esc="lightboxOpen = false">
+      <header><div><span class="lightbox-eyebrow">VOICE PREVIEW</span><h3>語音文字預覽</h3></div><button class="lightbox-close" aria-label="關閉文字燈箱" @click="lightboxOpen = false">×</button></header>
+      <div class="lightbox-transcript" :class="{ 'transcript-empty': !lightboxText }" aria-live="polite">{{ lightboxText }}</div>
+      <footer><span>{{ state.phase === 'listening' ? '正在聆聽…' : state.phase === 'stopping' ? '辨識處理中…' : state.notice || '文字預覽' }}</span><button v-if="state.phase === 'starting' || state.phase === 'listening'" class="lightbox-stop" @click="voice.stop()">結束錄音</button></footer>
+    </section>
+  </div>
 </template>
 
 <style scoped>
@@ -382,4 +409,37 @@ onBeforeUnmount(() => {
 @media (prefers-reduced-motion: reduce) {
   .voice-mic.recording { animation: none; }
 }
+
+.voice-settings-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.voice-settings-columns fieldset { min-width: 0; }
+.voice-settings-columns fieldset + fieldset { border-left: 1px solid var(--border); padding-left: 12px; }
+.voice-settings-columns legend { font-size: 11px; }
+.voice-settings-columns label { gap: 4px; font-size: 11px; white-space: nowrap; }
+.voice-settings-columns input { accent-color: var(--accent); width: 15px; height: 15px; }
+.settings-open .voice-content { height: 72px; min-height: 0; max-height: 72px; overflow: auto; }
+.settings-open .language-switch { font-size: 10px; min-height: 24px; }
+.lightbox-hint { font-size: 10px; }
+.open-lightbox { align-self: flex-start; padding: 0; border: 0; background: transparent; color: var(--accent); font: inherit; font-size: 11px; cursor: pointer; }
+.voice-lightbox-backdrop { position: absolute; inset: 0; z-index: 110; display: flex; align-items: center; justify-content: center; padding: 24px; background: #0005; pointer-events: none; }
+.voice-lightbox { pointer-events: auto; width: 100%; max-width: 520px; max-height: 65%; display: flex; flex-direction: column; padding: 18px; border: 1px solid var(--border); border-radius: 16px; background: var(--bg-panel); color: var(--text); box-shadow: 0 18px 60px #0006; }
+.voice-lightbox header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.lightbox-eyebrow { color: var(--text-dim); font-size: 9px; letter-spacing: .12em; }
+.voice-lightbox h3 { margin: 5px 0 0; font-size: 15px; font-weight: 550; }
+.lightbox-close { width: 32px; height: 32px; border: 0; border-radius: 7px; background: var(--bg-raised); color: var(--text-dim); font-size: 22px; cursor: pointer; }
+.lightbox-transcript { min-height: 160px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 20px; line-height: 1.8; }
+.lightbox-transcript.transcript-empty { color: var(--text-dim); font-size: 16px; }
+.voice-lightbox footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); font-size: 10px; color: var(--text-dim); }
+.lightbox-stop { padding: 7px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg-raised); color: var(--text); font: inherit; font-size: 11px; cursor: pointer; }
+.voice-lightbox button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.voice-input { height: 84px; min-height: 84px; max-height: 84px; box-sizing: border-box; }
+.voice-settings-columns { gap: 8px; }
+.voice-settings-columns fieldset { padding-bottom: 0; }
+.voice-settings-columns fieldset + fieldset { padding-left: 8px; }
+.voice-settings-columns legend { margin-bottom: 0; line-height: 14px; }
+.voice-settings-columns label { min-height: 20px; line-height: 20px; }
+.settings-open .language-switch { min-height: 18px; padding-top: 1px; line-height: 18px; }
+.settings-open .language-switch input { width: 14px; height: 14px; }
+
+.voice-settings-toggle { border: 0; background: transparent; }
 </style>

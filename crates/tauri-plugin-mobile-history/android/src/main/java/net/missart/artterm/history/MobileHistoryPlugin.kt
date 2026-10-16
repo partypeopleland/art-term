@@ -51,6 +51,8 @@ class BoundsArgs {
 }
 @InvokeArg
 class ReaderArgs {
+    var foreground: Int? = null
+    var background: Int? = null
     var readerId: String = ""
     var records: Array<RecordArgs> = emptyArray()
     var visible: Boolean = true
@@ -72,9 +74,15 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
     private var text: TextView? = null
     private var starts = linkedMapOf<Long, Int>()
     private var renderedStyles: List<List<Int>> = emptyList()
+    private var themeForeground = 0xd7d7dc
+    private var themeBackground = 0x16171b
     private var adjusting = false
     private var dragging = false
     private var moving = false
+    private var horizontalSwipe = false
+    private var verticalGesture = false
+    private var swipeStartX = 0f
+    private var swipeStartY = 0f
     private var userGesture = false
     private var userViewportPending = false
     private var pageVisible = false
@@ -212,6 +220,7 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
         pendingDraw = null; adjusting = false
     }
     private fun closeReader() {
+        horizontalSwipe = false; verticalGesture = false
         epoch++; cancelDraw(); main.removeCallbacks(settled)
         root?.let { (it.parent as? ViewGroup)?.removeView(it) }
         root = null; scroll = null; text = null
@@ -267,6 +276,9 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
             press = null
             return
         }
+        // During a horizontal page gesture the native view follows the finger
+        // itself; translated WebView bounds must not apply that offset twice.
+        if (horizontalSwipe) return
         val webPos = IntArray(2); web.getLocationOnScreen(webPos)
         val parentPos = IntArray(2); parent.getLocationOnScreen(parentPos)
         val scale = if (b != null) web.width / b.viewportWidth else 1.0
@@ -299,6 +311,44 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
             val frame = FrameLayout(activity).apply { setBackgroundColor(Color.rgb(22,23,27)) }
             val s = object : ScrollView(activity) {
                 override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+                    if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                        swipeStartX = event.rawX; swipeStartY = event.rawY
+                        horizontalSwipe = false; verticalGesture = false
+                    }
+                    val dx = event.rawX - swipeStartX
+                    val dy = event.rawY - swipeStartY
+                    if (event.actionMasked == MotionEvent.ACTION_POINTER_DOWN && horizontalSwipe) {
+                        send("swipe") { put("phase", "cancel"); put("dx", dx / cssScale) }
+                        horizontalSwipe = false; verticalGesture = true
+                        root?.translationX = 0f
+                        return true
+                    }
+                    if (event.actionMasked == MotionEvent.ACTION_MOVE && !verticalGesture) {
+                        val slop = android.view.ViewConfiguration.get(activity).scaledTouchSlop
+                        if (!horizontalSwipe && kotlin.math.abs(dy) > slop && kotlin.math.abs(dy) > kotlin.math.abs(dx)) verticalGesture = true
+                        if (!horizontalSwipe && dx > slop && dx > kotlin.math.abs(dy) * 1.2f) {
+                            val cancel = MotionEvent.obtain(event)
+                            cancel.action = MotionEvent.ACTION_CANCEL
+                            super.dispatchTouchEvent(cancel); cancel.recycle()
+                            horizontalSwipe = true; dragging = false; moving = false; userGesture = false; press = null
+                            main.removeCallbacks(settled)
+                            send("swipe") { put("phase", "start"); put("dx", dx / cssScale) }
+                        }
+                    }
+                    if (horizontalSwipe) {
+                        root?.translationX = dx.coerceIn(0f, (webView?.width ?: 0).toFloat())
+                        val phase = when (event.actionMasked) {
+                            MotionEvent.ACTION_UP -> "end"
+                            MotionEvent.ACTION_CANCEL -> "cancel"
+                            else -> "move"
+                        }
+                        send("swipe") { put("phase", phase); put("dx", dx / cssScale) }
+                        if (phase == "end" || phase == "cancel") {
+                            horizontalSwipe = false
+                            root?.translationX = 0f
+                        }
+                        return true
+                    }
                     touch(event)
                     when (event.actionMasked) {
                         MotionEvent.ACTION_DOWN -> {
@@ -366,6 +416,12 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
         if (!pageVisible) return
         val s = scroll ?: return
         val t = text ?: return
+        val nextForeground = (args.foreground ?: 0xd7d7dc) and 0xffffff
+        val nextBackground = (args.background ?: 0x16171b) and 0xffffff
+        val themeChanged = themeForeground != nextForeground || themeBackground != nextBackground
+        themeForeground = nextForeground; themeBackground = nextBackground
+        root?.setBackgroundColor(themeBackground or (0xff shl 24))
+        t.setTextColor(themeForeground or (0xff shl 24))
         val nextStarts = linkedMapOf<Long, Int>()
         val content = StringBuilder()
         val nextStyles = mutableListOf<List<Int>>()
@@ -380,7 +436,7 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
             append(r.text, r.styles)
         }
         val nextText = content.toString()
-        if (!layoutPending && !adjusting && t.text.toString() == nextText && renderedStyles == nextStyles && starts == nextStarts && sourceEpoch == args.sourceEpoch) { starts = nextStarts; return }
+        if (!themeChanged && !layoutPending && !adjusting && t.text.toString() == nextText && renderedStyles == nextStyles && starts == nextStarts && sourceEpoch == args.sourceEpoch) { starts = nextStarts; return }
         press = null; links = findLinks(nextText)
         val a = if (adjusting) pendingAnchor else if (layoutPending) layoutAnchor else anchor()
         val follow = args.followLatest && (if (adjusting) pendingFollow else if (layoutPending) layoutBottom else atBottom()) && !dragging && !moving
@@ -390,8 +446,8 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
         starts = nextStarts; renderedStyles = nextStyles
         val styled = SpannableStringBuilder(nextText)
         for ((start, end, rawFg, rawBg, flags) in nextStyles) {
-            var fg = if (rawFg < 0) 0xd7d7dc else rawFg
-            var bg = if (rawBg < 0) 0x16171b else rawBg
+            var fg = if (rawFg < 0) themeForeground else rawFg
+            var bg = if (rawBg < 0) themeBackground else rawBg
             if (flags and 32 != 0) { val swap = fg; fg = bg; bg = swap }
             if (flags and 16 != 0) {
                 fg = Color.rgb(((fg shr 16 and 255) + (bg shr 16 and 255)) / 2,
@@ -455,6 +511,8 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
         main.post { if (args.readerId == readerId) closeReader(); invoke.resolve() }
     }
     override fun onPause(activity: AppCompatActivity) {
+        horizontalSwipe = false
+        root?.translationX = 0f
         press = null
         root?.visibility = View.GONE
         send("visibility") { put("visible", false) }

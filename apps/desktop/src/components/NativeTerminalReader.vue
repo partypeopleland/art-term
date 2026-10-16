@@ -2,11 +2,12 @@
 import { inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { NATIVE_PAGE_LINES, NATIVE_WINDOW_LINES, type NativeTerminalLine } from '../terminal/native-buffer'
 import type { TerminalHandle } from '../terminal/handle'
-import { HostHistoryWindow, NativeHistoryKey, type HostHistoryRequestFn, type NativeHistoryEvent, type NativeHistorySnapshot } from '../terminal/native'
+import { HostHistoryWindow, NativeHistoryKey, NativeSwipeKey, type HostHistoryRequestFn, type NativeHistoryEvent, type NativeHistorySnapshot } from '../terminal/native'
 
 const props = defineProps<{ terminal: TerminalHandle | null; visible: boolean; historyRequest?: HostHistoryRequestFn; historyNotice?: (text: string) => void }>()
 const factory = inject(NativeHistoryKey, null)
 const native = factory?.()
+const swipe = inject(NativeSwipeKey, null)
 const host = ref<HTMLElement | null>(null)
 const failed = ref(false)
 const remoteLoading = ref(false)
@@ -23,6 +24,10 @@ let remote: HostHistoryWindow | undefined
 
 function event(value: NativeHistoryEvent): void {
   if (disposed || value.readerId !== readerId) return
+  if (value.kind === 'swipe') {
+    if (props.visible && !document.hidden && value.phase && value.dx !== undefined) swipe?.({ phase: value.phase, dx: value.dx })
+    return
+  }
   // Native tap is deliberately the only touch event that can focus input.
   if (value.kind === 'tap' && props.visible && !document.hidden) props.terminal?.focus()
   if (value.kind === 'visibility') void sync()
@@ -79,6 +84,8 @@ async function sync(): Promise<void> {
         requestedPage = false
       }
       const snapshot: NativeHistorySnapshot = {
+        foreground: parseInt((host.value ? getComputedStyle(host.value).getPropertyValue('--text').trim() : '').replace('#', '') || 'd7d7dc', 16),
+        background: parseInt((host.value ? getComputedStyle(host.value).getPropertyValue('--bg').trim() : '').replace('#', '') || '16171b', 16),
         readerId, records, visible: show, followLatest: page ? !remote!.held : followLatest,
         ...(page ? { sourceEpoch: remote!.sourceEpoch } : {}),
         bounds: { x: Math.max(0, rect?.x ?? 0), y: Math.max(0, rect?.y ?? 0), width: rect?.width ?? 0, height: rect?.height ?? 0, viewportWidth: window.innerWidth }
@@ -132,5 +139,5 @@ onBeforeUnmount(() => {
 </template>
 <style scoped>
 .native-terminal-host { position: absolute; inset: 0; pointer-events: none; }
-.history-loading { pointer-events: auto; position: absolute; inset: 0; display: grid; place-items: center; background: #16171b; color: #d7d7dc; }
+.history-loading { pointer-events: auto; position: absolute; inset: 0; display: grid; place-items: center; background: var(--bg); color: var(--text); }
 </style>
