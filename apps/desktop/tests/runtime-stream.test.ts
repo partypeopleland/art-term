@@ -109,6 +109,23 @@ describe('ordered runtime rendering and acknowledgement', () => {
 })
 
 describe('runtime recovery keeps the original binding and emulator', () => {
+  it('can recover later independent drops after healthy live output was rendered and ACKed', async () => {
+    let now = 0
+    vi.spyOn(Date, 'now').mockImplementation(() => now)
+    const { transport, tab, term, session } = await setup()
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      transport.feed(session, output([], { batchId: 0, ended: 'slowConsumer' })); await flush()
+      expect(tab.sessionId).toBe(session)
+      expect(tab.status).toBe('live')
+      expect(transport.runtimeRecover).toHaveBeenCalledTimes(attempt)
+      now += 31000
+      transport.feed(session, output([{ kind: 'bytes', bytes: [64 + attempt], start: attempt - 1, end: attempt, historical: false }], { batchId: attempt })); await flush()
+    }
+    expect(term.text()).toBe('ABCD')
+    expect(term.resetCount).toBe(0)
+    expect(transport.openCalls).toHaveLength(1)
+    expect(transport.sessions.get(session)!.writes).toEqual([])
+  })
   it.each(['ttlExpired', 'takeover', 'operatorKill', 'sessionEnded', 'replacement', 'capacity', 'protocol'])('does not automatically recover typed %s termination', async (reason) => {
     const { transport, tab, session } = await setup()
     transport.feed(session, output([], { batchId: 0, ended: reason })); await flush()
@@ -117,18 +134,18 @@ describe('runtime recovery keeps the original binding and emulator', () => {
     expect(transport.closeCalls).toEqual([session])
   })
 
-  it('recovers transport loss on the same id/emulator and stops after three recovery attempts', async () => {
+  it.each(['transport', 'slowConsumer'])('recovers %s on the same id/emulator and stops after three recovery attempts', async (reason) => {
     const { transport, tab, term, session } = await setup()
     transport.feed(session, output([historical])); await flush()
     const writes = transport.sessions.get(session)!.writes
     for (let attempt = 1; attempt <= 3; attempt++) {
       tab.writeBuf = [0x78]
-      transport.feed(session, output([], { batchId: 0, ended: attempt === 2 ? 'timeout' : 'transport', inputUncertain: true })); await flush()
+      transport.feed(session, output([], { batchId: 0, ended: attempt === 2 ? 'timeout' : reason, inputUncertain: true })); await flush()
       expect(transport.runtimeRecover).toHaveBeenCalledTimes(attempt)
       expect(tab.sessionId).toBe(session); expect(tab.term).toBe(term); expect(tab.status).toBe('live')
       expect(tab.writeBuf).toEqual([]); expect(term.resetCount).toBe(0); expect(term.text()).toBe('漢')
     }
-    transport.feed(session, output([], { batchId: 0, ended: 'transport' })); await flush()
+    transport.feed(session, output([], { batchId: 0, ended: reason })); await flush()
     expect(transport.runtimeRecover.mock.calls).toEqual([[session], [session], [session]])
     expect(transport.openCalls).toHaveLength(1); expect(writes).toEqual([])
     expect(tab.status).toBe('error'); expect(transport.closeCalls).toEqual([session])

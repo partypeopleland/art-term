@@ -14,15 +14,25 @@ export function paletteColor(index: number): number {
   return (cube[Math.floor(n / 36)] << 16) | (cube[Math.floor(n / 6) % 6] << 8) | cube[n % 6]
 }
 export interface NativeTerminalLine { id: number; text: string; styles: TextStyle[]; wrapped?: boolean }
-export interface NativeTerminalBuffer { records: NativeTerminalLine[]; supported: boolean }
+export interface NativeTerminalBuffer { records: NativeTerminalLine[]; supported: boolean; hasOlder?: boolean; hasNewer?: boolean }
+export interface NativeBufferWindow { firstId?: number; limit: number }
+export const NATIVE_PAGE_LINES = 256
+export const NATIVE_WINDOW_LINES = 1024
 // Bound the complete local projection. Exceeding this budget uses xterm rather
 // than truncating the user's 5000-line buffer or dropping color metadata.
 export const NATIVE_BUFFER_BUDGET = 1280 * 1024
 
-export function readStyledLines(buffer: IBuffer, firstId = 1): NativeTerminalBuffer {
+export function readStyledLines(buffer: IBuffer, firstId = 1, window?: NativeBufferWindow): NativeTerminalBuffer {
   const records: NativeTerminalLine[] = []
   let size = 0
-  for (let y = 0; y < buffer.length; y++) {
+  if (window && (!Number.isSafeInteger(window.limit) || window.limit < 1
+    || (window.firstId !== undefined && !Number.isSafeInteger(window.firstId)))) return { records, supported: false }
+  const limit = window ? Math.min(window.limit, NATIVE_WINDOW_LINES) : buffer.length
+  const cursor = buffer.baseY + buffer.cursorY
+  const first = window?.firstId === undefined ? Math.max(0, Math.min(buffer.length - limit, cursor)) : window.firstId - firstId
+  const start = Math.max(0, Math.min(first, Math.max(0, buffer.length - 1)))
+  const end = Math.min(buffer.length, start + limit)
+  for (let y = start; y < end; y++) {
     const line = buffer.getLine(y)
     if (!line) continue
     let text = ''
@@ -54,14 +64,13 @@ export function readStyledLines(buffer: IBuffer, firstId = 1): NativeTerminalBuf
   }
   // Blank screen cells below the cursor are not scrollback. Interior blank
   // lines and the cursor's line remain in place.
-  const cursor = buffer.baseY + buffer.cursorY
-  while (records.length > cursor + 1 && !records.at(-1)!.text) records.pop()
-  return { records, supported: true }
+  while (start + records.length > cursor + 1 && !records.at(-1)!.text) records.pop()
+  return { records, supported: true, hasOlder: start > 0, hasNewer: end < buffer.length && end <= cursor }
 }
 
 /** A single xterm marker tracks removed head lines without comparing repeated
  * output text. Native anchors use monotonically numbered local buffer lines. */
-export function createNativeBufferProjection(term: Terminal): { read(): NativeTerminalBuffer; reset(): void; dispose(): void } {
+export function createNativeBufferProjection(term: Terminal): { read(window?: NativeBufferWindow): NativeTerminalBuffer; reset(): void; dispose(): void } {
   let marker: IMarker | undefined
   let previousLine = 0
   let firstId = 1
@@ -69,7 +78,7 @@ export function createNativeBufferProjection(term: Terminal): { read(): NativeTe
   let reflowed = false
   function reset(): void { marker?.dispose(); marker = undefined; firstId += 10000000; columns = undefined; reflowed = false }
   return {
-    read() {
+    read(window) {
       const buffer = term.buffer.active
       // Reflow changes line identities, so retain xterm for this terminal
       // until reset rather than pretending old native anchors still match.
@@ -83,7 +92,7 @@ export function createNativeBufferProjection(term: Terminal): { read(): NativeTe
       }
       previousLine = buffer.baseY + buffer.cursorY
       marker = term.registerMarker(0)
-      return readStyledLines(buffer, firstId)
+      return readStyledLines(buffer, firstId, window)
     },
     reset,
     dispose: () => { marker?.dispose(); marker = undefined }

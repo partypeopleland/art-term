@@ -1,5 +1,7 @@
 # 使用前準備
 
+0.1.26 起，新建 Shell 另需私有 tmux 3.6a 與讀頁支援檔；完成 Runtime 安裝後依[終端歷史主機準備](refarch/terminal-history.md#主機準備)設定。既有 Shell 可繼續連線。
+
 art-term 讓 Windows 電腦或 Android 手機連到 Linux 受控端，操作終端與 coding CLI。先準備以下依賴，再把下面的 prompt 貼給能操作受控端的 AI，由它讀取安裝文件並完成設定。
 
 ## 需要哪些依賴

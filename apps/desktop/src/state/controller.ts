@@ -11,6 +11,7 @@ import type {
   Transport
 } from '../transport/types'
 import type { TerminalHandle } from '../terminal/handle'
+import type { HostHistoryReply, HostHistoryRequest } from '../terminal/native'
 
 export const MAX_TABS = 32
 export const MAX_RUNTIME_PROFILES = 64
@@ -19,13 +20,20 @@ const WRITE_CAP = 256 * 1024
 const WRITE_CHUNK = 16 * 1024
 const DEFAULT_IDLE_POLL_MS = 20
 
-/** Bound and quote each POSIX word before sending to the existing remote input pipe. */
+/** Bound POSIX words; keep the Codex button inline and ordinary words unquoted. */
 export function codingCliInput(cli: CodingCli): string | null {
   if (typeof cli.command !== 'string' || !cli.command || cli.command.length > 256 || cli.command.startsWith('-') ||
       !Array.isArray(cli.args) || cli.args.length > 32) return null
-  const words = [cli.command, ...cli.args]
+  const codex = cli.id === 'codex'
+  const args = codex
+    ? ['--yolo', '--no-alt-screen', ...cli.args.filter(arg => arg !== '--yolo' && arg !== '--no-alt-screen')]
+    : cli.args
+  const words = [cli.command, ...args]
   if (words.some(w => typeof w !== 'string' || w.length > 1024 || /[\u0000-\u001f\u007f-\u009f]/u.test(w)) || words.reduce((n, w) => n + new TextEncoder().encode(w).length, 0) > 8192) return null
-  return words.map(w => "'" + w.replaceAll("'", "'\\''") + "'").join(' ') + '\r'
+  return words.map((w, index) => {
+    const plain = index === 0 ? /^(?:[A-Za-z0-9_./-]+\/)?codex$/.test(w) : /^[A-Za-z0-9_./:@%+=,-]+$/.test(w)
+    return codex && plain ? w : "'" + w.replaceAll("'", "'\\''") + "'"
+  }).join(' ') + '\r'
 }
 
 export type TabStatus = 'connecting' | 'live' | 'exited' | 'error'
@@ -93,6 +101,7 @@ export interface ControllerOptions {
 }
 
 export interface AppController {
+  historyRequest(tab: TabState, request: HostHistoryRequest): Promise<HostHistoryReply>
   catalogLoading: Ref<boolean>
   /** Saved runtime Host metadata (local protected-store snapshot only —
    *  never a session target and no credential material). */
@@ -363,6 +372,7 @@ export function createAppController(
     }
     tab.sessionId = session.id
     runtimeRecoveryAttempts.delete(tab.key)
+    runtimeRecoveryHealthySince.delete(tab.key)
     runtimeRecovery.delete(tab.key)
     tab.remoteSession = session.remoteSession
     // Every openable target is runtime-issued; there is no other transport.
@@ -460,6 +470,13 @@ export function createAppController(
           if (disposed || tab.closed || tab.sessionId !== sessionId) return
           if (!transport.runtimeAck) throw new Error('此版本無法確認遠端輸出')
           if (out.runtime.batchId !== 0) await transport.runtimeAck(sessionId, out.runtime.batchId, out.runtime.localGeneration)
+          const healthySince = runtimeRecoveryHealthySince.get(tab.key)
+          if (out.runtime.batchId !== 0 && !out.runtime.ended && healthySince !== undefined
+            && Date.now() - healthySince >= 30000
+            && !out.runtime.events.some(e => e.kind === 'gap')
+            && out.runtime.events.some(e => e.kind === 'bytes' && !e.historical && e.bytes.length > 0)) {
+            runtimeRecoveryAttempts.delete(tab.key)
+          }
         } catch (e) {
           if (!tab.closed && tab.sessionId === sessionId) {
             const conn = asConnectionError(e)
@@ -490,12 +507,12 @@ export function createAppController(
           }
           tab.status = 'error'
           tab.errorMsg = KIND_FALLBACK[reason] ?? '遠端 Shell 連線已結束'
-          if (['transport', 'timeout'].includes(reason) && (runtimeRecoveryAttempts.get(tab.key) ?? 0) < 3) {
+          if (['transport', 'timeout', 'slowConsumer'].includes(reason) && (runtimeRecoveryAttempts.get(tab.key) ?? 0) < 3) {
             runtimeRecovery.set(tab.key, sessionId)
             if (!hidden) void recoverRuntime(tab)
           } else {
             runtimeRecovery.delete(tab.key)
-            if (['transport', 'timeout'].includes(reason) && (runtimeRecoveryAttempts.get(tab.key) ?? 0) >= 3) {
+            if (['transport', 'timeout', 'slowConsumer'].includes(reason) && (runtimeRecoveryAttempts.get(tab.key) ?? 0) >= 3) {
               tab.notice = KIND_FALLBACK.retryExhausted
             }
             tab.sessionId = null
@@ -662,6 +679,7 @@ export function createAppController(
     foregroundResume.delete(tab.key)
     runtimeRecovery.delete(tab.key)
     runtimeRecoveryAttempts.delete(tab.key)
+    runtimeRecoveryHealthySince.delete(tab.key)
     if (tab.closed) return
     tab.closed = true
     tab.connectionGen++
@@ -690,6 +708,7 @@ export function createAppController(
     foregroundResume.delete(tab.key)
     runtimeRecovery.delete(tab.key)
     runtimeRecoveryAttempts.delete(tab.key)
+    runtimeRecoveryHealthySince.delete(tab.key)
     if (tab.closed) return
     tab.connectionGen++
     const sid = tab.sessionId
@@ -707,9 +726,11 @@ export function createAppController(
   const runtimeRecovery = new Map<string, string>()
   const runtimeRecovering = new Set<string>()
   const runtimeRecoveryAttempts = new Map<string, number>()
+  const runtimeRecoveryHealthySince = new Map<string, number>()
   async function recoverRuntime(tab: TabState, explicit = false): Promise<void> {
     const sessionId = runtimeRecovery.get(tab.key)
     if (!sessionId || !transport.runtimeRecover || hidden || tab.closed || disposed || runtimeRecovering.has(tab.key)) return
+    runtimeRecoveryHealthySince.delete(tab.key)
     if (explicit) runtimeRecoveryAttempts.set(tab.key, 0)
     const attempts = runtimeRecoveryAttempts.get(tab.key) ?? 0
     if (attempts >= 3) {
@@ -736,6 +757,7 @@ export function createAppController(
       tab.status = 'live'
       tab.errorMsg = ''
       tab.sessionId = sessionId
+      runtimeRecoveryHealthySince.set(tab.key, Date.now())
       if (tab.lastSize) await transport.resize(sessionId, tab.lastSize.rows, tab.lastSize.cols)
       void pollLoop(tab, sessionId)
       if (!hidden && tab.desktopEnabled) {
@@ -929,9 +951,23 @@ export function createAppController(
     }
     runtimeRecovery.clear()
     runtimeRecoveryAttempts.clear()
+    runtimeRecoveryHealthySince.clear()
   }
 
+  async function historyRequest(tab: TabState, request: HostHistoryRequest): Promise<HostHistoryReply> {
+    if (!transport.runtimeHistory || !tab.runtime || tab.closed || !tab.sessionId || disposed) return { kind: 'unsupported' }
+    const sid = tab.sessionId, generation = tab.connectionGen
+    let result: HostHistoryReply
+    try { result = await transport.runtimeHistory(sid, request) }
+    catch (error) {
+      if (asConnectionError(error)?.kind === 'busy') return { kind: 'error', error: 'busy' }
+      throw error
+    }
+    if (tab.closed || disposed || tab.sessionId !== sid || tab.connectionGen !== generation) return { kind: 'unsupported' }
+    return result
+  }
   return {
+    historyRequest,
     catalogLoading,
     runtimeProfiles,
     runtimeProfilesError,

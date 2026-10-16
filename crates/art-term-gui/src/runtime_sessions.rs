@@ -4,6 +4,7 @@ use anyhow::Context;
 use art_term_core::{
     openab::{
         api::{ApiError, SessionGrant},
+        history::{self, HistoryChannel, HistoryReply, HistoryRequest},
         profiles::HostSnapshot,
         screenshot::{self, Mode, ShellOwnership},
         secret::Secret,
@@ -78,6 +79,53 @@ struct Target {
     /// Frozen mapped-preview binding captured at issue; `None` means
     /// this target can never offer desktop preview.
     desktop: Option<RuntimeMapping>,
+    history_bootstrap: AtomicBool,
+}
+struct HistorySlot {
+    channel: HistoryChannel,
+    _permit: tokio::sync::OwnedSemaphorePermit,
+    active: Arc<Mutex<HashSet<String>>>,
+    active_key: String,
+}
+struct OpeningHistory {
+    active: Arc<Mutex<HashSet<String>>>,
+    registered: Arc<Mutex<Option<String>>>,
+    armed: bool,
+}
+impl Drop for OpeningHistory {
+    fn drop(&mut self) {
+        if self.armed {
+            if let (Ok(key), Ok(mut active)) = (self.registered.lock(), self.active.lock()) {
+                if let Some(key) = key.as_ref() { active.remove(key); }
+            }
+        }
+    }
+}
+struct HistoryOwnership {
+    owned: OwnedShells,
+    active: Arc<Mutex<HashSet<String>>>,
+    registered: Arc<Mutex<Option<String>>>,
+}
+impl ShellOwnership for HistoryOwnership {
+    fn mark(&self, name: &str) -> Result<(), SessionError> {
+        let key = format!("{}:{name}", self.owned.profile_id);
+        self.active.lock().map_err(|_| SessionError::Internal)?.insert(key.clone());
+        *self.registered.lock().map_err(|_| SessionError::Internal)? = Some(key.clone());
+        if let Err(error) = self.owned.mark(name) {
+            if let Ok(mut active) = self.active.lock() { active.remove(&key); }
+            return Err(error);
+        }
+        Ok(())
+    }
+    fn unmark(&self, name: &str) {
+        self.owned.unmark(name);
+        if let Ok(mut active) = self.active.lock() { active.remove(&format!("{}:{name}", self.owned.profile_id)); }
+    }
+}
+impl Drop for HistorySlot {
+    fn drop(&mut self) {
+        if let Ok(mut active) = self.active.lock() { active.remove(&self.active_key); }
+    }
 }
 /// Live runtime session connection state. Opaque outside this module —
 /// the frozen desktop route, enable/close fences, and live handle
@@ -97,6 +145,8 @@ pub struct Connection {
     owned_shells: Arc<Mutex<HashMap<String, HashSet<String>>>>,
     closed: AtomicBool,
     desktop_operation: tokio::sync::Mutex<()>,
+    history_binding: Option<SessionBinding>,
+    history: tokio::sync::Mutex<Option<HistorySlot>>,
 }
 #[derive(Default)]
 pub struct RuntimeSessions {
@@ -110,6 +160,9 @@ pub struct RuntimeSessions {
     /// Host profile id. Marked names are hidden from the selectable list
     /// and retried on later operations instead of being forgotten.
     owned_shells: Arc<Mutex<HashMap<String, HashSet<String>>>>,
+    history_owned: Arc<Mutex<HashMap<String, HashSet<String>>>>,
+    history_active: Arc<Mutex<HashSet<String>>>,
+    history_slots: Mutex<HashMap<String, Arc<tokio::sync::Semaphore>>>,
 }
 /// Fixed-profile adapter over `RuntimeSessions::owned_shells` for the
 /// core screenshot transport.
@@ -117,6 +170,13 @@ struct OwnedShells {
     shells: Arc<Mutex<HashMap<String, HashSet<String>>>>,
     profile_id: String,
 }
+fn shell_label(name: &str) -> String {
+    match (history::HistoryVersion::from_name(name), history::key_from_name(name)) {
+        (Some(history::HistoryVersion::Paged), Some(key)) => format!("s-{}", &key[..8]),
+        _ => name.to_owned(),
+    }
+}
+
 fn ownership_key(profile: &art_term_core::openab::profiles::HostProfile) -> String {
     format!("{}:{}:{}", profile.id, profile.revision, profile.base_url)
 }
@@ -202,7 +262,7 @@ impl RuntimeSessions {
             return Ok(TargetDto {
                 id: id.clone(),
                 host_id: binding.profile.id.clone(),
-                label: binding.name.clone(),
+                label: shell_label(&binding.name),
                 subtitle: "Runtime Shell".into(),
                 account_label: None,
                 kind: "host".into(),
@@ -224,7 +284,7 @@ impl RuntimeSessions {
         let dto = TargetDto {
             id: id.clone(),
             host_id: binding.profile.id.clone(),
-            label: binding.name.clone(),
+            label: shell_label(&binding.name),
             subtitle: "Runtime Shell".into(),
             account_label: None,
             kind: "host".into(),
@@ -239,6 +299,7 @@ impl RuntimeSessions {
                 binding,
                 grant: Mutex::new(grant),
                 desktop,
+                history_bootstrap: AtomicBool::new(false),
             }),
         );
         Ok(dto)
@@ -333,6 +394,14 @@ impl RuntimeSessions {
             return Err(SessionError::StateChanged.into());
         }
         handle.resize(rows, cols)?;
+        let history_binding = handle.binding().clone();
+        if target.history_bootstrap.swap(false, Ordering::SeqCst) {
+            let key = history::key_from_name(&history_binding.name).ok_or(SessionError::Protocol)?;
+            let version = history::HistoryVersion::from_name(&history_binding.name).ok_or(SessionError::Protocol)?;
+            // Only a target minted by the explicit new-history action can
+            // reach this once. Relist/recovery never repeats shell input.
+            handle.write(format!("exec python3 \"$HOME/.local/share/art-term/openab-pty/{}\" {key}\n", version.wrapper_script()).as_bytes())?;
+        }
         let (cancel, _) = watch::channel(false);
         let id = self.id("session");
         self.sessions
@@ -354,12 +423,14 @@ impl RuntimeSessions {
                     owned_shells: self.owned_shells.clone(),
                     closed: AtomicBool::new(false),
                     desktop_operation: tokio::sync::Mutex::new(()),
+                    history_binding: Some(history_binding),
+                    history: tokio::sync::Mutex::new(None),
                 }),
             );
         Ok(SessionDto {
             id,
             target_id: target_id.into(),
-            label: target.binding.name.clone(),
+            label: shell_label(&target.binding.name),
             remote_session: format!("openab:{}", target.binding.name),
         })
     }
@@ -717,6 +788,75 @@ impl RuntimeSessions {
                 .unwrap_or(0),
         })
     }
+    pub async fn history_request(&self, hosts: &RuntimeHosts, id: &str, request: HistoryRequest) -> Reply<HistoryReply> {
+        let conn = self.connection(id)?;
+        let Some(binding) = conn.history_binding.as_ref() else { return Ok(HistoryReply::Unsupported) };
+        let Some(key) = history::key_from_name(&binding.name) else { return Ok(HistoryReply::Unsupported) };
+        let version = history::HistoryVersion::from_name(&binding.name).ok_or(SessionError::Protocol)?;
+        let mut slot = conn.history.try_lock().map_err(|_| SessionError::Busy)?;
+        if matches!(request, HistoryRequest::Close) {
+            if let Some(mut owned) = slot.take() { owned.channel.close().await; }
+            return Ok(HistoryReply::Unsupported);
+        }
+        if conn.closed.load(Ordering::SeqCst) { return Err(SessionError::Cancelled.into()) }
+        if slot.is_none() && !matches!(request, HistoryRequest::Viewport) {
+            return Ok(HistoryReply::Error { error: "expired".into() });
+        }
+        // The frozen profile stays available while recovery temporarily takes
+        // the work handle. Such a pause is retryable, never a new binding.
+        if conn.handle.lock().map_err(|_| SessionError::Internal)?.is_none() { return Err(SessionError::Busy.into()) }
+        let store = hosts.store().map_err(SessionError::from)?;
+        if !store.is_current(&binding.profile).map_err(SessionError::from)? { return Err(SessionError::StateChanged.into()) }
+        let snapshot = store.snapshot(&binding.profile.id).map_err(SessionError::from)?;
+        if snapshot.profile != binding.profile { return Err(SessionError::StateChanged.into()) }
+        let mut cancel = conn.cancel.subscribe();
+        let operation = async {
+            if slot.is_none() {
+                let host_key = ownership_key(&binding.profile);
+                let semaphore = {
+                    let mut slots = self.history_slots.lock().map_err(|_| SessionError::Internal)?;
+                    if slots.len() >= 512 && !slots.contains_key(&host_key) { return Err(SessionError::Capacity) }
+                    slots.entry(host_key.clone()).or_insert_with(|| Arc::new(tokio::sync::Semaphore::new(2))).clone()
+                };
+                let permit = semaphore.try_acquire_owned().map_err(|_| SessionError::Capacity)?;
+                let mut opening = OpeningHistory { active: self.history_active.clone(), registered: Arc::new(Mutex::new(None)), armed: true };
+                let ownership = Arc::new(HistoryOwnership {
+                    owned: OwnedShells { shells: self.history_owned.clone(), profile_id: host_key.clone() },
+                    active: self.history_active.clone(), registered: opening.registered.clone(),
+                });
+                let pending = self.history_owned.lock().map_err(|_| SessionError::Internal)?.get(&host_key).cloned().unwrap_or_default();
+                let active = self.history_active.lock().map_err(|_| SessionError::Internal)?.clone();
+                let api = hosts.admin().map_err(SessionError::from)?;
+                for name in pending.into_iter().filter(|name| !active.contains(&format!("{host_key}:{name}"))).take(4) {
+                    if matches!(tokio::time::timeout(std::time::Duration::from_secs(2), api.delete(&snapshot, &name)).await,
+                        Ok(Ok(())) | Ok(Err(ApiError::SessionMissing))) { ownership.unmark(&name); }
+                }
+                let channel = HistoryChannel::open(api, snapshot, &key, version, ownership, |binding, token, since, generation| {
+                    hosts.attach_token(binding, token, since, generation)
+                }).await?;
+                let active_key = format!("{host_key}:{}", channel.helper_name());
+                self.history_active.lock().map_err(|_| SessionError::Internal)?.insert(active_key.clone());
+                *slot = Some(HistorySlot { channel, _permit: permit, active: self.history_active.clone(), active_key });
+                opening.armed = false;
+            }
+            slot.as_mut().ok_or(SessionError::Internal)?.channel.request(request).await
+        };
+        let result = tokio::select! { biased;
+            _ = cancel.changed() => Err(SessionError::Cancelled),
+            result = operation => result,
+        };
+        let current = !conn.closed.load(Ordering::SeqCst) && store.is_current(&binding.profile).map_err(SessionError::from)?;
+        if result.is_err() || !current {
+            if let Some(mut owned) = slot.take() { owned.channel.close().await; }
+        }
+        if !current { return Err(SessionError::StateChanged.into()) }
+        match result {
+            Ok(HistoryReply::Unsupported) => Ok(HistoryReply::Error { error: "unsupported".into() }),
+            Err(SessionError::Missing) => Ok(HistoryReply::Error { error: "unavailable".into() }),
+            Err(SessionError::UpgradeRequired) => Ok(HistoryReply::Error { error: "unsupported".into() }),
+            other => other.map_err(Into::into),
+        }
+    }
     pub async fn close(&self, id: &str) -> Reply<()> {
         let connection = self
             .sessions
@@ -732,6 +872,7 @@ impl RuntimeSessions {
                 .preview_cancel
                 .send_modify(|n| *n = n.wrapping_add(1));
             connection.cancel.send_replace(true);
+            if let Some(mut history) = connection.history.lock().await.take() { history.channel.close().await; }
             let handle = connection
                 .handle
                 .lock()
@@ -764,6 +905,7 @@ impl RuntimeSessions {
                 .preview_cancel
                 .send_modify(|n| *n = n.wrapping_add(1));
             connection.cancel.send_replace(true);
+            if let Some(mut history) = connection.history.lock().await.take() { history.channel.close().await; }
             let handle = connection.handle.lock().ok().and_then(|mut h| h.take());
             if let Some(handle) = handle {
                 tasks.spawn(handle.shutdown());
@@ -841,6 +983,8 @@ pub async fn gui_runtime_sessions(
                 .map_err(|_| ApiError::Storage)?
                 .get(&ownership_key(&snapshot.profile))
                 .is_some_and(|names| names.contains(&item.name))
+            && !sessions.history_owned.lock().map_err(|_| ApiError::Storage)?
+                .get(&ownership_key(&snapshot.profile)).is_some_and(|names| names.contains(&item.name))
         {
             let binding = SessionBinding::from_list(snapshot.profile.clone(), &list, &item.name)?;
             targets.push(sessions.issue(binding, None, item.attached, mapping.clone())?);
@@ -889,6 +1033,31 @@ pub async fn gui_runtime_create_session(
     sessions
         .issue(binding, Some(grant), false, mapping)
         .map_err(Into::into)
+}
+#[tauri::command]
+pub async fn gui_runtime_create_history_session(
+    hosts: State<'_, Arc<RuntimeHosts>>,
+    sessions: State<'_, Arc<RuntimeSessions>>,
+    preview: State<'_, Arc<dyn RuntimePreview>>,
+    id: String,
+    expected_revision: u64,
+) -> Result<TargetDto, HostError> {
+    let native_sessions = sessions.inner().clone();
+    let raw = uuid::Uuid::new_v4().simple().to_string();
+    let name = format!("th2-{}", &raw[..24]);
+    let target = gui_runtime_create_session(hosts, sessions, preview, id, expected_revision, name).await?;
+    let targets = native_sessions.targets.lock().map_err(|_| ApiError::Storage)?;
+    targets.get(&target.id).ok_or(ApiError::StateChanged)?.history_bootstrap.store(true, Ordering::SeqCst);
+    Ok(target)
+}
+#[tauri::command]
+pub async fn gui_runtime_history(
+    hosts: State<'_, Arc<RuntimeHosts>>,
+    sessions: State<'_, Arc<RuntimeSessions>>,
+    session_id: String,
+    request: HistoryRequest,
+) -> Reply<HistoryReply> {
+    sessions.history_request(&hosts, &session_id, request).await
 }
 #[tauri::command]
 pub async fn gui_runtime_ack(
@@ -1070,6 +1239,8 @@ mod tests {
                 owned_shells: Arc::default(),
                 closed: AtomicBool::new(false),
                 desktop_operation: tokio::sync::Mutex::new(()),
+                history_binding: None,
+                history: tokio::sync::Mutex::new(None),
             }),
         );
         id

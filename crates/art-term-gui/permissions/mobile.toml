@@ -1,4 +1,4 @@
 [[permission]]
 identifier = "allow-mobile"
 description = "Runtime Host sessions and local session operations."
-commands.allow = ["gui_transfer_export", "gui_transfer_pick_import", "gui_transfer_unlock", "gui_transfer_apply", "gui_transfer_cancel", "gui_platform", "mobile_open", "mobile_poll", "mobile_write", "mobile_resize", "mobile_close", "mobile_desktop", "mobile_screenshot", "gui_runtime_hosts", "gui_runtime_save_host", "gui_runtime_delete_host", "gui_runtime_test_host", "gui_runtime_sessions", "gui_runtime_create_session", "gui_runtime_ack", "gui_runtime_recover"]
+commands.allow = ["gui_transfer_export", "gui_transfer_pick_import", "gui_transfer_unlock", "gui_transfer_apply", "gui_transfer_cancel", "gui_platform", "mobile_open", "mobile_poll", "mobile_write", "mobile_resize", "mobile_close", "mobile_desktop", "mobile_screenshot", "gui_runtime_hosts", "gui_runtime_save_host", "gui_runtime_delete_host", "gui_runtime_test_host", "gui_runtime_sessions", "gui_runtime_create_session", "gui_runtime_create_history_session", "gui_runtime_history", "gui_runtime_ack", "gui_runtime_recover"]

@@ -1302,3 +1302,129 @@ fn single_toml_external_changes_refuse_stale_operations() {
         }
     }
 }
+
+#[tokio::test]
+async fn native_wss_large_history_replay_waits_for_renderer_without_losing_bytes() {
+    large_output_waits_for_renderer(true).await;
+}
+#[tokio::test]
+async fn native_wss_live_resume_burst_waits_for_renderer_without_losing_bytes() {
+    large_output_waits_for_renderer(false).await;
+}
+async fn large_output_waits_for_renderer(historic: bool) {
+    use super::session::SessionHandle;
+    use tokio_tungstenite::tungstenite::Message;
+    let identity = tls_identity("127.0.0.1", false);
+    let ca = identity.ca_der.clone();
+    let chunk = vec![b'x'; 64 * 1024];
+    let total = chunk.len() * 64;
+    let mut messages = vec![wss_notice(if historic { total as u64 } else { 0 })];
+    messages.extend((0..64).map(|_| Message::Binary(chunk.clone())));
+    let (origin, task) = wss_fixture(identity, messages, 0).await;
+    let handle = SessionHandle::tls_fixture_attach(tls_snapshot(origin), wss_grant(), 0, 1, &ca)
+        .await
+        .unwrap();
+    // The WebView is not mounted yet. Replay must wait instead of ending.
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    handle.write(b"explicit-live-input").unwrap();
+    let mut received = 0;
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while received < total {
+            let batch = handle.poll().unwrap();
+            assert!(
+                batch.ended.is_none(),
+                "history replay ended: {:?}",
+                batch.ended
+            );
+            for event in batch.events {
+                if let super::session::OutputEvent::Bytes {
+                    bytes,
+                    start,
+                    end,
+                    historical,
+                } = event
+                {
+                    assert_eq!(historical, historic);
+                    assert_eq!(start, received as u64);
+                    assert!(bytes.iter().all(|b| *b == b'x'));
+                    received += bytes.len();
+                    assert_eq!(end, received as u64);
+                }
+            }
+            if batch.batch_id != 0 {
+                handle.ack(batch.batch_id, batch.local_generation).unwrap();
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("bounded replay must finish");
+    assert_eq!(received, total);
+    assert_eq!(handle.rendered_cursor().unwrap(), total as u64);
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    handle.shutdown().await;
+    let input = task.await.unwrap();
+    let sent: Vec<_> = input
+        .iter()
+        .filter_map(|m| {
+            if let Message::Binary(b) = m {
+                Some(b.as_slice())
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(
+        sent,
+        vec![b"explicit-live-input".as_slice()],
+        "only current explicit input may be sent while output is paused"
+    );
+}
+
+#[test]
+fn newer_connection_document_preserves_inactive_desktops_through_host_edits() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("connections.toml");
+    let store = HostStore::load(path.clone(), Arc::new(FixtureCipher)).unwrap();
+    let host = store
+        .add("Existing".into(), "https://example.test/".into(), secret())
+        .unwrap();
+    drop(store);
+    let mut document: toml::Value =
+        toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let desktops: toml::Value = toml::from_str("desktops = [{ id = 'saved-desktop', revision = 7, name = 'Saved', mcpUrl = 'https://desktop.test/mcp', tokenPresent = true, token_ciphertext = [77, 88], extra = { keep = 'untouched' } }]").unwrap();
+    document["schema_version"] = toml::Value::Integer(6);
+    document
+        .as_table_mut()
+        .unwrap()
+        .insert("desktops".into(), desktops["desktops"].clone());
+    std::fs::write(&path, toml::to_string(&document).unwrap()).unwrap();
+    let store = HostStore::load(path.clone(), Arc::new(FixtureCipher)).unwrap();
+    assert_eq!(store.list().unwrap(), vec![host.clone()]);
+    assert_eq!(
+        store.snapshot(&host.id).unwrap().credential.expose(),
+        secret().expose()
+    );
+    let edited = store
+        .update(
+            &host.id,
+            host.revision,
+            "Renamed".into(),
+            host.base_url.clone(),
+            None,
+        )
+        .unwrap();
+    let added = store
+        .add("Second".into(), "https://second.test/".into(), secret())
+        .unwrap();
+    store.delete(&edited.id, edited.revision).unwrap();
+    store.delete(&added.id, added.revision).unwrap();
+    let saved: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(saved["schema_version"].as_integer(), Some(6));
+    assert_eq!(saved["desktops"], desktops["desktops"]);
+    assert!(HostStore::load(path, Arc::new(FixtureCipher))
+        .unwrap()
+        .list()
+        .unwrap()
+        .is_empty());
+}

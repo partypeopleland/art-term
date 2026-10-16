@@ -13,7 +13,7 @@ from device import Device, ROOT, PACKAGE, require, wait
 
 
 class LinuxEmulator(Device):
-    def __init__(self, sdk, run):
+    def __init__(self, sdk, run, *, hardware_keyboard=True):
         self.sdk, self.run = Path(sdk).resolve(), Path(run).resolve()
         require(self.run.is_relative_to((ROOT / 'target/android-regression').resolve()), 'AVD must be under test target')
         self.run.mkdir(parents=True, exist_ok=False, mode=0o700)
@@ -28,6 +28,7 @@ class LinuxEmulator(Device):
         self.process = None
         self.verified = False
         self.log = None
+        self.hardware_keyboard = hardware_keyboard
         # Console and ADB ports must both be free.
         for port in range(5580, 5680, 2):
             holders = []
@@ -60,7 +61,7 @@ class LinuxEmulator(Device):
         (self.run/'avd-create.log').write_bytes(result.stdout + result.stderr)
         require(result.returncode == 0, 'AVD creation failed; see avd-create.log')
         config = self.avd/'config.ini'
-        values = {'hw.keyboard':'yes', 'hw.lcd.width':'412', 'hw.lcd.height':'915', 'hw.lcd.density':'160'}
+        values = {'hw.keyboard':'yes' if self.hardware_keyboard else 'no', 'hw.lcd.width':'412', 'hw.lcd.height':'915', 'hw.lcd.density':'160'}
         text = config.read_text()
         for key, value in values.items():
             text = re.sub(r'(?m)^'+re.escape(key)+r'=.*\n?', '', text) + f'\n{key}={value}\n'

@@ -104,6 +104,21 @@ describe('shared App with runtime profiles (no Tauri)', () => {
       expect(transport.sessions.get(sid)!.writes).toHaveLength(1)
     } finally { m.wrapper.unmount() }
   })
+  it('sends the inline Codex command once from the header button', async () => {
+    const transport = new FakeTransport()
+    const target = { ...AGENTS.targets[0], codingCli: { id: 'codex', name: 'CODEX', command: 'codex', args: ['--yolo'] } }
+    const m = mountApp(transport)
+    try {
+      await flush()
+      m.controller.openTarget({ dto: makeHost('hana', [target]), expanded: true }, target, false)
+      await flush()
+      const sid = m.controller.tabs[0].sessionId!
+      expect(transport.sessions.get(sid)!.writes).toEqual([])
+      await m.wrapper.find('[data-testid="launch-coding-cli"]').trigger('click'); await flush()
+      expect(transport.sessions.get(sid)!.writes.map(b => new TextDecoder().decode(Uint8Array.from(b))))
+        .toEqual(['codex --yolo --no-alt-screen\r'])
+    } finally { m.wrapper.unmount() }
+  })
   beforeEach(() => {
     document.body.innerHTML = ''
   })

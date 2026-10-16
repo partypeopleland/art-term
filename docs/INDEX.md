@@ -9,6 +9,7 @@
 | 模組責任、信任邊界、資料流 | [架構](refarch/architecture.md) |
 | 唯一 TOML、欄位、能力、舊版相容 | [連線設定](refarch/connections.md) |
 | Host／Agent 分類、Shell 選擇、ACK、重連 | [連線與工作生命週期](refarch/sessions.md) |
+| tmux 保存歷史、上捲分頁、主機支援檔 | [終端歷史](refarch/terminal-history.md) |
 | 匯出／匯入、加密格式、新裝置還原 | [連線搬移](refarch/connection-transfer.md) |
 | DPAPI／Keystore、金鑰遺失、保存與清理 | [憑證與檔案](refarch/credential-storage.md) |
 | App 共享桌面預覽與 binding | [桌面](refarch/desktop.md) |
@@ -28,7 +29,7 @@
 | 原生 Runtime 邊界的決策理由 | [ADR-001](adr/ADR-001-client-boundaries.md) |
 | Android 語音輸入現況、決策與待觀察事項 | [BDR-001](bdr/BDR-001-android-voice-input.md) |
 | 未排程候選及保護條件 | [BDR-002](bdr/BDR-002-future-directions.md) |
-| 版本差異、遷移與本版驗證限制 | [0.1.25 release note](report/0.1.25.md)（前一版紀錄 [0.1.24](report/0.1.24.md)） |
+| 版本差異、遷移與本版驗證限制 | [0.1.26 release note](report/0.1.26.md)（前一版紀錄 [0.1.25](report/0.1.25.md)） |
 | 文件寫法、拆篇與載入原則 | [文件規則](steering/documentation.md) |
 | 第三方散布義務 | [第三方說明](third-party-notices.md) |
 

@@ -214,6 +214,8 @@ pub fn run() {
             crate::runtime_hosts::gui_runtime_test_host,
             crate::runtime_sessions::gui_runtime_sessions,
             crate::runtime_sessions::gui_runtime_create_session,
+            crate::runtime_sessions::gui_runtime_create_history_session,
+            crate::runtime_sessions::gui_runtime_history,
             crate::runtime_sessions::gui_runtime_ack,
             crate::runtime_sessions::gui_runtime_recover,
         ])

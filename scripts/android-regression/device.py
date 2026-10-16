@@ -28,6 +28,16 @@ def wait(predicate, seconds=20):
     raise RuntimeError('bounded wait expired')
 
 
+def runtime_work_name(app, previous=None):
+    # Observe the real native binding, independently of its short UI label.
+    def selected():
+        value = app.evaluate('window.__scrollTest.opens.at(-1)?.remoteSession')
+        return value if value and value != 'openab:' + (previous or '') else None
+    remote = wait(selected)
+    require(remote.startswith('openab:'), 'native Runtime binding missing')
+    return remote.removeprefix('openab:')
+
+
 class Device:
     def __init__(self, adb, serial, manifest):
         self.adb = Path(adb).resolve(strict=True)

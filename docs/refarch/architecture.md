@@ -51,6 +51,24 @@ Runtime output -> WSS binding -> bounded queue -> xterm parse
 
 核心同時提供共用尺寸／大小界限及 PNG／JPEG 驗證。桌面使用同一 Runtime 中由 App 建立的暫時 Shell 呼叫 Host helper，JSON 與圖片經該 Shell 的 WSS 回傳；Runtime 只傳送終端資料，不提供自訂桌面 API。這是共享畫面，並非每個 Shell 的獨立桌面；其責任與準備方式見 [桌面](desktop.md)及 [桌面 helper](runtime-desktop.md)。
 
+## tmux 保存工作與按需讀頁
+
+新建 Shell 由 App 的單一「建立並連線」入口啟動主機私有 tmux。Runtime 繼續負責 HTTPS／WSS、工作 token 與即時輸入輸出；tmux 負責保存終端畫面、原生換行與有限歷史。讀頁輔助程序透過同一 Runtime 的獨立短命 Shell 回傳指定範圍，沒有新增伺服器 API。
+
+```text
+App --create--> Runtime work Shell --wrapper--> private tmux work pane
+ |                   |                              |
+ |<-- live WSS ------+                              | native history in RAM
+ |                                                  |
+ +-- viewport / older request --> Runtime helper ----+
+ |                                      | native copy-mode backing grid
+ +<-- bounded rows / epoch --------------+ capture requested rows only
+ |
+ Android native reader: viewport first, upward gesture -> older page
+```
+
+每個工作使用自己的 socket，tmux 與系統版本並存。輔助程序最多維持兩份 tmux 原生閱讀快照；首次只讀當前畫面，上捲才最多取得 256 行，App 閱讀窗口最多 1024 行。歷史版面與軟換行由 tmux 提供，輔助程序不先擷取完整歷史再切頁。畫面確認已顯示後才釋放舊快照，前插舊頁與新輸出均保留閱讀位置。生命週期、限制與主機準備見[終端歷史](terminal-history.md)。
+
 ## 平台層負責什麼
 
 Windows 使用目前使用者的 DPAPI 保護管理憑證，Android 使用既有 operator Keystore；共用 CredentialContext 維持憑證與設定身分的綁定。唯一 TOML 的原子保存、外部修改核對與舊格式相容由 HostStore 負責，見 [設定](connections.md)與 [憑證保存](credential-storage.md)。保留的 bootstrap 模組僅供舊測試相容，正式啟動不呼叫，私有 seed 建置會被拒絕。

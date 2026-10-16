@@ -25,6 +25,7 @@ use tokio_tungstenite::{
 };
 
 const OUTPUT_BYTES: usize = 512 * 1024;
+const SOCKET_BYTES: usize = 256 * 1024;
 const OUTPUT_EVENTS: usize = 128;
 const POLL_BYTES: usize = 64 * 1024;
 const INPUT_BYTES: usize = 256 * 1024;
@@ -488,8 +489,8 @@ impl SessionHandle {
             task: Some(task),
         })
     }
-    /// Dedicated preview uses bounded backpressure instead of renderer speed failure.
-    /// Work terminals retain their existing SlowConsumer behavior.
+    /// Compatibility switch retained for callers; every terminal now uses
+    /// bounded output backpressure, including work terminals.
     pub fn preview_flow(&self) {
         self.preview_flow.store(true, Ordering::SeqCst);
     }
@@ -594,7 +595,6 @@ impl SessionHandle {
         })
     }
     pub fn ack(&self, batch_id: u64, local_generation: u64) -> Result<(), SessionError> {
-        self.output_drained.notify_one();
         if local_generation != self.local_generation {
             return Err(SessionError::StateChanged);
         }
@@ -607,6 +607,8 @@ impl SessionHandle {
         }
         q.acknowledged = cursor;
         q.pending = None;
+        drop(q);
+        self.output_drained.notify_one();
         Ok(())
     }
     pub fn write(&self, bytes: &[u8]) -> Result<(), SessionError> {
@@ -779,8 +781,8 @@ async fn connect(
         .headers_mut()
         .insert(tungstenite::http::header::AUTHORIZATION, header);
     let mut config = WebSocketConfig::default();
-    config.max_message_size = Some(256 * 1024);
-    config.max_frame_size = Some(256 * 1024);
+    config.max_message_size = Some(SOCKET_BYTES);
+    config.max_frame_size = Some(SOCKET_BYTES);
     config.max_write_buffer_size = 512 * 1024;
     let (socket, response) = tokio::time::timeout(
         Duration::from_secs(10),
@@ -800,36 +802,22 @@ async fn owner(
     shared: Arc<Mutex<Shared>>,
     mut commands: mpsc::Receiver<Command>,
     mut cancel: watch::Receiver<bool>,
-    preview_flow: Arc<std::sync::atomic::AtomicBool>,
+    _preview_flow: Arc<std::sync::atomic::AtomicBool>,
     output_ready: Arc<tokio::sync::Notify>,
     output_drained: Arc<tokio::sync::Notify>,
 ) {
     let mut sent_input = false;
     let result:Result<(),SessionError>=async {
         loop {
+            // Reserve capacity for a whole allowed WebSocket message (which
+            // can split into historical/live events). Keep commands and cancel
+            // responsive while renderer ACKs release bounded output capacity.
+            let paused = {
+                let q = shared.lock().map_err(|_| SessionError::Internal)?;
+                q.pending.is_some() || q.bytes > OUTPUT_BYTES - SOCKET_BYTES || q.events.len() > OUTPUT_EVENTS - 2
+            };
             tokio::select!{ biased;
                 _=cancel.changed()=>{let _=tokio::time::timeout(Duration::from_millis(250),socket.send(Message::Text("{\"v\":1,\"type\":\"detach\"}".into()))).await;let _=tokio::time::timeout(Duration::from_millis(250),socket.close(None)).await;return Err(SessionError::Cancelled)}
-                message=socket.next()=>{
-                    let message=message.ok_or(SessionError::Transport)?.map_err(ws_error)?;
-                    let events=match message {
-                        Message::Binary(bytes)=>tracker.bytes(bytes)?,
-                        Message::Text(text)=>{if text.len()>8192{return Err(SessionError::Protocol)}let control:Control=serde_json::from_str(&text).map_err(|_|SessionError::Protocol)?;if control.v!=1{return Err(SessionError::Protocol)}
-                            match control.kind.as_str(){"gap"=>{let dropped=control.bytes_dropped.ok_or(SessionError::Protocol)?;tracker.pre_gap(dropped)?;vec![OutputEvent::Gap{bytes_dropped:dropped,resume_offset:tracker.next}]},"ttl-warning"=>vec![OutputEvent::TtlWarning{seconds_remaining:control.seconds_remaining.ok_or(SessionError::Protocol)?,absolute:control.absolute.ok_or(SessionError::Protocol)?}],"pong"=>Vec::new(),"shutting-down"=>return Err(SessionError::Replacement),_=>return Err(SessionError::Protocol)}},
-                        Message::Close(frame)=>return Err(frame.map(|f|close_error(f.code.into())).unwrap_or(SessionError::Transport)),
-                        Message::Ping(payload)=>{tokio::time::timeout(Duration::from_secs(2),socket.send(Message::Pong(payload))).await.map_err(|_|SessionError::Timeout)?.map_err(ws_error)?;Vec::new()},Message::Pong(_)=>Vec::new(),_=>return Err(SessionError::Protocol)};
-                    for event in events {
-                        if preview_flow.load(Ordering::SeqCst) {
-                            loop {
-                                let full = { let q = shared.lock().map_err(|_|SessionError::Internal)?; q.bytes.saturating_add(match &event { OutputEvent::Bytes { bytes, .. } => bytes.len(), _ => 0 }) > OUTPUT_BYTES || q.events.len() >= OUTPUT_EVENTS };
-                                if !full { break; }
-                                tokio::select! { _ = cancel.changed() => return Err(SessionError::Cancelled), _ = output_drained.notified() => {} }
-                            }
-                        }
-                        shared.lock().map_err(|_|SessionError::Internal)?.push(event)?;
-                        output_ready.notify_one();
-                    }
-                    tokio::task::yield_now().await;
-                }
                 command=commands.recv()=>{
                     let Some(command)=command else{return Err(SessionError::Cancelled)};
                     let message=match &command {Command::Input(input)=>Message::Binary(input.bytes.clone()),Command::Resize(rows,cols)=>Message::Text(serde_json::json!({"v":1,"type":"resize","rows":rows,"cols":cols}).to_string()),Command::Ping=>Message::Text("{\"v\":1,\"type\":\"ping\"}".into())};
@@ -838,6 +826,22 @@ async fn owner(
                     result.map_err(|_|SessionError::Timeout)?.map_err(ws_error)?;
                     if matches!(command,Command::Input(_)){sent_input=true;}
                 }
+                _=output_drained.notified(), if paused => {}
+                message=socket.next(), if !paused =>{
+                    let message=message.ok_or(SessionError::Transport)?.map_err(ws_error)?;
+                    let events=match message {
+                        Message::Binary(bytes)=>tracker.bytes(bytes)?,
+                        Message::Text(text)=>{if text.len()>8192{return Err(SessionError::Protocol)}let control:Control=serde_json::from_str(&text).map_err(|_|SessionError::Protocol)?;if control.v!=1{return Err(SessionError::Protocol)}
+                            match control.kind.as_str(){"gap"=>{let dropped=control.bytes_dropped.ok_or(SessionError::Protocol)?;tracker.pre_gap(dropped)?;vec![OutputEvent::Gap{bytes_dropped:dropped,resume_offset:tracker.next}]},"ttl-warning"=>vec![OutputEvent::TtlWarning{seconds_remaining:control.seconds_remaining.ok_or(SessionError::Protocol)?,absolute:control.absolute.ok_or(SessionError::Protocol)?}],"pong"=>Vec::new(),"shutting-down"=>return Err(SessionError::Replacement),_=>return Err(SessionError::Protocol)}},
+                        Message::Close(frame)=>return Err(frame.map(|f|close_error(f.code.into())).unwrap_or(SessionError::Transport)),
+                        Message::Ping(payload)=>{tokio::time::timeout(Duration::from_secs(2),socket.send(Message::Pong(payload))).await.map_err(|_|SessionError::Timeout)?.map_err(ws_error)?;Vec::new()},Message::Pong(_)=>Vec::new(),_=>return Err(SessionError::Protocol)};
+                    for event in events {
+                        shared.lock().map_err(|_|SessionError::Internal)?.push(event)?;
+                        output_ready.notify_one();
+                    }
+                    tokio::task::yield_now().await;
+                }
+
             }
         }
     }.await;

@@ -55,7 +55,8 @@ function runtimeTransport(store: RuntimeHostDto[]) {
     }),
     runtimeTestHost: vi.fn(async () => ({ sessionCount: 0, draining: false, teardownBestEffort: true, continuityVerified: false })),
     runtimeSessions: vi.fn(async () => sessionGroup),
-    runtimeCreateSession: vi.fn(async () => issuedTarget)
+    runtimeCreateSession: vi.fn(async () => issuedTarget),
+    runtimeCreateHistorySession: vi.fn(async () => issuedTarget)
   })
 }
 
@@ -260,12 +261,11 @@ describe('saved runtime Computers in the shared catalog', () => {
   it('backgrounding the dialog prevents a late create from connecting', async () => {
     const transport = runtimeTransport([profile])
     const pending = deferred<TargetDto>()
-    transport.runtimeCreateSession.mockReturnValueOnce(pending.promise)
+    transport.runtimeCreateHistorySession.mockReturnValueOnce(pending.promise)
     const { wrapper, transport: t } = mountApp(transport)
     await flush()
     await wrapper.get('[data-runtime-label="nuc"]').trigger('click')
     await flush()
-    await wrapper.get('.runtime-sessions input').setValue('new-shell')
     await wrapper.get('.runtime-sessions form').trigger('submit')
     await flush()
     setVisibility(true)
@@ -276,7 +276,7 @@ describe('saved runtime Computers in the shared catalog', () => {
     setVisibility(false)
     await flush()
     expect(t.openCalls).toEqual([])
-    expect(t.runtimeCreateSession).toHaveBeenCalledExactlyOnceWith(profile.id, 7, 'new-shell')
+    expect(t.runtimeCreateHistorySession).toHaveBeenCalledExactlyOnceWith(profile.id, 7)
   })
 
   it('closing the dialog via the return button clears the selection only', async () => {
@@ -308,7 +308,8 @@ describe('mobile shared runtime catalog entries', () => {
       runtimeDeleteHost: vi.fn(async () => {}),
       runtimeTestHost: vi.fn(async () => ({ sessionCount: 0, draining: false, teardownBestEffort: true, continuityVerified: false })),
       runtimeSessions: vi.fn(async () => sessionGroup),
-      runtimeCreateSession: vi.fn(async () => issuedTarget)
+      runtimeCreateSession: vi.fn(async () => issuedTarget),
+    runtimeCreateHistorySession: vi.fn(async () => issuedTarget)
     })
   }
 

@@ -3,6 +3,7 @@ import { inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import NativeTerminalReader from './NativeTerminalReader.vue'
 import { NativeHistoryKey } from '../terminal/native'
 import type { AppController, TabState } from '../state/controller'
+import type { HostHistoryRequest } from '../terminal/native'
 import { TerminalFactoryKey, createDesktopXtermTerminal } from '../terminal/handle'
 
 const props = defineProps<{
@@ -17,6 +18,8 @@ const nativeReader = inject(NativeHistoryKey, null) !== null
 const factory = inject(TerminalFactoryKey, createDesktopXtermTerminal)
 let observer: ResizeObserver | null = null
 let disposed = false
+const historyRequest = (request: HostHistoryRequest) => props.controller.historyRequest(props.tab, request)
+const historyNotice = (text: string) => { if (!props.tab.closed) props.tab.notice = text }
 
 function fitAndReport(): void {
   const term = props.tab.term
@@ -63,6 +66,7 @@ onBeforeUnmount(() => {
     <div ref="el" class="term-host" />
     <NativeTerminalReader v-if="nativeReader && active && tab.status === 'live'"
       :key="tab.sessionId ?? tab.key" :terminal="tab.term"
+      :history-request="tab.runtime ? historyRequest : undefined" :history-notice="historyNotice"
       :visible="active && readerVisible !== false" />
     <div v-if="tab.status === 'connecting'" class="overlay">
       <span>連線中…</span>

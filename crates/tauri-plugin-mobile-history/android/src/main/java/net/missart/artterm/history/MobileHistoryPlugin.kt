@@ -54,6 +54,8 @@ class ReaderArgs {
     var readerId: String = ""
     var records: Array<RecordArgs> = emptyArray()
     var visible: Boolean = true
+    var followLatest: Boolean = true
+    var sourceEpoch: String? = null
     var bounds: BoundsArgs? = null
 }
 
@@ -73,9 +75,14 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
     private var adjusting = false
     private var dragging = false
     private var moving = false
+    private var userGesture = false
+    private var userViewportPending = false
     private var pageVisible = false
     private var epoch = 0
     private var pending: ReaderArgs? = null
+    private var layoutPending = false
+    private var layoutAnchor: Anchor? = null
+    private var layoutBottom = false
     private var pendingDraw: Pair<View, ViewTreeObserver.OnPreDrawListener>? = null
     private data class Link(val start: Int, val end: Int, val url: String)
     private data class Press(val link: Link?, val x: Float, val y: Float, val time: Long)
@@ -129,9 +136,31 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
     private data class Anchor(val id: Long, val character: Int, val pixel: Int)
+    private var sourceEpoch: String? = null
+    private var pendingAnchor: Anchor? = null
+    private var pendingFollow = false
+    private var pendingSourceEpoch: String? = null
+    private var committedPage: ReaderArgs? = null
+    private var gestureStartY = 0
+    private var gestureTouchY = 0f
+    private var upwardIntent = false
     private val settled = Runnable {
         if (!dragging) {
             moving = false
+            userGesture = false
+            if (userViewportPending) {
+                userViewportPending = false
+                anchor()?.let { a -> send("viewport") {
+                    put("anchorId", a.id)
+                    put("anchorCharacter", a.character)
+                    put("anchorPixel", a.pixel)
+                    put("firstId", starts.keys.firstOrNull())
+                    put("lastId", starts.keys.lastOrNull())
+                    put("atBottom", atBottom())
+                    put("nearTop", (scroll?.scrollY ?: 0) <= dp(64) && (upwardIntent || (scroll?.scrollY ?: 0) < gestureStartY))
+                    put("nearBottom", (text?.height ?: 0) - (scroll?.height ?: 0) - (scroll?.scrollY ?: 0) <= dp(64))
+                } }
+            }
             val page = pending
             pending = null
             if (page != null) applyPage(page)
@@ -159,7 +188,7 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
     private fun dp(value: Int) = (value * activity.resources.displayMetrics.density).toInt()
     private fun send(kind: String, id: String = readerId, fill: JSObject.() -> Unit = {}) {
         if (id.isEmpty()) return
-        trigger("history", JSObject().apply { put("readerId", id); put("kind", kind); fill() })
+        trigger("history", JSObject().apply { put("readerId", id); put("kind", kind); sourceEpoch?.let { put("sourceEpoch", it) }; fill() })
     }
     private fun anchor(): Anchor? {
         val s = scroll ?: return null
@@ -188,7 +217,10 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
         root = null; scroll = null; text = null
         starts.clear(); renderedStyles = emptyList(); readerId = ""; pending = null
         links = emptyList(); press = null
-        dragging = false; moving = false; pageVisible = false
+        dragging = false; moving = false; userGesture = false; userViewportPending = false; pageVisible = false
+        sourceEpoch = null; pendingAnchor = null; pendingFollow = false
+        pendingSourceEpoch = null; committedPage = null
+        layoutPending = false; layoutAnchor = null; layoutBottom = false
     }
     private fun validStyles(value: String, styles: Array<IntArray>, cap: Int): Boolean {
         if (styles.size > cap) return false
@@ -205,6 +237,7 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
     }
     private fun valid(args: ReaderArgs): Boolean {
         if (!args.readerId.matches(Regex("[a-zA-Z0-9-]{1,80}")) || args.records.size > 8192) return false
+        if (args.sourceEpoch != null && !args.sourceEpoch!!.matches(Regex("[a-f0-9]{32}:[1-9][0-9]{0,15}"))) return false
         var last = 0L
         var size = 0L
         for (r in args.records) {
@@ -217,12 +250,19 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
         return size <= 1280L * 1024L
     }
     private fun place(args: ReaderArgs) {
+        // Save the actual reading state before Android receives new bounds.
+        // Text may be identical during IME resize, but scroll limits change.
+        if (!layoutPending) {
+            layoutAnchor = if (adjusting) pendingAnchor else anchor()
+            layoutBottom = if (adjusting) pendingFollow else atBottom()
+        }
         val r = root ?: return
         val web = webView ?: return
         val parent = r.parent as? ViewGroup ?: return
         val b = args.bounds
         pageVisible = args.visible && (b == null || (b.width > 0 && b.height > 0 && b.viewportWidth > 0))
         if (!args.visible || (b != null && (b.width <= 0 || b.height <= 0 || b.viewportWidth <= 0))) {
+            layoutPending = true
             r.visibility = View.GONE
             press = null
             return
@@ -240,8 +280,10 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
         val h = ((b?.height ?: web.height.toDouble()) * scale).toInt().coerceIn(0, web.height)
         val params = r.layoutParams as FrameLayout.LayoutParams
         if (params.width != w || params.height != h || params.leftMargin != x || params.topMargin != y) {
+            layoutPending = true
             r.layoutParams = FrameLayout.LayoutParams(w, h).apply { leftMargin = x; topMargin = y }
         }
+        if (r.visibility != View.VISIBLE) layoutPending = true
         r.visibility = View.VISIBLE
     }
     @Command
@@ -260,8 +302,18 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
                     touch(event)
                     when (event.actionMasked) {
                         MotionEvent.ACTION_DOWN -> {
-                            dragging = true; moving = true
+                            dragging = true; moving = true; userGesture = true
+                            gestureStartY = scrollY; gestureTouchY = event.y; upwardIntent = false
+                            userViewportPending = true
+                            // A candidate can arrive just before the input
+                            // frame. Restore the actual committed epoch before
+                            // its pending draw can replace the touched page.
+                            if (adjusting && pendingSourceEpoch != sourceEpoch) committedPage?.let { applyPage(it) }
+                            send("reading")
                             main.removeCallbacks(settled)
+                        }
+                        MotionEvent.ACTION_MOVE -> {
+                            if (event.y - gestureTouchY > android.view.ViewConfiguration.get(activity).scaledTouchSlop) upwardIntent = true
                         }
                         MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                             dragging = false
@@ -288,7 +340,8 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
             parent.addView(frame, FrameLayout.LayoutParams(0, 0))
             root = frame; scroll = s; text = t
             s.setOnScrollChangeListener { _, _, _, _, _ ->
-                if (!adjusting) {
+                if (!adjusting && userGesture) {
+                    userViewportPending = true
                     moving = true
                     main.removeCallbacks(settled); main.postDelayed(settled, 180)
                 }
@@ -310,6 +363,7 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
     private fun applyPage(args: ReaderArgs) {
+        if (!pageVisible) return
         val s = scroll ?: return
         val t = text ?: return
         val nextStarts = linkedMapOf<Long, Int>()
@@ -326,11 +380,13 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
             append(r.text, r.styles)
         }
         val nextText = content.toString()
-        if (t.text.toString() == nextText && renderedStyles == nextStyles) { starts = nextStarts; return }
+        if (!layoutPending && !adjusting && t.text.toString() == nextText && renderedStyles == nextStyles && starts == nextStarts && sourceEpoch == args.sourceEpoch) { starts = nextStarts; return }
         press = null; links = findLinks(nextText)
-        val a = anchor()
-        val follow = atBottom() && !dragging && !moving
+        val a = if (adjusting) pendingAnchor else if (layoutPending) layoutAnchor else anchor()
+        val follow = args.followLatest && (if (adjusting) pendingFollow else if (layoutPending) layoutBottom else atBottom()) && !dragging && !moving
         cancelDraw(); val generation = ++epoch; adjusting = true
+        pendingAnchor = a; pendingFollow = follow
+        pendingSourceEpoch = args.sourceEpoch
         starts = nextStarts; renderedStyles = nextStyles
         val styled = SpannableStringBuilder(nextText)
         for ((start, end, rawFg, rawBg, flags) in nextStyles) {
@@ -364,6 +420,28 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
                     }
                     }
                     adjusting = false
+                    layoutPending = false; layoutAnchor = null; layoutBottom = false
+                    pendingAnchor = null; pendingFollow = false; pendingSourceEpoch = null
+                    sourceEpoch = args.sourceEpoch; committedPage = args
+                    // A read-only layout result, distinct from user viewport
+                    // requests. It must never request another history page.
+                    anchor()?.let { current -> send("position") {
+                        put("anchorId", current.id)
+                        put("anchorCharacter", current.character)
+                        put("anchorPixel", current.pixel)
+                        put("firstId", starts.keys.firstOrNull())
+                        put("lastId", starts.keys.lastOrNull())
+                        // Prepending a soft-wrapped prefix can change the
+                        // first visible line. Observe the saved character's
+                        // actual layout position rather than comparing those
+                        // two different first-visible line identities.
+                        if (a != null) starts[a.id]?.let { start -> t.layout?.let { layout ->
+                            val line = layout.getLineForOffset((start + a.character).coerceAtMost(t.length()))
+                            put("restoredAnchorId", a.id)
+                            put("restoredAnchorCharacter", a.character)
+                            put("restoredAnchorPixel", t.top + t.totalPaddingTop + layout.getLineTop(line) - s.scrollY)
+                        } }
+                    } }
                     main.removeCallbacks(settled); main.postDelayed(settled, 180)
                 }
                 return true

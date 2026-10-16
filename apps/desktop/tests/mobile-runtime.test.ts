@@ -18,6 +18,7 @@ class RuntimeMobile extends FakeMobileTransport {
   runtimeTestHost = vi.fn()
   runtimeSessions = vi.fn(async () => group)
   runtimeCreateSession = vi.fn(async () => target)
+  runtimeCreateHistorySession = vi.fn(async () => target)
   runtimeAck = vi.fn(async (_id: string, _batch: number, _generation: number) => {})
   runtimeRecover = vi.fn(async (_id: string) => {})
 }
@@ -93,11 +94,10 @@ describe('mobile shared runtime settings and Shell routing', () => {
   it('discards successful create completion after settings closes without opening or retrying', async () => {
     const { wrapper, transport } = setup(); await flush()
     await wrapper.get('[data-testid="runtime-host-manage"]').trigger('click'); await flush(); await button(wrapper, 'Shell')
-    const pending = deferred<typeof target>(); transport.runtimeCreateSession.mockReturnValueOnce(pending.promise)
-    await wrapper.get('.runtime-sessions input').setValue('new-shell')
+    const pending = deferred<typeof target>(); transport.runtimeCreateHistorySession.mockReturnValueOnce(pending.promise)
     await wrapper.get('.runtime-sessions form').trigger('submit')
     await button(wrapper, '關閉'); pending.resolve(target); await flush()
-    expect(transport.runtimeCreateSession).toHaveBeenCalledExactlyOnceWith(profile.id, 7, 'new-shell')
+    expect(transport.runtimeCreateHistorySession).toHaveBeenCalledExactlyOnceWith(profile.id, 7)
     expect(transport.openCalls).toEqual([])
   })
 

@@ -13,7 +13,6 @@ const emit = defineEmits<{ open: [host: HostDto, target: TargetDto]; close: [] }
 const group = ref<HostDto | null>(
   props.initialGroup && props.initialGroup.id === props.host.id ? props.initialGroup : null
 )
-const name = ref('')
 const busy = ref(false)
 const error = ref('')
 let alive = true
@@ -36,17 +35,12 @@ async function load(): Promise<void> {
   }
 }
 async function create(): Promise<void> {
-  if (busy.value || !props.transport.runtimeCreateSession) return
-  const selectedName = name.value.trim()
-  if (!/^[a-z0-9-]{1,32}$/.test(selectedName)) {
-    error.value = 'Shell 名稱請用 1–32 個小寫英文字母、數字或短橫線。'
-    return
-  }
+  if (busy.value || !props.transport.runtimeCreateHistorySession) return
   const request = ++generation
   busy.value = true
   error.value = ''
   try {
-    const target = await props.transport.runtimeCreateSession(props.host.id, props.host.revision, selectedName)
+    const target = await props.transport.runtimeCreateHistorySession(props.host.id, props.host.revision)
     // desktopAvailable/codingCli come from the backend target DTO — the
     // explicit endpoint mapping, never the display name.
     if (current(request)) emit('open', { id: props.host.id, label: props.host.name, desktopAvailable: target.desktopAvailable, targets: [target] }, target)
@@ -82,9 +76,8 @@ onBeforeUnmount(() => { alive = false; generation++; document.removeEventListene
     </ul>
     <form @submit.prevent="create" :aria-describedby="error ? 'shell-error' : undefined">
       <h4>建立新 Shell</h4><p class="muted">關頁只脫離連線，遠端 Shell 繼續執行。</p>
-      <label>新 Shell 名稱<input v-model="name" maxlength="32" autocomplete="off" autocapitalize="off" spellcheck="false" :disabled="busy" placeholder="例如 dev-shell"></label>
-      <p class="muted">1–32 個小寫英文字母、數字或短橫線。</p>
-      <button class="primary" type="submit" :disabled="busy">建立並連線</button>
+      <p class="muted">自動命名，支援向上載入歷史紀錄。</p>
+      <button class="primary" type="submit" data-testid="history-create" :disabled="busy || !transport.runtimeCreateHistorySession">建立並連線</button>
     </form>
   </section>
 </template>

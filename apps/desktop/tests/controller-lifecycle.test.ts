@@ -9,6 +9,16 @@ async function flush(): Promise<void> {
 const host = makeHost('test-host', [makeTarget('test-target', 'test-host', 'host')])
 const group = { dto: host, expanded: true }
 
+it('launches Codex inline with yolo and no unnecessary quotes or duplicate flags', () => {
+  const cli = { id: 'codex', name: 'CODEX', command: 'codex', args: ['--yolo'] }
+  expect(codingCliInput(cli)).toBe('codex --yolo --no-alt-screen\r')
+  expect(codingCliInput({ ...cli, args: [] })).toBe('codex --yolo --no-alt-screen\r')
+  expect(codingCliInput({ ...cli, args: ['--no-alt-screen', '--yolo', '--model', 'a b'] }))
+    .toBe("codex --yolo --no-alt-screen --model 'a b'\r")
+  expect(codingCliInput({ ...cli, args: ['--label', "owner's workspace", '$(literal)', ''] }))
+    .toBe("codex --yolo --no-alt-screen --label 'owner'\\''s workspace' '$(literal)' ''\r")
+})
+
 it('rejects CLI control characters and excessive input before remote write', () => {
   const cli = { id: 'assistant', name: 'Assistant', command: 'assistant', args: ['--model', 'a b'] }
   expect(codingCliInput(cli)).toBe("'assistant' '--model' 'a b'\r")

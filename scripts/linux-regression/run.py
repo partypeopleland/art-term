@@ -284,8 +284,10 @@ class Harness:
 
     def delete(self, name):
         require(name in self.owned, 'refuse unowned DELETE')
-        require(self.api('DELETE', '/admin/sessions/' + name)[0] == 200, 'owned DELETE')
-        self.owned.remove(name)
+        # Runtime removes exited children itself; a recorded owned helper may
+        # already be absent by the time fixture teardown reaches it.
+        require(self.api('DELETE', '/admin/sessions/' + name)[0] in (200, 404), 'owned DELETE')
+        self.owned.discard(name)
 
     def preview(self, work):
         name, grant = self.create('mcshot-')

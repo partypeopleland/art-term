@@ -1,5 +1,7 @@
 # AI 操作指南：安裝官方 openab-pty 受控端
 
+0.1.26 起，新建 Shell 另需私有 tmux 3.6a 與讀頁支援檔；完成 Runtime 安裝後依[終端歷史主機準備](refarch/terminal-history.md#主機準備)設定。既有 Shell 可繼續連線。
+
 本頁供使用者的 AI 執行 Linux Host 安裝。目標是讓 art-term 以 HTTPS／WSS 操作指定帳號的遠端 Shell；使用者只需準備依賴與在 App 填入連線資訊。給使用者看的入口是[使用前準備](openab-host-setup.md)，進階故障、升級與復原細節見 [Host 維護](platforms/linux-host-maintenance.md)。
 
 ## 執行範圍與完成條件

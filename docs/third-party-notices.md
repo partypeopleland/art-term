@@ -12,3 +12,7 @@ Windows／APK交付保留LICENSE與THIRD-PARTY-NOTICES.md。
 Runtime HTTPS／WSS 使用 rustls／ring；uuid 與 zeroize 為 Apache-2.0 OR MIT。原套件許可與歸屬仍適用。App 不再包含 russh／ssh-key 或呼叫系統 OpenSSH。
 
 連線可攜檔使用 RustCrypto 的 argon2、aes-gcm 與 aes，以及 getrandom；原生檔案選擇／讀寫使用 tauri-plugin-dialog 與 tauri-plugin-fs。版本由 Cargo.lock 鎖定，各套件原有許可與歸屬仍適用。
+
+## tmux 主機歷史支援
+
+選配的 Linux 主機支援使用 tmux 3.6a；其 ISC／BSD 授權與所含來源通知需隨 binary 保存。若靜態連入 libevent 與 ncurses，亦需附上對應授權。私有 Node 22 應保留 Node 及其第三方通知。`tmux-history.cjs` 包含 xterm，請一併保存本專案與 xterm 的授權；APK 本身不內嵌 tmux 或 Node。

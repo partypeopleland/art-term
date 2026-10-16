@@ -7,6 +7,7 @@
 // session/Host failures (see ConnectionError).
 
 export type TargetKind = 'host'
+import type { HostHistoryReply, HostHistoryRequest } from '../terminal/native'
 
 export interface CodingCli {
   id: string
@@ -165,6 +166,8 @@ export interface Transport {
   runtimeRecover(sessionId: string): Promise<void>
   runtimeSessions(id: string, expectedRevision: number): Promise<HostDto>
   runtimeCreateSession(id: string, expectedRevision: number, name: string): Promise<TargetDto>
+  runtimeCreateHistorySession?(id: string, expectedRevision: number): Promise<TargetDto>
+  runtimeHistory?(sessionId: string, request: HostHistoryRequest): Promise<HostHistoryReply>
   runtimeHosts(): Promise<RuntimeHostDto[]>
   runtimeSaveHost(input: RuntimeHostInput): Promise<RuntimeHostDto>
   runtimeDeleteHost(id: string, expectedRevision: number): Promise<void>

@@ -3,6 +3,40 @@ import { Terminal } from '@xterm/xterm'
 import { createNativeBufferProjection, readStyledLines } from '../src/terminal/native-buffer'
 const write = (term: Terminal, value: string) => new Promise<void>(resolve => term.write(value, resolve))
 
+it('keeps a short cursor prompt visible when blank viewport rows exceed a native page', async () => {
+  const term = new Terminal({ cols: 80, rows: 400 })
+  const projection = createNativeBufferProjection(term)
+  try {
+    await write(term, 'prompt> ')
+    const page = projection.read({ limit: 256 })
+    expect(page.records[0]?.text).toBe('prompt>')
+    expect(page.hasOlder).toBe(false)
+  } finally { projection.dispose(); term.dispose() }
+})
+
+it('reads only the requested native page while retaining all terminal history and stable colored IDs', async () => {
+  const term = new Terminal({ cols: 80, rows: 2, scrollback: 5000 })
+  const projection = createNativeBufferProjection(term)
+  try {
+    await write(term, Array.from({ length: 2000 }, (_, n) => `\x1b[32mROW-${n}\x1b[0m`).join('\r\n'))
+    const tail = projection.read({ limit: 256 })
+    expect(tail.records).toHaveLength(256)
+    expect(tail.records[0]).toMatchObject({ id: 1745, text: 'ROW-1744' })
+    expect(tail.records.at(-1)).toMatchObject({ id: 2000, text: 'ROW-1999' })
+    expect(tail.hasOlder).toBe(true)
+    expect(tail.hasNewer).toBe(false)
+    const older = projection.read({ firstId: 1489, limit: 256 })
+    expect(older.records).toHaveLength(256)
+    expect(older.records[0]).toMatchObject({ id: 1489, text: 'ROW-1488' })
+    expect(older.records.at(-1)?.id).toBe(1744)
+    expect(older.records[0].styles[0][2]).toBe(0x6a9955)
+    expect(older.hasNewer).toBe(true)
+    expect(new Set([...older.records, ...tail.records].map(r => r.id)).size).toBe(512)
+    expect(term.buffer.normal.length).toBe(2000)
+    expect(term.buffer.normal.getLine(0)?.translateToString(true)).toBe('ROW-0')
+  } finally { projection.dispose(); term.dispose() }
+})
+
 it('projects parsed Unicode, palette/RGB and colored padding without modifying terminal input', async () => {
   const term = new Terminal({ cols: 80, rows: 2 })
   const input: string[] = []

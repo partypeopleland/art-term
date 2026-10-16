@@ -44,6 +44,9 @@ struct Record {
 struct Document {
     schema_version: u32,
     connections: Vec<DiskConnection>,
+    // Preserve newer desktop settings without enabling or decrypting them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    desktops: Option<Vec<toml::Value>>,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -76,7 +79,7 @@ fn decode(bytes: &[u8]) -> Result<Vec<Record>, ApiError> {
     if table
         .get("schema_version")
         .and_then(toml::Value::as_integer)
-        == Some(5)
+        .is_some_and(|version| version == 5 || version == 6)
     {
         let doc: Document = toml::from_str(text).map_err(|_| ApiError::Protocol)?;
         return doc
@@ -121,7 +124,18 @@ fn decode(bytes: &[u8]) -> Result<Vec<Record>, ApiError> {
         })
         .collect())
 }
-fn encode(records: &[Record]) -> Result<Vec<u8>, ApiError> {
+fn encode(records: &[Record], source: Option<&[u8]>) -> Result<Vec<u8>, ApiError> {
+    let original = source
+        .map(|bytes| std::str::from_utf8(bytes).map_err(|_| ApiError::Protocol))
+        .transpose()?
+        .map(toml::from_str::<Document>)
+        .transpose();
+    // Legacy schemas still migrate normally; schema 5/6 opaque data survives
+    // every save, including deleting the final Host connection.
+    let (schema_version, desktops) = match original {
+        Ok(Some(doc)) if matches!(doc.schema_version, 5 | 6) => (doc.schema_version, doc.desktops),
+        _ => (5, None),
+    };
     let connections = records
         .iter()
         .map(|r| {
@@ -139,8 +153,9 @@ fn encode(records: &[Record]) -> Result<Vec<u8>, ApiError> {
         })
         .collect();
     toml::to_string(&Document {
-        schema_version: 5,
+        schema_version,
         connections,
+        desktops,
     })
     .map(String::into_bytes)
     .map_err(|_| ApiError::Protocol)
@@ -471,7 +486,11 @@ impl HostStore {
         check_path(&self.path)?;
         self.ensure_source()?;
         validate_records(records)?;
-        let bytes = encode(records)?;
+        let source = read_source(&self.path)?;
+        // Recheck after reading so externally changed settings cannot be
+        // silently replaced while preserving a different file's extensions.
+        self.ensure_source()?;
+        let bytes = encode(records, source.as_deref())?;
         if bytes.len() as u64 > MAX_FILE {
             return Err(ApiError::Capacity);
         }

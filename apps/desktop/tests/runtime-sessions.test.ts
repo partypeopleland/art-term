@@ -10,10 +10,11 @@ const attached = { ...target, id: 'issued-attached', phase: 'attached', label: '
 const dead = { ...target, id: 'issued-dead', running: false, phase: 'dead', label: 'shell-dead' }
 const group = makeHost(host.id, [target, attached, dead])
 const wrappers: ReturnType<typeof mount>[] = []
-function setup() {
+function setup(history = true) {
   const transport: Transport = Object.assign(new FakeTransport([]), {
     runtimeSessions: vi.fn().mockResolvedValue(group),
-    runtimeCreateSession: vi.fn().mockResolvedValue(target)
+    runtimeCreateSession: vi.fn().mockResolvedValue(target),
+    ...(history ? { runtimeCreateHistorySession: vi.fn().mockResolvedValue(target) } : {})
   })
   const wrapper = mount(RuntimeSessions, { props: { host, transport } }); wrappers.push(wrapper)
   return { wrapper, transport }
@@ -25,6 +26,23 @@ async function button(wrapper: ReturnType<typeof mount>, label: string) {
 afterEach(() => { for (const wrapper of wrappers.splice(0)) wrapper.unmount(); vi.restoreAllMocks() })
 
 describe('explicit runtime Shell selection and creation', () => {
+  it('offers one automatic tmux create action without a name field', async () => {
+    const { wrapper, transport } = setup(); await flushPromises()
+    expect(wrapper.find('input').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('建立主機歷史 Shell')
+    expect(wrapper.findAll('button').filter(b => b.text() === '建立並連線')).toHaveLength(1)
+    expect(transport.runtimeCreateHistorySession).not.toHaveBeenCalled()
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(transport.runtimeCreateHistorySession).toHaveBeenCalledExactlyOnceWith(host.id, host.revision)
+    expect(transport.runtimeCreateSession).not.toHaveBeenCalled()
+    expect(wrapper.emitted('open')?.[0][1]).toEqual(target)
+  })
+  it('does not fall back to a plain Shell when tmux creation is unavailable', async () => {
+    const { wrapper, transport } = setup(false); await flushPromises()
+    const create = wrapper.findAll('button').find(b => b.text() === '建立並連線')!
+    expect(create.attributes('disabled')).toBeDefined()
+    expect(transport.runtimeCreateSession).not.toHaveBeenCalled()
+  })
   it('lists by exact profile revision without creating anything automatically', async () => {
     const { wrapper, transport } = setup(); await flushPromises()
     expect(transport.runtimeSessions).toHaveBeenCalledExactlyOnceWith(host.id, 7)
@@ -40,19 +58,12 @@ describe('explicit runtime Shell selection and creation', () => {
     expect(wrapper.findAll('li')[2].get('button').attributes('disabled')).toBeDefined()
   })
 
-  it.each(['', 'Upper', 'has space', 'slash/name', 'underscore_name', '漢字', 'a'.repeat(33)])('rejects invalid creation name %s', async (name) => {
+  it('creates tmux only once on explicit submit with its exact profile revision', async () => {
     const { wrapper, transport } = setup(); await flushPromises()
-    await wrapper.get('input').setValue(name); await wrapper.get('form').trigger('submit')
-    expect(transport.runtimeCreateSession).not.toHaveBeenCalled()
-    expect(wrapper.get('[role="alert"]').text()).toContain('1–32')
-  })
-
-  it('creates only once on explicit submit and carries exact profile revision/name', async () => {
-    const { wrapper, transport } = setup(); await flushPromises()
-    const pending = deferred<TargetDto>(); vi.mocked(transport.runtimeCreateSession!).mockReturnValueOnce(pending.promise)
-    await wrapper.get('input').setValue('  shell-7  '); await wrapper.get('form').trigger('submit')
+    const pending = deferred<TargetDto>(); vi.mocked(transport.runtimeCreateHistorySession!).mockReturnValueOnce(pending.promise)
     await wrapper.get('form').trigger('submit')
-    expect(transport.runtimeCreateSession).toHaveBeenCalledExactlyOnceWith(host.id, 7, 'shell-7')
+    await wrapper.get('form').trigger('submit')
+    expect(transport.runtimeCreateHistorySession).toHaveBeenCalledExactlyOnceWith(host.id, 7)
     pending.resolve(target); await flushPromises()
     const emitted = wrapper.emitted('open')!
     expect(emitted).toHaveLength(1); expect(emitted[0][1]).toEqual(target)
@@ -61,13 +72,13 @@ describe('explicit runtime Shell selection and creation', () => {
 
   it('creation uncertainty never retries automatically and instructs listing first', async () => {
     const { wrapper, transport } = setup(); await flushPromises()
-    vi.mocked(transport.runtimeCreateSession!).mockRejectedValueOnce(new Error('private fixture upstream response'))
-    await wrapper.get('input').setValue('shell'); await wrapper.get('form').trigger('submit'); await flushPromises()
-    expect(transport.runtimeCreateSession).toHaveBeenCalledTimes(1)
+    vi.mocked(transport.runtimeCreateHistorySession!).mockRejectedValueOnce(new Error('private fixture upstream response'))
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(transport.runtimeCreateHistorySession).toHaveBeenCalledTimes(1)
     expect(wrapper.emitted('open')).toBeUndefined(); expect(wrapper.text()).not.toContain('private fixture')
     expect(wrapper.get('[role="alert"]').text()).toContain('重新整理確認狀態')
     await button(wrapper, '重新整理 Shell'); await flushPromises()
-    expect(transport.runtimeCreateSession).toHaveBeenCalledTimes(1); expect(transport.runtimeSessions).toHaveBeenCalledTimes(2)
+    expect(transport.runtimeCreateHistorySession).toHaveBeenCalledTimes(1); expect(transport.runtimeSessions).toHaveBeenCalledTimes(2)
   })
 
   it('does not render raw errors from failed list requests', async () => {
@@ -79,26 +90,26 @@ describe('explicit runtime Shell selection and creation', () => {
 
   it('unmount discards a late create completion without opening a Shell', async () => {
     const { wrapper, transport } = setup(); await flushPromises()
-    const pending = deferred<TargetDto>(); vi.mocked(transport.runtimeCreateSession!).mockReturnValueOnce(pending.promise)
-    await wrapper.get('input').setValue('shell'); await wrapper.get('form').trigger('submit')
+    const pending = deferred<TargetDto>(); vi.mocked(transport.runtimeCreateHistorySession!).mockReturnValueOnce(pending.promise)
+    await wrapper.get('form').trigger('submit')
     wrapper.unmount(); pending.resolve(target); await flushPromises()
     expect(wrapper.emitted('open')).toBeUndefined()
   })
 
   it('hidden completion is discarded without automatically creating or opening again', async () => {
     const { wrapper, transport } = setup(); await flushPromises()
-    const pending = deferred<TargetDto>(); vi.mocked(transport.runtimeCreateSession!).mockReturnValueOnce(pending.promise)
-    await wrapper.get('input').setValue('shell'); await wrapper.get('form').trigger('submit')
+    const pending = deferred<TargetDto>(); vi.mocked(transport.runtimeCreateHistorySession!).mockReturnValueOnce(pending.promise)
+    await wrapper.get('form').trigger('submit')
     const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
     document.dispatchEvent(new Event('visibilitychange')); pending.resolve(target); await flushPromises()
     visibility.mockReturnValue('visible'); document.dispatchEvent(new Event('visibilitychange')); await flushPromises()
-    expect(wrapper.emitted('open')).toBeUndefined(); expect(transport.runtimeCreateSession).toHaveBeenCalledTimes(1)
+    expect(wrapper.emitted('open')).toBeUndefined(); expect(transport.runtimeCreateHistorySession).toHaveBeenCalledTimes(1)
   })
 
   it('hide/foreground invalidates a late create promise even when it resolves while visible again', async () => {
     const { wrapper, transport } = setup(); await flushPromises()
-    const pending = deferred<TargetDto>(); vi.mocked(transport.runtimeCreateSession!).mockReturnValueOnce(pending.promise)
-    await wrapper.get('input').setValue('shell'); await wrapper.get('form').trigger('submit')
+    const pending = deferred<TargetDto>(); vi.mocked(transport.runtimeCreateHistorySession!).mockReturnValueOnce(pending.promise)
+    await wrapper.get('form').trigger('submit')
     const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
     document.dispatchEvent(new Event('visibilitychange'))
     visibility.mockReturnValue('visible'); document.dispatchEvent(new Event('visibilitychange'))

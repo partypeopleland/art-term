@@ -182,7 +182,7 @@ export function createMobileInput(): MobileInput {
         return real.cols
       },
       bracketedPasteMode: () => real.bracketedPasteMode?.() ?? false,
-      readStyledText: () => real.readStyledText?.() ?? { records: [], supported: false },
+      readStyledText: window => real.readStyledText?.(window) ?? { records: [], supported: false },
       setNativeReaderActive: active => real.setNativeReaderActive?.(active),
       write: (data, historical) => real.write(data, historical),
       onData: (fn) => {
