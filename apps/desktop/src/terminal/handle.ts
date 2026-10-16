@@ -2,7 +2,7 @@ import { createNativeBufferProjection, type NativeTerminalBuffer, type NativeBuf
 // Terminal handle abstraction. The controller only sees this interface, so
 // tests can inject a fake without xterm.js or a real DOM renderer.
 import type { InjectionKey } from 'vue'
-import { Terminal } from '@xterm/xterm'
+import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { attachMobileScroll } from '../mobile/scroll'
@@ -11,6 +11,7 @@ import { attachTerminalLinks, type ClipboardWriter } from './links'
 export const SCROLLBACK_LINES = 5000
 
 export interface TerminalHandle {
+  setTheme?(theme: ITheme): void
   readonly cols: number
   readonly rows: number
   /** Whether xterm currently has remote bracketed paste mode enabled. */
@@ -131,6 +132,7 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
     })
   }
   return {
+    setTheme: theme => { term.options.theme = theme },
     get cols() {
       return term.cols
     },

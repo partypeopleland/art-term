@@ -1,0 +1,45 @@
+.m-app[data-theme] {
+  color-scheme: dark;
+  --bg: #0b1420; --bg-panel: #111d2b; --bg-raised: #172b3d; --bg-hover: #1c3348;
+  --border: #283b50; --text: #dce7f4; --text-dim: #8b9fb6; --accent: #62d3ff;
+  --ok: #70e1b2; --warn: #e0bf7e; --err: #ef939c; --on-accent: #0b1420;
+  --computer-rgb: 98, 211, 255; --agent-rgb: 181, 154, 255; --screen-rgb: 101, 219, 194;
+  --page-glow: #15354c55; --dot-idle: #63758a;
+  --text-muted: var(--text-dim);
+}
+.m-app[data-theme="dark"] {
+  --bg: #090a0c; --bg-panel: #141518; --bg-raised: #222429; --bg-hover: #2a2d33;
+  --border: #33363d; --text: #dedee2; --text-dim: #a0a2ac; --accent: #b5c4d6;
+  --ok: #9bcead; --warn: #d7c28f; --err: #e99595; --on-accent: #090a0c;
+  --computer-rgb: 181, 196, 214; --agent-rgb: 209, 189, 231; --screen-rgb: 150, 199, 196;
+  --page-glow: transparent; --dot-idle: #727680;
+}
+.m-app[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f3f2ee; --bg-panel: #fffefa; --bg-raised: #e8ece9; --bg-hover: #e1e7e3;
+  --border: #cfd7d2; --text: #323b43; --text-dim: #65716f; --accent: #31788e;
+  --ok: #37724f; --warn: #876520; --err: #a74748; --on-accent: #fffefa;
+  --computer-rgb: 49, 120, 142; --agent-rgb: 135, 102, 158; --screen-rgb: 50, 117, 103;
+  --page-glow: #d5e3df66; --dot-idle: #8b9591;
+}
+.m-app[data-theme="retro"] {
+  --bg: #28251f; --bg-panel: #363128; --bg-raised: #443d31; --bg-hover: #514735;
+  --border: #5b503d; --text: #e1d3b9; --text-dim: #b5a58c; --accent: #d9ad68;
+  --ok: #b9be83; --warn: #dfb570; --err: #dc9275; --on-accent: #28251f;
+  --computer-rgb: 217, 173, 104; --agent-rgb: 185, 190, 131; --screen-rgb: 166, 185, 155;
+  --page-glow: #78603933; --dot-idle: #978b74;
+  font-family: 'Courier New', 'Microsoft JhengHei', monospace;
+}
+
+/* Shared dialogs and voice controls inherit the same application palette. */
+.m-app[data-theme] .runtime-conn { border-color: var(--border); }
+.m-app[data-theme] [role="alert"] { color: var(--err); }
+.m-app[data-theme] .runtime-transfer button[type="submit"] { color: var(--on-accent); }
+.m-app[data-theme] .voice-mic { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.m-app[data-theme] .voice-mic:active:not(:disabled) { background: var(--accent); filter: brightness(.9); }
+.m-app[data-theme] .voice-mic.recording { background: var(--err); border-color: var(--err); }
+.m-app[data-theme] .voice-mic.stopping { background: var(--warn); border-color: var(--warn); }
+.m-app[data-theme] .voice-cancel { background: var(--bg-raised); border-color: var(--err); color: var(--err); }
+.m-app[data-theme] .voice-status.error { color: var(--err); }
+.m-app[data-theme] .voice-status.sent { color: var(--ok); }
+.m-app[data-theme] :is(.voice-mic, .voice-settings-toggle, .voice-download):focus-visible { outline-color: var(--accent); }

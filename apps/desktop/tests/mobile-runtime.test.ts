@@ -49,11 +49,11 @@ afterEach(() => { for (const wrapper of wrappers.splice(0)) wrapper.unmount(); v
 describe('mobile shared runtime settings and Shell routing', () => {
   it('opens listed attached Shell only after explicit takeover, retaining shared session/terminal and historical ACK', async () => {
     const { wrapper, transport, terms, controller } = setup(); await flush()
-    await wrapper.get('[data-testid="runtime-host-manage"]').trigger('click'); await flush()
-    await button(wrapper, 'Shell')
+    // Home lists are read-only until the explicit attached-Shell action.
+    expect(wrapper.get('.attach-button').text()).toContain('接管')
     expect(transport.runtimeSessions).toHaveBeenCalledExactlyOnceWith(profile.id, 7)
     expect(transport.openCalls).toEqual([]); expect(transport.runtimeCreateSession).not.toHaveBeenCalled()
-    await button(wrapper, '接管連線')
+    await wrapper.get('.attach-button').trigger('click'); await flush()
     expect(transport.openCalls).toHaveLength(1); expect(transport.openCalls[0].targetId).toBe(target.id)
     expect(wrapper.find('.runtime-hosts').exists()).toBe(false)
     const tab = controller.tabs[0], session = tab.sessionId!
@@ -74,7 +74,7 @@ describe('mobile shared runtime settings and Shell routing', () => {
 
   it('masks credentials, clears the actual input before awaiting save and discards stale completion after background', async () => {
     const { wrapper, transport } = setup(); await flush()
-    await wrapper.get('[data-testid="runtime-host-settings"]').trigger('click'); await flush()
+    await wrapper.get('.settings-trigger').trigger('click'); await flush()
     await wrapper.get('[data-testid="name"]').setValue('新主機')
     await wrapper.get('[data-testid="base-url"]').setValue('https://runtime.example.test')
     const credential = wrapper.get('[data-testid="credential"]')
@@ -86,37 +86,31 @@ describe('mobile shared runtime settings and Shell routing', () => {
     visibility(true); await flush(); expect(wrapper.find('.runtime-hosts').exists()).toBe(false)
     visibility(false); pending.resolve(profile); await flush()
     expect(wrapper.find('.runtime-hosts').exists()).toBe(false)
-    await wrapper.get('[data-testid="runtime-host-settings"]').trigger('click'); await flush()
+    await wrapper.get('.settings-trigger').trigger('click'); await flush()
     expect((wrapper.get('[data-testid="credential"]').element as HTMLInputElement).value).toBe('')
     expect(transport.openCalls).toEqual([]); expect(transport.runtimeCreateSession).not.toHaveBeenCalled()
   })
 
-  it('discards successful create completion after settings closes without opening or retrying', async () => {
+  it('discards successful inline create completion after navigating to settings', async () => {
     const { wrapper, transport } = setup(); await flush()
-    await wrapper.get('[data-testid="runtime-host-manage"]').trigger('click'); await flush(); await button(wrapper, 'Shell')
     const pending = deferred<typeof target>(); transport.runtimeCreateHistorySession.mockReturnValueOnce(pending.promise)
-    await wrapper.get('.runtime-sessions form').trigger('submit')
-    await button(wrapper, '關閉'); pending.resolve(target); await flush()
+    await wrapper.get('.new-connection').trigger('click')
+    await wrapper.get('.settings-trigger').trigger('click'); await flush()
+    pending.resolve(target); await flush()
     expect(transport.runtimeCreateHistorySession).toHaveBeenCalledExactlyOnceWith(profile.id, 7)
     expect(transport.openCalls).toEqual([])
   })
 
-  it('clears composer and the actual terminal composition on visibility changes without replay', async () => {
+  it('clears actual terminal composition on visibility changes without replay', async () => {
     const { wrapper, transport, terms, controller } = setup(); await flush()
-    await wrapper.get('[data-testid="runtime-host-manage"]').trigger('click'); await flush(); await button(wrapper, 'Shell'); await button(wrapper, '接管連線')
+    await wrapper.get('.attach-button').trigger('click'); await flush()
     const terminal = wrapper.get('.term-host').element, session = controller.tabs[0].sessionId!
     terminal.dispatchEvent(new CompositionEvent('compositionstart')); terms[0].emitData('舊')
-    await wrapper.get('[data-testid="k-composer"]').trigger('click')
-    await wrapper.get('[data-testid="composer-text"]').setValue('未送指令')
-    await wrapper.get('[data-testid="k-ctrl"]').trigger('click')
     visibility(true); await flush()
     expect(wrapper.find('[data-testid="composer"]').exists()).toBe(false)
     visibility(false); await flush()
     terminal.dispatchEvent(new CompositionEvent('compositionend', { data: '舊組字' })); terms[0].emitData('舊組字'); await flush()
     expect(transport.sessions.get(session)!.writes).toEqual([])
-    expect(wrapper.get('[data-testid="k-ctrl"]').classes()).not.toContain('on')
-    await wrapper.get('[data-testid="k-composer"]').trigger('click')
-    expect((wrapper.get('[data-testid="composer-text"]').element as HTMLTextAreaElement).value).toBe('')
     terminal.dispatchEvent(new CompositionEvent('compositionstart')); terms[0].emitData('新')
     terminal.dispatchEvent(new CompositionEvent('compositionend', { data: '新組字' })); terms[0].emitData('新組字'); await flush()
     expect(transport.sessions.get(session)!.writes.map(bytes => new TextDecoder().decode(Uint8Array.from(bytes)))).toEqual(['新組字'])

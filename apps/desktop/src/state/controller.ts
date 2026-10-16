@@ -98,6 +98,8 @@ export interface ControllerOptions {
   idlePollMs?: number
   autoCaptureMs?: number
   backgroundConnection?: 'detach' | 'keep'
+  /** Mobile returns to target selection when the remote Shell exits. */
+  closeFinishedTabs?: boolean
 }
 
 export interface AppController {
@@ -505,6 +507,10 @@ export function createAppController(
             void retireRuntimeAgentTab(tab)
             return
           }
+          if (reason === 'exited' && options.closeFinishedTabs) {
+            void closeTab(tab)
+            return
+          }
           tab.status = 'error'
           tab.errorMsg = KIND_FALLBACK[reason] ?? '遠端 Shell 連線已結束'
           if (['transport', 'timeout', 'slowConsumer'].includes(reason) && (runtimeRecoveryAttempts.get(tab.key) ?? 0) < 3) {
@@ -533,6 +539,10 @@ export function createAppController(
         if (tab.closed || tab.sessionId !== sessionId) return
       }
       if (out.exitCode !== null) {
+        if (options.closeFinishedTabs) {
+          void closeTab(tab)
+          return
+        }
         tab.exitCode = out.exitCode
         tab.status = 'exited'
         tab.sessionId = null

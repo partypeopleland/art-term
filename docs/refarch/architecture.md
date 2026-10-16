@@ -31,6 +31,33 @@ native GUI adapter 驗證 Host 操作並發出 target。target 是後端核發�
 
 Rust 核心讀取唯一 `connections.toml`，透過官方 HTTPS API 列出、建立或依使用者選擇續期 Shell，再以 WSS 連接已核發的 target。HTTPS 管理呼叫不接受 redirect、環境代理或降級，錯誤使用固定安全訊息。Runtime 使用未修改的官方產物；這條路徑不需要本專案伺服器補丁，也不恢復已退役的 SSH terminal、CLI／TUI 或 gateway。
 
+## Android 畫面與原生閱讀器
+
+手機介面以固定頂列統一導覽；軟體資訊及設定是頂列下方的內容頁，Main 與 Connect 是可水平拖曳的工作頁。頁面位移與指示色條共用同一滑動進度，因此手指停在中間時，畫面與色條位置一致。
+
+```text
+MobileApp (fixed brand / Main / Connect / global gear)
+  |
+  +-- AppHomepage -------- version + bundled release notes
+  +-- ThemeSettings ------ theme + connection import/export + add form
+  +-- workspace pager ---- shared page position + indicator progress
+         |
+         +-- Main: ConnectionDashboard -> HostConnections -> issued target
+         +-- Connect: tabs / terminal / voice / quick keys
+                            |
+                    NativeTerminalReader (Android native view)
+                            |
+                  horizontal gesture -> pager bridge
+
+selected theme -> CSS variables + xterm palette + native reader palette
+```
+
+`ConnectionDashboard` 管分類、數量與收合，`HostConnections` 管每筆主機的 Shell 清單、明確 attach／接管與建立工作。頁面切換不改變本機分頁與遠端工作 binding；既有 target 核發、Rust 核心和 HTTPS／WSS 協定保持原有責任。
+
+Android 終端閱讀器是覆蓋在 WebView 終端位置的原生 View，水平手勢需透過 bridge 回報共用 pager，不能只依賴 Vue pointer 事件。閱讀器仍負責垂直歷史捲動；頁面、設定、資訊與語音燈箱的可見狀態控制原生 View 是否呈現，避免遮住 Vue 內容。Theme 保存於裝置本機，變更時同步頁面樣式、xterm 與原生閱讀器配色。
+
+瀏覽器預覽沿用手機元件，但以獨立入口注入記憶體 transport、假語音與瀏覽器終端；正式入口使用原生 transport、裝置端辨識及原生閱讀器。預覽不接真實 Runtime，不參與 APK 打包，詳見[手機畫面預覽](../platforms/ui-preview.md)。
+
 ## 輸出完成後才確認
 
 ```text
@@ -73,7 +100,7 @@ App --create--> Runtime work Shell --wrapper--> private tmux work pane
 
 Windows 使用目前使用者的 DPAPI 保護管理憑證，Android 使用既有 operator Keystore；共用 CredentialContext 維持憑證與設定身分的綁定。唯一 TOML 的原子保存、外部修改核對與舊格式相容由 HostStore 負責，見 [設定](connections.md)與 [憑證保存](credential-storage.md)。保留的 bootstrap 模組僅供舊測試相容，正式啟動不呼叫，私有 seed 建置會被拒絕。
 
-Android adapter 處理觸控、輸入法組字、Ctrl 與背景生命週期。背景時清除敏感輸入和待送操作，健康終端連線可繼續保留；這些平台差異不改變核心 binding 規則，詳見 [Android](../platforms/android.md)。邊界的決策理由見 [ADR-001](../adr/ADR-001-client-boundaries.md)，尚未實作的候選見 [BDR-002](../bdr/BDR-002-future-directions.md)。
+Android adapter 處理觸控、輸入法組字、快速鍵與背景生命週期。背景時清除敏感輸入和待送操作，健康終端連線可繼續保留；這些平台差異不改變核心 binding 規則，詳見 [Android](../platforms/android.md)。邊界的決策理由見 [ADR-001](../adr/ADR-001-client-boundaries.md)，尚未實作的候選見 [BDR-002](../bdr/BDR-002-future-directions.md)。
 
 ## 附錄：實作與參考
 

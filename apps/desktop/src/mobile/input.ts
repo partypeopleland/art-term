@@ -6,6 +6,7 @@ import type { TerminalHandle } from '../terminal/handle'
 export type SpecialKey =
   | 'esc'
   | 'tab'
+  | 'enter'
   | 'up'
   | 'down'
   | 'left'
@@ -17,6 +18,7 @@ export type SpecialKey =
 export const SPECIAL_BYTES: Record<Exclude<SpecialKey, 'detach'>, string> = {
   esc: '\x1b',
   tab: '\t',
+  enter: '\r',
   up: '\x1b[A',
   down: '\x1b[B',
   right: '\x1b[C',
@@ -175,6 +177,7 @@ export function createMobileInput(): MobileInput {
     })
 
     return {
+      setTheme: theme => real.setTheme?.(theme),
       get rows() {
         return real.rows
       },

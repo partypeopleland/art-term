@@ -313,51 +313,34 @@ describe('mobile shared runtime catalog entries', () => {
     })
   }
 
-  it('mobile lists the saved Computer and connects only on explicit connect', async () => {
+  it('mobile lists saved Shells read-only and attaches only on explicit connect', async () => {
     const transport = mobileTransport([profile])
     const { wrapper, transport: t, controller } = mountMobile(transport)
     await flush()
-
-    const entry = wrapper.get('[data-runtime-label="nuc"]')
-    expect(entry.text()).toContain('openab-pty')
-    expect(t.runtimeSessions).not.toHaveBeenCalled()
-
-    await entry.trigger('click')
-    await flush()
-    const dialog = wrapper.get('[data-testid="runtime-connection-dialog"]')
-    expect(dialog.text()).toContain('返回連線清單')
+    expect(wrapper.get('[data-runtime-label="nuc"]').text()).toContain('openab-pty')
     expect(t.runtimeSessions).toHaveBeenCalledExactlyOnceWith(profile.id, 7)
     expect(t.openCalls).toEqual([])
-
-    await dialogButton(wrapper, '連線')
-    await flush()
+    await wrapper.get('.attach-button').trigger('click'); await flush()
     expect(t.openCalls).toEqual([{ targetId: 'issued-shell-1', rows: 24, cols: 80 }])
-    // Shared component + shared controller: connecting lands on the session phase.
-    expect(wrapper.find('[data-testid="runtime-connection-dialog"]').exists()).toBe(false)
     expect(wrapper.get('.term-page').isVisible()).toBe(true)
     expect(controller.tabs[0].targetId).toBe('issued-shell-1')
     expect(controller.tabs[0].hostId).toBe(profile.id)
   })
 
-  it('mobile background closes the dialog and a late reply never connects', async () => {
+  it('mobile background invalidates an in-flight inline listing without attaching', async () => {
     const transport = mobileTransport([profile])
     const pending = deferred<HostDto>()
     transport.runtimeSessions.mockReturnValueOnce(pending.promise)
     const { wrapper, transport: t } = mountMobile(transport)
     await flush()
-    // The dedicated Shell button always opens the manager; the primary
-    // click no longer mounts the dialog while its own list is pending.
-    await wrapper.get(`[data-testid="runtime-shell-${profile.id}"]`).trigger('click')
-    await flush()
-    expect(wrapper.find('[data-testid="runtime-connection-dialog"]').exists()).toBe(true)
-    setVisibility(true)
-    await flush()
-    expect(wrapper.find('[data-testid="runtime-connection-dialog"]').exists()).toBe(false)
-    pending.resolve(sessionGroup)
-    setVisibility(false)
-    await flush()
+    expect(wrapper.find('.attach-button').exists()).toBe(false)
+    setVisibility(true); await flush()
+    pending.resolve(sessionGroup); await flush()
     expect(t.openCalls).toEqual([])
-    expect(wrapper.find('[data-testid="runtime-connection-dialog"]').exists()).toBe(false)
+    expect(wrapper.find('.attach-button').exists()).toBe(false)
+    setVisibility(false); await flush()
+    expect(t.openCalls).toEqual([])
+    expect(wrapper.find('.attach-button').exists()).toBe(true)
   })
 
   it('mobile profile-read failure surfaces a safe fixed error', async () => {

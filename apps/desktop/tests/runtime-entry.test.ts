@@ -1,3 +1,4 @@
+import { showMobileMain } from './mobile-actions'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
@@ -469,57 +470,50 @@ describe('local connected green dot', () => {
   })
 })
 
-describe('mobile parity', () => {
-  it('mobile single ready Shell quick-connects into the session phase', async () => {
+describe('mobile inline attachment', () => {
+  it('loads ready Shells read-only and attaches only after an explicit action', async () => {
     const transport = mobileRuntimeTransport([profile], readyGroup)
     const { wrapper, controller, transport: t } = mountMobile(transport)
     await flush()
-
-    await wrapper.get('[data-runtime-label="nuc"]').trigger('click')
-    await flush()
-
     expect(t.runtimeSessions).toHaveBeenCalledExactlyOnceWith(profile.id, profile.revision)
-    expect(wrapper.find('[data-testid="runtime-connection-dialog"]').exists()).toBe(false)
+    expect(t.openCalls).toEqual([])
+    await wrapper.get('.attach-button').trigger('click'); await flush()
     expect(t.openCalls).toEqual([{ targetId: 'runtime-target-1', rows: 24, cols: 80 }])
     expect(wrapper.get('.term-page').isVisible()).toBe(true)
     expect(controller.tabs[0].hostId).toBe(profile.id)
-
-    // Back on the list the shared dot reflects the live local tab.
-    await wrapper.get('[data-testid="to-list"]').trigger('click')
-    await flush()
+    await showMobileMain(wrapper)
     expect(statusDot(wrapper).classes()).toContain('on')
   })
 
-  it('mobile re-click reuses the live runtime tab — session phase, no remote list', async () => {
+  it('attaching the same inline Shell reuses the live local tab', async () => {
     const transport = mobileRuntimeTransport([profile])
     const { wrapper, controller, transport: t } = mountMobile(transport)
     await flush()
-
-    await wrapper.get('[data-runtime-label="nuc"]').trigger('click')
-    await flush()
+    await wrapper.get('.attach-button').trigger('click'); await flush()
     expect(controller.tabs[0].status).toBe('live')
-
-    await wrapper.get('[data-testid="to-list"]').trigger('click')
-    await flush()
-    t.runtimeSessions.mockClear()
-    await wrapper.get('[data-runtime-label="nuc"]').trigger('click')
-    await flush()
-
-    expect(t.runtimeSessions).not.toHaveBeenCalled()
+    await showMobileMain(wrapper)
+    const listings = t.runtimeSessions.mock.calls.length
+    await wrapper.get('.attach-button').trigger('click'); await flush()
+    expect(t.runtimeSessions).toHaveBeenCalledTimes(listings)
     expect(t.openCalls).toHaveLength(1)
+    expect(controller.tabs).toHaveLength(1)
     expect(wrapper.get('.term-page').isVisible()).toBe(true)
-    expect(controller.activeKey.value).toBe(controller.tabs[0].key)
   })
 
-  it('mobile zero/multi/attached outcomes open the chooser via Shell or primary click', async () => {
-    const transport = mobileRuntimeTransport([profile], sessionGroup(profile, []))
+  it('expands multiple inline Shells and requires explicit takeover selection', async () => {
+    const attached = runtimeTarget('attached-shell', profile.id, 'attached', true, 'busy-shell')
+    const transport = mobileRuntimeTransport([profile], sessionGroup(profile, [ready, attached]))
     const { wrapper, transport: t } = mountMobile(transport)
     await flush()
-    await wrapper.get('[data-runtime-label="nuc"]').trigger('click')
-    await flush()
-    expect(wrapper.find('[data-testid="runtime-connection-dialog"]').exists()).toBe(true)
-    expect(t.runtimeSessions).toHaveBeenCalledTimes(1)
     expect(t.openCalls).toEqual([])
+    expect(wrapper.get('.connection-summary').text()).toContain('02')
+    await wrapper.get('[data-runtime-label="nuc"]').trigger('click'); await flush()
+    const choices = wrapper.findAll('.attach-button')
+    expect(choices).toHaveLength(2)
+    expect(choices[1].text()).toContain('接管')
+    expect(t.openCalls).toEqual([])
+    await choices[1].trigger('click'); await flush()
+    expect(t.openCalls.map(call => call.targetId)).toEqual([attached.id])
   })
 })
 
@@ -563,23 +557,17 @@ describe('a later user selection retires pending quick connect', () => {
     expect(transport.openCalls.map((call) => call.targetId)).toEqual([other.id])
   })
 
-  it('mobile Shell-button selection also prevents a late runtime result from switching targets', async () => {
+  it('an inline selection prevents a late read-only result from switching targets', async () => {
     const other = runtimeTarget('runtime-target-b', profileB.id, 'ready', true, 'shell-b')
     const transport = mobileRuntimeTransport([profile, profileB])
     const gate = deferred<HostDto>()
-    transport.runtimeSessions.mockImplementation((id: string) =>
-      id === profile.id ? gate.promise : Promise.resolve(sessionGroup(profileB, [other]))
-    )
+    transport.runtimeSessions.mockImplementation((id: string) => id === profile.id ? gate.promise : Promise.resolve(sessionGroup(profileB, [other])))
     const { wrapper, controller } = mountMobile(transport)
     await flush()
-    await wrapper.get('[data-runtime-label="nuc"]').trigger('click')
-    await wrapper.get(`[data-testid="runtime-shell-${profileB.id}"]`).trigger('click')
-    await flush()
-    const dialog = wrapper.get('[data-testid="runtime-connection-dialog"]')
-    await dialog.findAll('button').find((b) => b.text() === '連線')!.trigger('click')
-    gate.resolve(readyGroup)
-    await flush()
-    expect(transport.openCalls.map((call) => call.targetId)).toEqual([other.id])
+    expect(transport.openCalls).toEqual([])
+    await wrapper.get(`[data-testid="runtime-${profileB.id}"] .attach-button`).trigger('click')
+    gate.resolve(readyGroup); await flush()
+    expect(transport.openCalls.map(call => call.targetId)).toEqual([other.id])
     expect(controller.activeTab.value?.targetId).toBe(other.id)
   })
 })

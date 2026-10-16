@@ -4,7 +4,7 @@
 // shared runtime Host settings. Tabs/poll/preview rules live in the
 // shared createAppController.
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
-import { NativeHistoryKey, NativeKeyboardKey } from '../terminal/native'
+import { NativeHistoryKey, NativeKeyboardKey, NativeSwipeKey, type NativeHistoryReader } from '../terminal/native'
 import { createNativeHistoryReader, listenKeyboardVisibility } from './history'
 import { createMobileInput, type SpecialKey } from './input'
 import {
@@ -25,48 +25,89 @@ import { createRuntimeEntry, runtimeConnectedIds } from '../state/runtime-entry'
 import TabBar from '../components/TabBar.vue'
 import TerminalPane from '../components/TerminalPane.vue'
 import PreviewPanel from '../components/PreviewPanel.vue'
-import CategoryList from '../components/CategoryList.vue'
+import ConnectionDashboard from './ConnectionDashboard.vue'
+import ThemeSettings from './ThemeSettings.vue'
+import AppHomepage from './AppHomepage.vue'
+import { selectedTheme, terminalTheme } from './theme'
+import './themes.css'
+import { useWorkspacePager, type Workspace } from './pager'
 import RuntimeHosts from '../components/RuntimeHosts.vue'
 import RuntimeConnectionDialog from '../components/RuntimeConnectionDialog.vue'
 import VoiceButton from './VoiceButton.vue'
-import { createTauriVoicePlugin, createVoiceController, type VoiceTarget } from './voice'
+import { createTauriVoicePlugin, createVoiceController, type VoiceTarget, type VoicePlugin } from './voice'
 
 const props = defineProps<{
   transport: Transport
   terminalFactory?: TerminalFactory
   controllerOptions?: ControllerOptions
+  /** null selects the browser xterm reader for the isolated UI preview. */
+  nativeHistoryFactory?: (() => NativeHistoryReader) | null
+  /** Optional browser demo; production uses the Android voice plugin. */
+  voicePlugin?: VoicePlugin
 }>()
 
 const controller: AppController = createAppController(
   props.transport,
-  { ...props.controllerOptions, backgroundConnection: 'keep' }
+  { ...props.controllerOptions, backgroundConnection: 'keep', closeFinishedTabs: true }
 )
-// MobileApp is only loaded after gui_platform identifies Android in main.ts.
-const voice = createVoiceController(createTauriVoicePlugin())
+// Production loads this after identifying Android; browser preview aliases native IPC.
+const voice = createVoiceController(props.voicePlugin ?? createTauriVoicePlugin(), props.voicePlugin ? { isTauri: () => true } : {})
 const input = createMobileInput()
-provide(NativeHistoryKey, createNativeHistoryReader)
+if (props.nativeHistoryFactory !== null) {
+  provide(NativeHistoryKey, props.nativeHistoryFactory ?? createNativeHistoryReader)
+}
 defineExpose({ controller })
 
 // The injected factory wraps every real terminal with the IME/latch adapter,
 // so shared TerminalPane + shared controller see only clean input.
 const baseFactory = props.terminalFactory ?? createMobileXtermTerminal
-provide(TerminalFactoryKey, (el: HTMLElement): TerminalHandle =>
-  input.wrap(el, baseFactory(el))
-)
+provide(TerminalFactoryKey, (el: HTMLElement): TerminalHandle => {
+  const terminal = input.wrap(el, baseFactory(el))
+  terminal.setTheme?.(terminalTheme(selectedTheme.value))
+  return terminal
+})
+watch(selectedTheme, theme => {
+  for (const tab of controller.tabs) tab.term?.setTheme?.(terminalTheme(theme))
+})
 
 const rootEl = ref<HTMLElement | null>(null)
+const settingsOpen = ref(false)
+const aboutOpen = ref(false)
+function showHomepage(): void {
+  runtimeEntry.cancel()
+  voice.cancel('target')
+  settingsOpen.value = false
+  composerOpen.value = false
+  aboutOpen.value = true
+}
+const voiceLightboxOpen = ref(false)
 const composerOpen = ref(false)
 const composerText = ref('')
-const phase = ref<'list' | 'session'>('list')
+const phase = ref<Workspace>('list')
+const pager = useWorkspacePager(rootEl, phase, activateWorkspace, () => !aboutOpen.value && !settingsOpen.value && !runtimeHostsOpen.value && !runtimeDialogProfile.value && !composerOpen.value)
+const { dragging: swipeDragging, animating: swipeAnimating, nativeDragging: nativeSwipeActive, visible: swipeVisible, indicatorStyle: workspaceIndicatorStyle, transform: pageTransform, begin: beginSwipe, move: moveSwipe, end: finishSwipe, guardClick: guardSwipeClick } = pager
+provide(NativeSwipeKey, pager.native)
+function activateWorkspace(page: Workspace): void {
+  if (page === 'list') backToList()
+  else switchWorkspace(page)
+}
+function slideTo(workspace: Workspace): void {
+  aboutOpen.value = false
+  settingsOpen.value = false
+  pager.slideTo(workspace)
+}
+
 const runtimeHostsOpen = ref(false)
 const transferPicker = ref(false)
 const hostsView = ref<'list' | 'create'>('create')
+const hostsCategory = ref<'host' | 'agent' | undefined>()
 // Every transport in the runtime-only product implements the full
 // runtime Host surface; the flag only gates rendering.
 const runtimeAvailable = computed(() => true)
 
-function openRuntimeHosts(view: 'list' | 'create' = 'create'): void {
+function openRuntimeHosts(view: 'list' | 'create' = 'create', category?: 'host' | 'agent'): void {
   hostsView.value = view
+  hostsCategory.value = category
   runtimeEntry.cancel()
   composerOpen.value = false
   composerText.value = ''
@@ -116,15 +157,15 @@ const runtimeEntry = createRuntimeEntry(props.transport, controller, {
 })
 
 const KEYBAR: { id: SpecialKey; label: string }[] = [
-  { id: 'esc', label: 'Esc' },
   { id: 'tab', label: 'Tab' },
-  { id: 'left', label: '←' },
+  { id: 'esc', label: 'Esc' },
+  { id: 'shiftleft', label: '⇧←' },
   { id: 'up', label: '↑' },
   { id: 'down', label: '↓' },
+  { id: 'left', label: '←' },
   { id: 'right', label: '→' },
-  { id: 'shiftleft', label: '⇧←' },
-  { id: 'ctrlc', label: 'Ctrl+C' },
-  { id: 'detach', label: 'Detach' }
+  { id: 'enter', label: 'ENTER' },
+  { id: 'ctrlc', label: 'CTRL+C' }
 ]
 
 const activeTab = controller.activeTab
@@ -159,6 +200,15 @@ watch(
     if (next.some((value, index) => value !== previous[index])) voice.cancel('target')
   }
 )
+
+// Show the complete bottom bar in the browser even before a demo tab is attached.
+const displayedVoiceTarget = computed<VoiceTarget | null>(() => voiceTarget.value ?? (props.voicePlugin ? {
+  tabId: 'preview-layout', generation: 0,
+  isValid: () => phase.value === 'session' && !document.hidden,
+  bracketedPasteMode: () => false,
+  send: () => {}
+} : null))
+const displayedRemoteSession = computed(() => activeTab.value?.remoteSession || (props.voicePlugin ? 'openab-pty:preview（版面示範）' : ''))
 
 const statusText = computed(() => {
   const t = activeTab.value
@@ -224,12 +274,21 @@ async function toggleDesktop(tab: TabState): Promise<void> {
   }
 }
 
+function switchWorkspace(workspace: Workspace, focus = false): void {
+  runtimeEntry.cancel()
+  composerOpen.value = false
+  phase.value = workspace
+  if (focus) void nextTick(() => rootEl.value?.querySelector<HTMLElement>(workspace === 'list' ? '#workspace-connections' : '#workspace-terminal')?.focus())
+  if (workspace === 'session') void nextTick(onViewport)
+}
+
 function backToList(): void {
   phase.value = 'list'
   void controller.loadCatalog()
 }
 
 function onGlobalKey(e: KeyboardEvent): void {
+  if (aboutOpen.value || settingsOpen.value || phase.value !== 'session') return
   // Capture phase: Alt+[/Alt+] and Ctrl+PgUp/PgDn switch tabs before xterm
   // can turn them into remote bytes.
   controller.handleKey(e)
@@ -251,6 +310,8 @@ function onViewport(): void {
 
 function onVisibility(): void {
   if (document.hidden) {
+    if (!transferPicker.value) settingsOpen.value = false
+    pager.cancel()
     // Password and queued input never survive backgrounding.
     composerOpen.value = false
     composerText.value = ''
@@ -311,61 +372,30 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="rootEl" class="m-app">
-    <RuntimeHosts v-if="runtimeHostsOpen" :transport="transport" :initial-view="hostsView"
+  <div ref="rootEl" class="m-app" :data-theme="selectedTheme" :class="{ 'swipe-animating': swipeAnimating, 'swipe-dragging': swipeDragging }" @pointerdown.capture="beginSwipe" @pointermove.capture="moveSwipe" @pointerup.capture="finishSwipe($event)" @pointercancel.capture="finishSwipe($event, true)" @click.capture="guardSwipeClick">
+    <RuntimeHosts v-if="runtimeHostsOpen" :transport="transport" :initial-view="hostsView" :initial-category="hostsCategory" :category-filter="hostsCategory"
       @picker="transferPicker = $event" @close="runtimeHostsOpen = false" @changed="controller.loadCatalog()" @open="openRuntimeSession" />
     <RuntimeConnectionDialog v-if="runtimeDialogProfile" :profile="runtimeDialogProfile" :transport="transport"
       :initial-group="runtimeDialogSeed"
       @open="openRuntimeTarget" @close="runtimeDialogProfile = null; runtimeDialogSeed = null" />
-    <!-- ── 分類連線列表（runtime 連線首頁）── -->
-    <div v-if="phase === 'list'" class="page list-page">
-      <header class="m-head">
-        <span class="m-title">art-term</span>
-        <span class="m-sub">連線</span>
-        <span class="flex" />
-        <button
-          v-if="controller.tabs.length"
-          class="mbtn slim"
-          data-testid="open-tabs"
-          @click="phase = 'session'"
-        >分頁（{{ controller.tabs.length }}）</button>
-      </header>
+      <header class="t-head workspace-header">
+        <button class="fixed-brand" :class="{ active: aboutOpen }" aria-label="軟體資訊首頁" @click="showHomepage">
+        <span class="m-brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m5 6 6 6-6 6M13 18h6" /></svg></span>
+        <div class="m-brand"><span class="m-title">art-term<span class="m-title-dot">.</span></span><span class="m-sub">CONNECTION HUB</span></div>
+        </button>
+        <nav class="page-text-navigation" aria-label="頁面切換">
+          <span v-show="!settingsOpen && !aboutOpen" class="workspace-progress-indicator" :style="workspaceIndicatorStyle" aria-hidden="true" />
+          <button class="page-text-link" :class="{ current: !settingsOpen && !aboutOpen && phase === 'list' }" :aria-current="!settingsOpen && !aboutOpen && phase === 'list' ? 'page' : undefined" data-testid="terminal-to-list" @click="slideTo('list')">Main</button>
+          <button class="page-text-link" :class="{ current: !settingsOpen && !aboutOpen && phase === 'session' }" :aria-current="!settingsOpen && !aboutOpen && phase === 'session' ? 'page' : undefined" @click="slideTo('session')">Connect</button>
 
-      <section class="card" data-testid="catalog-card">
-        <div v-if="controller.uiNotice.value" class="warn" data-testid="list-notice">
-          {{ controller.uiNotice.value }}
-        </div>
-        <CategoryList
-          :catalog-loading="controller.catalogLoading.value"
-          :runtime-profiles="controller.runtimeProfiles.value"
-          :runtime-profiles-error="controller.runtimeProfilesError.value"
-          :runtime-pending="runtimeEntry.pendingId.value"
-          :runtime-connected="runtimeConnected"
-          @runtime-open="runtimeEntry.primary"
-          @runtime-shell="runtimeEntry.shell"
-          @create="openRuntimeHosts('create')"
-          @manage="openRuntimeHosts('list')"
-          @refresh="controller.loadCatalog()"
-        />
-      </section>
-    </div>
+        </nav>
 
-    <!-- ── 多連線終端頁 ── -->
-    <!-- v-show, not v-if: TerminalPane instances must live for the whole tab
-         lifetime so hidden-tab buffers keep draining and scrollback survives
-         list↔session navigation. -->
-    <div v-show="phase === 'session'" class="page term-page">
-      <header class="t-head">
-        <button class="mbtn slim" data-testid="to-list" @click="backToList">連線</button>
-        <button v-if="runtimeAvailable" class="mbtn slim" data-testid="runtime-hosts-session-open" @click="openRuntimeHosts()">新增 openab-pty 連線</button>
-        <span class="chip" :class="activeTab?.status ?? 'idle'" data-testid="link-status">
-          {{ statusText }}
-        </span>
         <span class="flex" />
-        <button v-if="activeTab?.codingCli" class="mbtn slim" data-testid="launch-coding-cli"
+
+        <button v-if="!settingsOpen && !aboutOpen && phase === 'session' && activeTab?.codingCli" class="mbtn slim" data-testid="launch-coding-cli"
           :disabled="activeTab.status !== 'live'" @click="controller.launchCodingCli(activeTab)">{{ activeTab.codingCli.name }}</button>
         <button
-          v-if="activeTab && activeTab.status === 'live' && activeTab.desktopAvailable"
+          v-if="!settingsOpen && !aboutOpen && phase === 'session' && activeTab && activeTab.status === 'live' && activeTab.desktopAvailable"
           class="mbtn slim"
           data-testid="desktop-toggle"
           :disabled="activeTab.desktopBusy"
@@ -373,9 +403,50 @@ onBeforeUnmount(() => {
           :aria-label="activeTab.desktopEnabled ? '停用桌面預覽' : '啟用桌面預覽'"
           @click="toggleDesktop(activeTab)"
         >桌面</button>
-      </header>
 
-      <TabBar
+
+
+
+        <button class="settings-trigger" :class="{ active: settingsOpen }" :aria-pressed="settingsOpen" aria-label="全域設定" title="全域設定" @click="aboutOpen = false; voice.cancel('target'); settingsOpen = true">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 3-.6 2.3-2 .9-2.1-.7-2.3 4 1.6 1.7v2.3l-1.6 1.7 2.3 4 2.1-.7 2 .9.6 2.6h5l.6-2.6 2-.9 2.1.7 2.3-4-1.6-1.7v-2.3l1.6-1.7-2.3-4-2.1.7-2-.9L14.5 3Z" /><circle cx="12" cy="12" r="3" /></svg>
+        </button>
+      </header>
+    <div class="workspace-viewport">
+      <div v-if="aboutOpen" class="software-home-page" role="region" aria-label="軟體資訊首頁"><AppHomepage /></div>
+      <div v-if="settingsOpen" class="global-settings-page" role="region" aria-label="全域設定"><ThemeSettings embedded :transport="transport" :hosts="controller.runtimeProfiles.value" @changed="controller.loadCatalog()" @picker="transferPicker = $event" /></div>
+    <div v-show="!settingsOpen && !aboutOpen && (phase === 'list' || swipeVisible)" class="home-surface" :style="{ transform: pageTransform('list') }">
+
+
+    <div id="connections-panel" class="page list-page" role="region" aria-label="連線">
+      <section class="dashboard-region" data-testid="catalog-card" aria-label="連線工作區">
+        <div v-if="controller.uiNotice.value" class="warn" data-testid="list-notice">
+          {{ controller.uiNotice.value }}
+        </div>
+        <ConnectionDashboard
+          :transport="transport"
+          :active="!settingsOpen && !aboutOpen && phase === 'list'"
+          :catalog-loading="controller.catalogLoading.value"
+          :runtime-profiles="controller.runtimeProfiles.value"
+          :runtime-profiles-error="controller.runtimeProfilesError.value"
+          :runtime-pending="runtimeEntry.pendingId.value"
+          :runtime-connected="runtimeConnected"
+          @open="openRuntimeTarget"
+          @create="openRuntimeHosts('create', $event)"
+        />
+      </section>
+    </div>
+
+    </div>
+
+    <!-- ── 多連線終端頁 ── -->
+    <!-- v-show, not v-if: TerminalPane instances must live for the whole tab
+         lifetime so hidden-tab buffers keep draining and scrollback survives
+         list↔session navigation. -->
+    <div id="terminal-panel" v-show="!settingsOpen && !aboutOpen && (phase === 'session' || swipeVisible)" class="page term-page" :style="{ transform: pageTransform('session') }" role="region" aria-label="終端">
+
+
+
+      <TabBar v-if="controller.tabs.length"
         :tabs="controller.tabs"
         :active-key="controller.activeKey.value"
         @select="(t) => { runtimeEntry.cancel(); controller.setActive(t.key) }"
@@ -389,11 +460,10 @@ onBeforeUnmount(() => {
           :tab="tab"
           :active="tab.key === controller.activeKey.value"
           :controller="controller"
-          :reader-visible="phase === 'session' && !composerOpen && !runtimeHostsOpen && !runtimeDialogProfile"
+          :reader-visible="phase === 'session' && (!swipeVisible || nativeSwipeActive) && !voiceLightboxOpen && !composerOpen && !runtimeHostsOpen && !runtimeDialogProfile && !settingsOpen && !aboutOpen"
         />
         <div v-if="!controller.tabs.length" class="cover" data-testid="no-tabs">
           <div class="done">
-            <div class="hint">尚未開啟連線；回列表選擇一個連線。</div>
             <button class="mbtn primary" data-testid="no-tabs-targets" @click="backToList">
               選擇連線
             </button>
@@ -410,13 +480,6 @@ onBeforeUnmount(() => {
 
       <div class="keybar" data-testid="keybar">
         <button
-          class="kbtn"
-          :class="{ on: input.ctrlLatch.value }"
-          data-testid="k-ctrl"
-          @pointerdown.prevent="keepKeyboardState"
-          @click="tapCtrl"
-        >Ctrl</button>
-        <button
           v-for="k in KEYBAR"
           :key="k.id"
           class="kbtn"
@@ -424,19 +487,19 @@ onBeforeUnmount(() => {
           @pointerdown.prevent="keepKeyboardState"
           @click="tapKey(k.id)"
         >{{ k.label }}</button>
-        <button class="kbtn" data-testid="k-composer" @click="composerOpen = true">輸入</button>
         <button class="kbtn" data-testid="k-keyboard" @click="activeTab?.term?.focus()">鍵盤</button>
       </div>
 
       <VoiceButton
-        v-if="voice.state.pluginPresent && phase === 'session' && activeTab && voiceTarget"
+        v-if="(voice.state.pluginPresent || props.voicePlugin) && phase === 'session' && displayedVoiceTarget"
         :voice="voice"
-        :target="voiceTarget"
+        :target="displayedVoiceTarget"
+        @overlay="voiceLightboxOpen = $event"
       />
 
       <div class="t-foot">
-        <span v-if="activeTab?.remoteSession" class="mono" data-testid="remote-session">
-          {{ activeTab.remoteSession }}
+        <span v-if="displayedRemoteSession" class="mono" data-testid="remote-session">
+          {{ displayedRemoteSession }}
         </span>
         <span v-if="activeTab?.notice" class="warn">{{ activeTab.notice }}</span>
         <span v-if="controller.uiNotice.value" class="warn">{{ controller.uiNotice.value }}</span>
@@ -469,23 +532,13 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
+    </div>
   </div>
 </template>
 
 <style scoped>
 .m-app {
   position: relative;
-  --bg: #16171b;
-  --bg-panel: #1d1f24;
-  --bg-raised: #26282e;
-  --bg-hover: #2e3038;
-  --border: #33353d;
-  --text: #d7d7dc;
-  --text-dim: #9a9ca6;
-  --accent: #5b8def;
-  --ok: #6a9955;
-  --warn: #d7ba7d;
-  --err: #d16969;
   height: 100%;
   overflow: hidden;
   background: var(--bg);
@@ -503,25 +556,39 @@ onBeforeUnmount(() => {
 
 .list-page {
   overflow-y: auto;
-  padding: 10px;
-  gap: 10px;
+  padding: 14px;
+  gap: 12px;
+  background: radial-gradient(ellipse at 90% 0%, var(--page-glow), transparent 48%), var(--bg);
 }
 
 .m-head {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
-  padding: 4px 2px;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 2px 0;
 }
 
+.m-brand-mark { display: grid; place-items: center; width: 35px; height: 35px; border: 1px solid var(--border); border-radius: 10px; color: var(--accent); background: linear-gradient(145deg, var(--bg-raised), var(--bg-panel)); box-shadow: inset 0 1px 0 #ffffff0a; }
+.m-brand-mark svg { width: 23px; height: 23px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.m-brand { display: flex; flex-direction: column; gap: 3px; }
+
 .m-title {
-  font-size: 18px;
-  font-weight: 700;
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -.035em;
+  line-height: 1;
+  color: var(--text);
 }
+.m-title-dot { color: var(--accent); }
 
 .m-sub {
   color: var(--text-dim);
+  font-size: 8px;
+  letter-spacing: .16em;
 }
+
+.dashboard-region { min-width: 0; }
+.m-head .mbtn { min-height: 44px; border-color: var(--border); background: var(--bg-raised); font-size: 11px; }
 
 .card {
   background: var(--bg-panel);
@@ -626,7 +693,7 @@ onBeforeUnmount(() => {
 .mbtn.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #0e1116;
+  color: var(--on-accent);
   font-weight: 600;
 }
 
@@ -710,7 +777,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(22, 23, 27, 0.82);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
 }
 
 .t-area :deep(.done) {
@@ -837,7 +904,7 @@ onBeforeUnmount(() => {
 .kbtn.on {
   background: var(--accent);
   border-color: var(--accent);
-  color: #0e1116;
+  color: var(--on-accent);
   font-weight: 700;
 }
 
@@ -957,4 +1024,124 @@ onBeforeUnmount(() => {
   max-height: 30vh;
   object-fit: contain;
 }
+
+.settings-trigger { display: grid; place-items: center; flex: none; width: 44px; height: 44px; padding: 11px; background: transparent; border: 1px solid transparent; border-radius: 10px; color: var(--text-dim); cursor: pointer; }
+.settings-trigger:hover { color: var(--accent); background: var(--bg-raised); }
+.settings-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.settings-trigger svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+
+.m-head { gap: 5px; }
+.m-head .m-brand-mark { flex: none; }
+@media (max-width: 340px) { .m-head { gap: 3px; } .m-head .m-title { font-size: 18px; } .header-action { padding-inline: 5px; } }
+.header-action { min-height: 44px; min-width: 44px; border: 0; border-radius: 9px; padding: 0 9px; color: var(--text-dim); background: transparent; font: inherit; font-size: 12px; cursor: pointer; }
+.header-add { color: var(--accent); background: var(--bg-raised); }
+.header-action:hover { background: var(--bg-hover); color: var(--text); }
+.header-action:focus-visible, .session-switch:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.home-navigation { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.session-switch { min-height: 44px; display: inline-flex; align-items: center; gap: 9px; padding: 0 10px; border: 1px solid var(--border); border-radius: 9px; color: var(--accent); background: var(--bg-panel); font: inherit; font-size: 11px; cursor: pointer; }
+.session-switch:disabled { color: var(--text-dim); opacity: .65; cursor: default; }
+.session-switch svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
+.session-count { min-width: 19px; padding: 2px 4px; border-radius: 4px; background: var(--bg-raised); text-align: center; font-family: monospace; }
+
+.m-app { display: flex; flex-direction: column; background: radial-gradient(ellipse at 90% 0%, var(--page-glow), transparent 48%), var(--bg); }
+.main-header { flex: none; margin: 12px 14px 8px; }
+.workspace-navigation { display: flex; align-items: flex-end; justify-content: space-between; flex: none; margin: 0 14px; border-bottom: 1px solid var(--border); }
+.workspace-tabs { display: flex; align-items: stretch; gap: 3px; }
+.workspace-tab { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 40px; padding: 0 14px; border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0; background: transparent; color: var(--text-dim); font: inherit; font-size: 12px; cursor: pointer; position: relative; }
+.workspace-tab.active { color: var(--accent); background: var(--bg-panel); border-color: var(--border); }
+.workspace-tab.active::after { position: absolute; content: ''; height: 2px; bottom: 0; left: 12px; right: 12px; background: var(--accent); border-radius: 2px; }
+.workspace-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+.workspace-navigation > .settings-trigger { width: 40px; height: 40px; padding: 11px; }
+.page { flex: 1; height: auto; min-height: 0; }
+.list-page { padding: 5px 14px 14px; gap: 0; background: transparent; touch-action: pan-y; }
+.term-page { margin: 0 14px 10px; border: 1px solid var(--border); border-top: 0; border-radius: 0 0 10px 10px; overflow: hidden; }
+.t-head { padding: 5px 8px; }
+
+.term-page { margin: 0; border: 0; border-radius: 0; }
+.t-head { flex-wrap: nowrap; gap: 5px; padding: 4px 8px; }
+.t-head .mbtn { flex: none; white-space: nowrap; }
+.terminal-settings { flex: none; width: 30px; height: 30px; display: grid; place-items: center; padding: 6px; border: 0; border-radius: 6px; background: transparent; color: var(--text-dim); cursor: pointer; }
+.terminal-settings svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.terminal-settings:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.home-surface { position: absolute; inset: 0; display: flex; flex-direction: column; min-height: 0; background: radial-gradient(ellipse at 90% 0%, var(--page-glow), transparent 48%), var(--bg); touch-action: pan-y; }
+.term-page { position: absolute; inset: 0; background: var(--bg); touch-action: pan-y; }
+.t-head { touch-action: pan-y; }
+.swipe-animating .home-surface, .swipe-animating .term-page { transition: transform 200ms cubic-bezier(.2,.7,.3,1); }
+.swipe-dragging .home-surface, .swipe-dragging .term-page { user-select: none; }
+.swipe-dragging .home-surface { will-change: transform; }
+@media (prefers-reduced-motion: reduce) { .swipe-animating .home-surface, .swipe-animating .term-page { transition: none; } }
+
+.page-text-navigation { display: inline-flex; align-items: center; gap: 7px; flex: none; color: var(--text-dim); font-size: 11px; }
+.page-text-link { border: 0; border-radius: 0; background: transparent; padding: 5px 0; color: var(--text-dim); font: inherit; cursor: pointer; }
+.page-text-link.current { color: var(--accent); }
+.page-text-link:hover { color: var(--text); }
+.page-text-link:focus-visible { outline: 1px solid var(--accent); outline-offset: 3px; }
+.main-header .page-text-navigation { gap: 4px; font-size: 10px; }
+
+.page-text-navigation, .main-header .page-text-navigation { gap: 2px; font-size: 11px; align-items: stretch; }
+.page-text-link { position: relative; min-height: 30px; padding: 7px 9px; color: var(--text-dim); border: 0; background: transparent; }
+.page-text-link.current { color: var(--accent); font-weight: 600; }
+.page-text-link.current::after { content: ''; position: absolute; left: 8px; right: 8px; bottom: 0; height: 2px; border-radius: 2px; background: var(--accent); }
+.main-header .page-text-link { padding-inline: 6px; }
+.main-header .page-text-link.current::after { left: 5px; right: 5px; }
+
+.page-text-navigation, .main-header .page-text-navigation { position: relative; display: inline-grid; grid-template-columns: repeat(2, 1fr); gap: 0; }
+.page-text-link, .main-header .page-text-link { min-width: 54px; padding-inline: 7px; text-align: center; }
+.page-text-link.current::after { display: none; }
+.workspace-progress-indicator { position: absolute; left: 0; bottom: 0; width: 50%; height: 2px; pointer-events: none; z-index: 1; }
+.workspace-progress-indicator::after { content: ''; position: absolute; inset: 0 7px; border-radius: 2px; background: var(--accent); }
+.swipe-animating .workspace-progress-indicator { transition: transform 200ms cubic-bezier(.2,.7,.3,1); }
+@media (prefers-reduced-motion: reduce) { .swipe-animating .workspace-progress-indicator { transition: none; } }
+
+.workspace-header { position: relative; z-index: 2; flex: none; min-height: 36px; padding: 3px 10px; background: var(--bg); border-bottom: 1px solid var(--border); }
+.workspace-header .page-text-navigation { align-self: stretch; }
+.workspace-viewport { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.home-surface, .term-page { width: 100%; height: 100%; }
+
+.workspace-header { gap: 7px; padding: 4px 10px; min-height: 44px; }
+.fixed-brand { display: flex; align-items: center; gap: 6px; flex: none; }
+.fixed-brand .m-brand-mark { width: 25px; height: 25px; border-radius: 7px; }
+.fixed-brand .m-brand-mark svg { width: 17px; height: 17px; }
+.fixed-brand .m-title { font-size: 15px; }
+.fixed-brand .m-sub { display: none; }
+.workspace-header .settings-trigger { width: 30px; height: 30px; padding: 7px; }
+.workspace-header .settings-trigger svg { width: 17px; height: 17px; }
+.workspace-header .page-text-link { min-width: 48px; padding-inline: 5px; font-size: 10px; }
+.list-page { padding-top: 8px; }
+
+.workspace-header .page-text-navigation { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); flex: 1; margin-left: auto; max-width: 260px; }
+.workspace-header .page-text-link { min-width: 0; width: 100%; padding-inline: 4px; font-size: 11px; }
+.workspace-progress-indicator { width: 25%; }
+.settings-page-tab { display: grid; place-items: center; }
+.settings-page-tab svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.workspace-page { position: absolute; inset: 0; overflow-y: auto; background: var(--bg); touch-action: pan-y; }
+.swipe-animating .workspace-page { transition: transform 200ms cubic-bezier(.2,.7,.3,1); }
+.swipe-dragging .workspace-page { user-select: none; }
+@media (prefers-reduced-motion: reduce) { .swipe-animating .workspace-page { transition: none; } }
+
+.workspace-header { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; width: 100%; padding: 4px 10px; }
+.workspace-header .fixed-brand { min-width: 0; }
+.workspace-header .page-text-navigation { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); width: 100%; min-width: 0; max-width: none; margin: 0; gap: 0; }
+.workspace-header .page-text-link { display: grid; place-items: center; min-width: 0; width: 100%; height: 32px; margin: 0; padding: 4px 2px; font-size: 11px; }
+.workspace-header .workspace-progress-indicator { width: 25%; }
+.terminal-tools { display: flex; justify-content: flex-end; gap: 5px; padding: 3px 8px; background: var(--bg-panel); }
+
+.workspace-header { display: flex; gap: 7px; padding: 4px 10px; min-height: 44px; }
+.workspace-header .page-text-navigation { display: inline-grid; grid-template-columns: repeat(2, 1fr); flex: none; width: auto; min-width: 0; max-width: none; margin: 0; gap: 0; }
+.workspace-header .page-text-link { min-width: 48px; width: auto; height: 30px; padding: 5px; font-size: 10px; }
+.workspace-header .workspace-progress-indicator { width: 50%; }
+
+.global-settings-page { position: absolute; inset: 0; overflow-y: auto; background: var(--bg); }
+.workspace-header .settings-trigger { position: relative; }
+.workspace-header .settings-trigger.active { color: var(--accent); }
+.workspace-header .settings-trigger.active::after { content: ''; position: absolute; left: 5px; right: 5px; bottom: 0; height: 2px; border-radius: 2px; background: var(--accent); }
+.workspace-header { touch-action: pan-y; }
+/* xterm's vertical reader is handled in JS; horizontal drags belong to the pager. */
+.term-page :deep(.xterm-screen) { touch-action: pinch-zoom; }
+
+.fixed-brand { border: 0; padding: 0; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+.fixed-brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 5px; }
+.fixed-brand.active .m-title { color: var(--accent); }
+.software-home-page { position: absolute; inset: 0; overflow-y: auto; background: var(--bg); }
 </style>

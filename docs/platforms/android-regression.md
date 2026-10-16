@@ -4,6 +4,15 @@
 
 Linux/KVM 的日常 APK UI 回歸使用[介面操作矩陣](../../scripts/android-regression/ui-matrix.md)，延伸同一套 Suite／協定 fixture，涵蓋語音設定 swap、原生歷史捲動、重連、快速鍵與 Android 軟鍵盤狀態；不依賴 Windows EXE。本文以下保留既有 Windows＋APK 跨裝置流程。
 
+0.1.27 的固定頂列、設定頁與行內連線使用新版入口 `scripts/android-regression/ui_refresh.py`，以專用 Linux 模擬器執行真 APK。它另涵蓋未連線頁右滑、儲存燈箱偏好後重新進入 Connect，以及正式 Shell-exited 訊號後清除終端並往返滑動；也涵蓋首頁更新文件、設定與 Keystore 保存、明確建立工作、原生／WebView 滑動、快速鍵、原生主題與背景／系統選檔返回；實際語音辨識及 ARM64 手機觸控仍須實機確認。舊操作矩陣部分入口選擇器尚未配合新介面調整，不能直接把舊矩陣視為本版完整驗收。
+
+```bash
+source target/android-tools/env.sh
+target/android-regression/venv/bin/python scripts/android-regression/ui_refresh.py \
+  --sdk "$ANDROID_HOME" \
+  --apk crates/art-term-gui/gen/android/app/build/outputs/apk/x86_64/debug/app-x86_64-debug.apk
+```
+
 本流程已在 Android 15／API 35 模擬器實際操作 APK，涵蓋六組 Android 案例及一組雙向跨平台案例。測試 APK 是 x86_64 debug＋`openab-fixture`，不是更新私人手機的 ARM64 release APK。測試使用真正的 Android 系統與產品程式，但模擬器不具有實體手機的 ARM64、硬體 Keystore、安全硬體與各廠牌省電行為。每次執行是否通過，仍以該次完整結果與清理狀態判定。
 
 ## 依賴與資料流

@@ -13,6 +13,7 @@
 /crates/tauri-plugin-mobile-voice/android/build/
 /crates/tauri-plugin-mobile-voice/android/.tauri/
 /apps/desktop/dist/
+/apps/desktop/dist-ui-preview/
 /crates/art-term-gui/gen/
 
 # Python caches and local environments
