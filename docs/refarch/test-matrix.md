@@ -21,8 +21,9 @@
 | 真官方 Runtime configure | Rust 原生 configure→未修改官方 Runtime 管理 PTY→adapter→固定 client→A／B；raw／關 echo READY 握手，token 不在 replay／history／cmdline／environ／log；管理 Shell 刪除與名額恢復；renew 後仍可 configure／clear |
 | 工具生命週期 | 無 adapter 不假報 ready、auth／timeout／isError、clear 拒新呼叫、CLI stdio EOF 保留 Shell 選擇、Shell 結束清記憶體／socket、背景／晚到回應、App 重啟／takeover 不沿用未核對選擇；owner／0700／非 symlink 及同 UID 邊界 |
 | CLI 契約 | 確定性檢查 Codex -c stdio command／args 不含 URL／token、timeout 75秒、其他 CLI 不猜語法、不對既有程式偷偷輸入；此項不等於真 Codex／AI 已測 |
-| Windows 平台呈現 | 固定品牌／同頁左1/3直向清單與左下預覽／右側終端／全頁設定、Host 管理可達、4themes覆蓋新分頁、Windows版本資訊；連線內容直接滾輪共用 HostHistoryWindow（1024行／向上256行／錨點／到底追尾／ACK／keep／close），不改 xterm 鍵盤／Host mouse off、不載 Android plugin；設定覆蓋時輸出繼續、恢復fit／focus、表單快捷鍵保護 |
-| 回歸 | tmux 歷史按需讀頁、輸入／ACK／重連、固定滑動頂列／四主題／語音與鍵列、Host 搬移保留獨立 Screens、無私人預填 |
+| Windows 平台呈現 | 保留200px可調左欄／左下預覽／右側終端與全頁設定；單一 xterm 原始 PTY，normal5000行scrollback／垂直捲軸，真tmux alternate mouse／copy-mode原生位置指示；無DOM歷史覆蓋／snapshot polling／預載，不載Android plugin；小幅首wheel確有位移，閱讀中輸出不拉走位置、到底回live、中文及Backspace可見延遲、resize／Theme／焦點／表單快捷鍵 |
+| Windows native mouse lease | READY terminalMouse capability／舊helper Unsupported不送未知操作、活動可見分頁enable、60秒只續控制lease、切頁／hidden／unmount釋放、owner CAS與初始mouse／copy-mode／WheelUpPane精確還原、child mouse轉送、EOF／idle清理；不觸及個人tmux／其他owner，Android snapshot回歸 |
+| 回歸 | tmux 歷史按需讀頁、輸入／ACK／重連、固定滑動頂列／四主題／語音與鍵列、Host／Screen 混合搬移、Screen-only 還原及舊版 Host 檔相容、無私人預填 |
 
 ARM64 手機、現場網路／MCP、實際 Codex CLI 與 AI 模型各自需要明確結果；固定 client E2E、命令契約或舊 helper 案例不替代它們。無授權不操作 Owner 手機或既有共享服務。
 
@@ -73,7 +74,7 @@ Windows／APK 的 debug fixture CA 只限定測試建置，仍實際驗證 TLS�
 完成後列出案例 ID、實際通過／失敗／未執行、受測版本，以及仍需實機確認的項目。
 ```
 
-執行入口分別是 [Windows](../platforms/windows-regression.md)、[Android APK](../platforms/android-regression.md)、[Linux](../platforms/linux-regression.md)。Windows 本輪同步 Android 非平台功能，語音留下一階段；Linux 完成開發與適用檢查後，以開發分支及臨時交接文件交另一 Windows 電腦建置與 EXE／DPAPI／真 Runtime 驗收，不 merge／tag／release。Linux Runtime／broker 測試不能代替 Windows GUI 或手機驗收。
+執行入口分別是 [Windows](../platforms/windows-regression.md)、[Android APK](../platforms/android-regression.md)、[Linux](../platforms/linux-regression.md)。Windows 專屬修改在 Windows 電腦開發與檢查，語音留下一階段；本輪由 AI 完成基本驗收及必要審查後 commit／push `feat/windows-mobile-parity`，不等待 Owner 才提交，也不 merge main／tag／release。Windows fixture、直接真 tmux、真 Codex 與 OS IME 各自記錄結果，不能互相代替；Owner 最終使用回饋另列。
 
 ## 仍需另外驗收
 

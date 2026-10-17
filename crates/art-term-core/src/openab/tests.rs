@@ -1205,6 +1205,7 @@ fn single_toml_missing_credential_edit_export_import_and_fill() {
     let payload = store
         .export_snapshot(
             &[ExportSelection {
+                kind: crate::openab::profiles::TransferKind::Host,
                 id: p.id.clone(),
                 expected_revision: p.revision,
             }],
@@ -1216,6 +1217,7 @@ fn single_toml_missing_credential_edit_export_import_and_fill() {
     let encrypted_payload = store
         .export_snapshot(
             &[ExportSelection {
+                kind: crate::openab::profiles::TransferKind::Host,
                 id: p.id.clone(),
                 expected_revision: p.revision,
             }],
@@ -1475,7 +1477,7 @@ fn standalone_desktop_token_context_and_host_import_preserve_the_catalog() {
     let path = dir.path().join("connections.toml");
     let store = HostStore::load(path.clone(), Arc::new(FixtureCipher)).unwrap();
     let desktop = store.save_desktop(None, None, "Screen".into(), "http://localhost:9876/mcp".into(), Some(secret())).unwrap();
-    let preview = store.preview_import(super::transfer::Payload { entries: vec![super::transfer::Entry {
+    let preview = store.preview_import(super::transfer::Payload { desktops: Vec::new(), entries: vec![super::transfer::Entry {
         name: "Imported host".into(), origin: "https://import.example/".into(), metadata: Default::default(), credential: Some(secret())
     }] }).unwrap();
     let key = preview.entries[0].key.clone();

@@ -228,7 +228,7 @@ onBeforeUnmount(() => {
         <p v-if="notice" role="status">{{ notice }}</p>
         <p v-if="testPrefillApplied" role="status">私人測試預填：尚未儲存，請手動儲存後再測試。</p>
         <div v-if="view === 'list' || embedded" data-testid="runtime-host-list">
-        <div v-if="!embedded" class="transfer-actions"><button type="button" :disabled="busy" data-testid="runtime-import" @click="reset(); transferMode = 'import'">匯入連線</button><button type="button" :disabled="busy || !visibleHosts.length" data-testid="runtime-export" @click="reset(); transferMode = 'export'">匯出連線</button></div>
+        <div v-if="!embedded" class="transfer-actions"><button type="button" :disabled="busy" data-testid="runtime-import" @click="reset(); transferMode = 'import'">匯入連線</button><button type="button" :disabled="busy" data-testid="runtime-export" @click="reset(); transferMode = 'export'">匯出連線</button></div>
         <button v-if="!embedded" type="button" data-testid="runtime-create" :disabled="busy" @click="create">新增 openab-pty 連線</button>
         <p v-if="busy" role="status">處理中…</p>
         <p v-else-if="!visibleHosts.length">尚未儲存連線。選擇新增連線開始設定。</p>

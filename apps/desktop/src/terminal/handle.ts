@@ -123,6 +123,8 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
   }
   if (desktopWheel) {
     term.attachCustomWheelEventHandler(event => {
+      if (!mobileScroll) term.options.scrollSensitivity =
+        term.buffer.active.type === 'alternate' && term.modes.mouseTrackingMode !== 'none' ? 3 : 1
       if (term.buffer.active.type !== 'alternate' || term.modes.mouseTrackingMode !== 'none') return true
       // Keep native mouse reporting for mouse-enabled tmux. Otherwise
       // prevent xterm's wheel-to-arrow fallback, including the

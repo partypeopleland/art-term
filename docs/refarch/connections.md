@@ -60,7 +60,7 @@ Screen 保存於同一檔案的 `desktops` 集合，欄位是 id、revision、na
 
 MCP URL 可包含服務路徑，例如虛構的 `https://screen.example.test/mcp`，不得含帳密、query、fragment。HTTPS 驗證正常 TLS；HTTP 只允許 loopback 或 Tailnet 範圍，DNS 每次連線重新核對並固定到合格位址，詳見[傳輸規則](desktop.md#原生-mcp-傳輸)。token 是最多 1024 bytes 的可見 ASCII，保存使用獨立 domain、id、URL、revision 的 CredentialCipher context，沿用平台金鑰但不與 Runtime 憑證互換。
 
-同 URL 編輯可不重填 token，改 URL 必須重填；revision 更新後重新 seal。讀回介面只提供非秘密 metadata，不回填密文內的 token。設定刪除、修改或檔案外部變更後，過期 snapshot 不得重新啟用預覽或工具。Host CRUD、匯入與匯出保留完整 Screen 集合；目前搬移檔只包含 Host，不含 Screen。
+同 URL 編輯可不重填 token，改 URL 必須重填；revision 更新後重新 seal。讀回介面只提供非秘密 metadata，不回填密文內的 token。設定刪除、修改或檔案外部變更後，過期 snapshot 不得重新啟用預覽或工具。Host CRUD 與僅 Host 的匯入保留完整 Screen 集合；[連線搬移](connection-transfer.md)亦可選取獨立 Screens，含 token 時整份密碼加密，目的裝置重新保護。
 
 ## 憑證保存
 
@@ -80,7 +80,7 @@ v2 仍要求 auto_discover=false 及空 computers／agents；退役 SSH-only 設
 
 新增第一筆 Screen 前，若原 connections.toml 存在，同目錄先建立 `connections.pre-desktops.toml` 備份；Unix 權限為 0600。備份僅建立一次，已有合法私有備份時保留，不覆寫；symlink、非一般檔案或 Unix 下其他帳號可讀寫的備份會拒絕。原設定尚不存在時無舊檔可備份。已有 schema 5 啟動時不改檔，有 Screen 的保存才使用 schema 6，刪除最後一筆 Screen 後保存為 schema 5。新版本保留 Host id／revision 與既有加密 context，Screen token 使用獨立 context。備份也含平台密文，須和原檔一樣保護，不能放 Git。
 
-降版到不支援 schema 6 的 App 前，關閉 App 並還原新增 Screen 前的備份，或先在新版明確移除 Screen 集合、確認保存為 schema 5；不能為了降版靜默丟棄桌面。還原舊備份也會回復備份後新增／修改的 Host，應先確認差異。跨裝置 Host 匯出不包含 Screen，無法取代 Screen 備份。
+降版到不支援 schema 6 的 App 前，關閉 App 並還原新增 Screen 前的備份，或先在新版明確移除 Screen 集合、確認保存為 schema 5；不能為了降版靜默丟棄桌面。還原舊備份也會回復備份後新增／修改的 Host，應先確認差異。跨裝置可匯出含 Screens 的加密搬移檔；這與降版前的完整 TOML 備份用途不同，搬移檔不保留來源平台密文或工作狀態。
 
 ## Runtime 契約
 

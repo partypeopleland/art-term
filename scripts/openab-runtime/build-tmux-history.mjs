@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // Build a self-contained Node 22 worker; no Host node_modules installation.
 import { createRequire } from 'node:module';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const require = createRequire(path.join(root, 'apps/desktop/package.json'));
 const paged = process.argv.includes('--paged');
 const outArg = process.argv.slice(2).find(arg => arg !== '--paged');
-const { build } = await import(require.resolve('vite'));
+const { build } = await import(pathToFileURL(require.resolve('vite')).href);
 await build({
   configFile: false,
   root: path.join(root, 'apps/desktop'),

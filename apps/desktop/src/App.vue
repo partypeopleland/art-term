@@ -130,7 +130,7 @@ const statusText = computed(() => !activeTab.value ? '未連線' : activeTab.val
         </div>
         <div class="desktop-session-content">
           <div class="term-area">
-            <TerminalPane v-for="tab in controller.tabs" :key="tab.key" :tab="tab" :active="terminalVisible && tab.key === controller.activeKey.value" :controller="controller" inline-history />
+            <TerminalPane v-for="tab in controller.tabs" :key="tab.key" :tab="tab" :active="terminalVisible && tab.key === controller.activeKey.value" :controller="controller" native-scroll />
             <div v-if="!controller.tabs.length" class="empty">從左側選擇連線，開始工作。</div>
           </div>
         </div>

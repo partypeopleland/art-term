@@ -520,19 +520,51 @@ impl HostStore {
 /// Opaque native owner of validated imported data and the complete store snapshot.
 pub struct ImportPreview {
     payload: super::transfer::Payload,
-    fingerprint: Vec<HostProfile>,
+    fingerprint: Option<Vec<u8>>,
     pub entries: Vec<ImportEntry>,
+}
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TransferKind {
+    #[default]
+    Host,
+    Screen,
 }
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportEntry {
     pub key: String,
     pub name: String,
-    pub origin: String,
-    pub metadata: crate::connections::ConnectionMetadata,
-    pub has_credential: bool,
     pub match_status: &'static str,
-    pub target: Option<HostProfile>,
+    #[serde(flatten)]
+    pub details: ImportDetails,
+}
+#[derive(Clone, Debug, Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "lowercase",
+    rename_all_fields = "camelCase"
+)]
+pub enum ImportDetails {
+    Host {
+        origin: String,
+        metadata: crate::connections::ConnectionMetadata,
+        has_credential: bool,
+        target: Option<HostProfile>,
+    },
+    Screen {
+        mcp_url: String,
+        has_token: bool,
+        target: Option<crate::instance_mcp::DesktopProfile>,
+    },
+}
+impl ImportEntry {
+    pub fn has_secret(&self) -> bool {
+        match &self.details {
+            ImportDetails::Host { has_credential, .. } => *has_credential,
+            ImportDetails::Screen { has_token, .. } => *has_token,
+        }
+    }
 }
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -549,6 +581,8 @@ pub struct ImportSelection {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ExportSelection {
+    #[serde(default)]
+    pub kind: TransferKind,
     pub id: String,
     pub expected_revision: u64,
 }
@@ -559,6 +593,7 @@ pub struct ImportResult {
     pub updated: usize,
     pub skipped: usize,
     pub profiles: Vec<HostProfile>,
+    pub desktops: Vec<crate::instance_mcp::DesktopProfile>,
 }
 impl HostStore {
     /// One lock, expected revisions, and no unseal at all for the public mode.
@@ -568,16 +603,41 @@ impl HostStore {
         include_credentials: bool,
         _catalog: Option<&crate::connections::Connections>,
     ) -> Result<super::transfer::Payload, ApiError> {
-        if selected.is_empty() || selected.len() > MAX_HOSTS {
+        if selected.is_empty() || selected.len() > MAX_HOSTS * 2 {
             return Err(ApiError::Capacity);
         }
         let guard = self.records.lock().map_err(|_| ApiError::StateChanged)?;
         self.ensure_source()?;
         let mut seen = std::collections::HashSet::new();
         let mut entries = Vec::new();
+        let mut desktops = Vec::new();
+        let desktop_records = if selected.iter().any(|s| s.kind == TransferKind::Screen) {
+            self.desktop_records()?
+        } else {
+            Vec::new()
+        };
         for s in selected {
-            if !seen.insert(&s.id) {
+            if !seen.insert((s.kind as u8, &s.id)) {
                 return Err(ApiError::Protocol);
+            }
+            if s.kind == TransferKind::Screen {
+                let r = desktop_records
+                    .iter()
+                    .find(|r| r.profile.id == s.id && r.profile.revision == s.expected_revision)
+                    .ok_or(ApiError::StateChanged)?;
+                desktops.push(super::transfer::ScreenEntry {
+                    name: r.profile.name.clone(),
+                    mcp_url: r.profile.mcp_url.clone(),
+                    token: if include_credentials {
+                        Some(self.cipher.unseal(
+                            &r.token_ciphertext,
+                            &instance_profiles::desktop_context(&r.profile),
+                        )?)
+                    } else {
+                        None
+                    },
+                });
+                continue;
             }
             let r = guard
                 .iter()
@@ -598,7 +658,7 @@ impl HostStore {
                 },
             });
         }
-        let mut payload = super::transfer::Payload { entries };
+        let mut payload = super::transfer::Payload { entries, desktops };
         payload.validate()?;
         Ok(payload)
     }
@@ -609,34 +669,66 @@ impl HostStore {
         payload.validate()?;
         let guard = self.records.lock().map_err(|_| ApiError::StateChanged)?;
         self.ensure_source()?;
-        let fingerprint: Vec<_> = guard.iter().map(|r| r.profile.clone()).collect();
-        let entries = payload
+        let hosts: Vec<_> = guard.iter().map(|r| r.profile.clone()).collect();
+        let fingerprint = self
+            .source
+            .lock()
+            .map_err(|_| ApiError::StateChanged)?
+            .clone();
+        let mut entries: Vec<_> = payload
             .entries
             .iter()
             .map(|e| {
-                let matches: Vec<_> = fingerprint
-                    .iter()
-                    .filter(|p| p.base_url == e.origin)
-                    .collect();
+                let matches: Vec<_> = hosts.iter().filter(|p| p.base_url == e.origin).collect();
                 ImportEntry {
                     key: uuid::Uuid::new_v4().to_string(),
                     name: e.name.clone(),
-                    origin: e.origin.clone(),
-                    metadata: e.metadata.clone(),
-                    has_credential: e.credential.is_some(),
+
                     match_status: match matches.len() {
                         0 => "new",
                         1 => "duplicate",
                         _ => "ambiguous",
                     },
-                    target: if matches.len() == 1 {
-                        Some(matches[0].clone())
-                    } else {
-                        None
+                    details: ImportDetails::Host {
+                        origin: e.origin.clone(),
+                        metadata: e.metadata.clone(),
+                        has_credential: e.credential.is_some(),
+                        target: if matches.len() == 1 {
+                            Some(matches[0].clone())
+                        } else {
+                            None
+                        },
                     },
                 }
             })
             .collect();
+        if !payload.desktops.is_empty() {
+            let local = self.desktop_records()?;
+            for e in &payload.desktops {
+                let matches: Vec<_> = local
+                    .iter()
+                    .filter(|r| r.profile.mcp_url == e.mcp_url)
+                    .collect();
+                entries.push(ImportEntry {
+                    key: uuid::Uuid::new_v4().to_string(),
+                    name: e.name.clone(),
+                    match_status: match matches.len() {
+                        0 => "new",
+                        1 => "duplicate",
+                        _ => "ambiguous",
+                    },
+                    details: ImportDetails::Screen {
+                        mcp_url: e.mcp_url.clone(),
+                        has_token: e.token.is_some(),
+                        target: if matches.len() == 1 {
+                            Some(matches[0].profile.clone())
+                        } else {
+                            None
+                        },
+                    },
+                });
+            }
+        }
         Ok(ImportPreview {
             payload,
             fingerprint,
@@ -650,16 +742,12 @@ impl HostStore {
         preview: ImportPreview,
         selected: Vec<ImportSelection>,
     ) -> Result<ImportResult, ApiError> {
-        if selected.len() > MAX_HOSTS {
+        if selected.len() > MAX_HOSTS * 2 {
             return Err(ApiError::Capacity);
         }
         let mut guard = self.records.lock().map_err(|_| ApiError::StateChanged)?;
         self.ensure_source()?;
-        if guard
-            .iter()
-            .map(|r| &r.profile)
-            .ne(preview.fingerprint.iter())
-        {
+        if *self.source.lock().map_err(|_| ApiError::StateChanged)? != preview.fingerprint {
             return Err(ApiError::StateChanged);
         }
         let mut choices = std::collections::HashMap::new();
@@ -676,8 +764,9 @@ impl HostStore {
             updated: 0,
             skipped: 0,
             profiles: Vec::new(),
+            desktops: Vec::new(),
         };
-        for (mut entry, info) in preview.payload.entries.into_iter().zip(preview.entries) {
+        for (mut entry, info) in preview.payload.entries.into_iter().zip(&preview.entries) {
             let Some(choice) = choices.remove(&info.key) else {
                 result.skipped += 1;
                 continue;
@@ -689,7 +778,10 @@ impl HostStore {
             if info.match_status == "ambiguous" {
                 return Err(ApiError::Protocol);
             }
-            let (mut profile, index, old_secret) = match (choice.action, info.target) {
+            let ImportDetails::Host { target, .. } = &info.details else {
+                return Err(ApiError::Protocol);
+            };
+            let (mut profile, index, old_secret) = match (choice.action, target.clone()) {
                 (ImportAction::Add, None) if info.match_status == "new" => (
                     HostProfile {
                         id: uuid::Uuid::new_v4().to_string(),
@@ -760,7 +852,101 @@ impl HostStore {
         if candidate.len() > MAX_HOSTS {
             return Err(ApiError::Capacity);
         }
-        if result.added + result.updated > 0 {
+        let has_screens = !preview.payload.desktops.is_empty();
+        if has_screens {
+            let mut desktops = self.desktop_records()?;
+            let had_desktops = !desktops.is_empty();
+            for (mut entry, info) in preview.payload.desktops.into_iter().zip(
+                preview
+                    .entries
+                    .iter()
+                    .filter(|e| matches!(e.details, ImportDetails::Screen { .. })),
+            ) {
+                let Some(choice) = choices.remove(&info.key) else {
+                    result.skipped += 1;
+                    continue;
+                };
+                if choice.action == ImportAction::Skip {
+                    result.skipped += 1;
+                    continue;
+                }
+                let ImportDetails::Screen { target, .. } = &info.details else {
+                    return Err(ApiError::Protocol);
+                };
+                let (profile, index) = match (choice.action, target) {
+                    (ImportAction::Add, None) if info.match_status == "new" => (
+                        crate::instance_mcp::DesktopProfile {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            revision: 1,
+                            name: entry.name,
+                            mcp_url: entry.mcp_url,
+                            token_present: true,
+                        },
+                        None,
+                    ),
+                    (ImportAction::Update, Some(old)) if info.match_status == "duplicate" => {
+                        let i = desktops
+                            .iter()
+                            .position(|r| r.profile == *old)
+                            .ok_or(ApiError::StateChanged)?;
+                        (
+                            crate::instance_mcp::DesktopProfile {
+                                id: old.id.clone(),
+                                revision: old
+                                    .revision
+                                    .checked_add(1)
+                                    .ok_or(ApiError::StateChanged)?,
+                                name: entry.name,
+                                mcp_url: entry.mcp_url,
+                                token_present: true,
+                            },
+                            Some(i),
+                        )
+                    }
+                    _ => return Err(ApiError::Protocol),
+                };
+                if choice.credential.is_some() && (index.is_some() || entry.token.is_some()) {
+                    return Err(ApiError::Protocol);
+                }
+                let token = entry
+                    .token
+                    .take()
+                    .or(choice.credential)
+                    .map(Ok)
+                    .unwrap_or_else(|| {
+                        let i = index.ok_or(ApiError::Protocol)?;
+                        self.cipher.unseal(
+                            &desktops[i].token_ciphertext,
+                            &instance_profiles::desktop_context(&desktops[i].profile),
+                        )
+                    })?;
+                if !token.expose().is_ascii() {
+                    return Err(ApiError::Protocol);
+                }
+                let record = instance_profiles::DesktopRecord {
+                    token_ciphertext: self
+                        .cipher
+                        .seal(&token, &instance_profiles::desktop_context(&profile))?,
+                    profile: profile.clone(),
+                };
+                if let Some(i) = index {
+                    desktops[i] = record;
+                    result.updated += 1;
+                } else {
+                    desktops.push(record);
+                    result.added += 1;
+                }
+                result.desktops.push(profile);
+            }
+            if result.added + result.updated > 0 {
+                let bytes = self.encode_desktop_records(&candidate, &desktops)?;
+                if !had_desktops && !desktops.is_empty() {
+                    self.backup_before_desktops()?;
+                }
+                self.persist_bytes(&bytes)?;
+                *guard = candidate;
+            }
+        } else if result.added + result.updated > 0 {
             self.save(&candidate)?;
             *guard = candidate;
         }

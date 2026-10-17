@@ -44,7 +44,7 @@ if (!props.embedded) useModalFocus(dialog, () => emit('close'))
         <h2 id="transfer-settings-title">連線設定</h2>
         <div class="transfer-setting-actions">
           <button data-testid="runtime-import" :disabled="pickerActive" :aria-pressed="transferMode === 'import'" @click="transferMode = 'import'"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M4 16v4h16v-4" /></svg><span>匯入連線</span></button>
-          <button data-testid="runtime-export" :disabled="pickerActive || !hosts.length" :aria-pressed="transferMode === 'export'" @click="transferMode = 'export'"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m-4 4 4-4 4 4M4 16v4h16v-4" /></svg><span>匯出連線</span></button>
+          <button data-testid="runtime-export" :disabled="pickerActive" :aria-pressed="transferMode === 'export'" @click="transferMode = 'export'"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m-4 4 4-4 4 4M4 16v4h16v-4" /></svg><span>匯出連線</span></button>
         </div>
         <RuntimeTransfer v-if="transferMode" :key="transferMode" :mode="transferMode" :transport="transport" :hosts="hosts" @close="transferMode = null" @changed="emit('changed')" @picker="picker" />
         <div v-else class="new-connection-settings">

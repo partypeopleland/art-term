@@ -1,24 +1,28 @@
 <script setup lang="ts">
 import App from '../src/App.vue'
 import { createPreviewTransport } from './transport'
-import type { HostHistoryPage, HostHistoryRequest, HostHistoryReply } from '../src/terminal/native'
+import type { HostHistoryRequest } from '../src/terminal/native'
 
 const transport = createPreviewTransport()
 const requests: HostHistoryRequest[] = []
-let epoch = 1, count = 1800
-const counts = new Map([[epoch, count]])
-const records = (total: number) => Array.from({ length: total }, (_, i) => ({ id: i + 1,
-  text: `ROW-${i + 1} ` + (i % 7 === 0 ? '繁體中文與 English 長行自動換行 '.repeat(24) : '桌面終端示範'), styles: [] }))
-const historyPage = (start: number, end: number, version = epoch): HostHistoryPage => ({ kind: 'page', instance: 'a'.repeat(32), epoch: version,
-  columns: 80, rows: 24, rowCount: counts.get(version)!, start, end, hasOlder: start > 0, records: records(counts.get(version)!).slice(start, end) })
-transport.runtimeHistory = async (_sid, request): Promise<HostHistoryReply> => {
+const pending = new Map<string, number[]>()
+let count = 0
+const open = transport.open
+transport.open = async (...args) => {
+  const session = await open(...args)
+  pending.set(session.id, [])
+  append(96)
+  return session
+}
+const poll = transport.poll
+transport.poll = async sid => {
+  const output = await poll(sid)
+  output.bytes.push(...(pending.get(sid)?.splice(0) ?? []))
+  return output
+}
+transport.runtimeHistory = async (_sid, request) => {
   requests.push(request)
-  if (request.op === 'viewport') return historyPage(Math.max(0, count - 24), count)
-  if (request.op === 'older') {
-    await new Promise(resolve => setTimeout(resolve, 150))
-    return historyPage(Math.max(0, request.before - request.limit), request.before, request.epoch)
-  }
-  return { kind: 'ack', instance: 'a'.repeat(32), epoch, op: request.op }
+  return { kind: 'ack', instance: 'a'.repeat(32), op: request.op }
 }
 const select = transport.instanceSelect!
 transport.instanceSelect = async (...args) => {
@@ -27,10 +31,13 @@ transport.instanceSelect = async (...args) => {
 }
 const write = transport.write
 transport.write = async (sid, input) => {
-  await write(sid, input)
-  append(1)
+  if (input.every(byte => byte === 127 || byte === 8)) pending.get(sid)?.push(...new TextEncoder().encode('\b \b'.repeat(input.length)))
+  else await write(sid, input)
 }
-function append(amount = 25) { count += amount; epoch++; counts.set(epoch, count); for (const version of [...counts.keys()].slice(0, -2)) counts.delete(version) }
+function append(amount = 25) {
+  const text = Array.from({ length: amount }, () => `ROW-${++count} 桌面終端示範\r\n`).join('')
+  for (const queue of pending.values()) queue.push(...new TextEncoder().encode(text))
+}
 Object.assign(window, { __desktopPreview: { requests, append } })
 </script>
 

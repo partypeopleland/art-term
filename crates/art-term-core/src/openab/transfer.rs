@@ -14,6 +14,7 @@ use zeroize::Zeroizing;
 pub const MAX_FILE: usize = 2 * 1024 * 1024;
 pub const MAX_PAYLOAD: usize = 1024 * 1024;
 const FORMAT: &str = "art-term-connections";
+const DOMAIN_V2: &[u8] = b"art-term-connections:v2:encrypted:argon2id:v19:m65536:t3:p4:aes-256-gcm";
 const DOMAIN: &[u8] = b"art-term-connections:v1:encrypted:argon2id:v19:m65536:t3:p4:aes-256-gcm";
 
 // Dedicated transfer DTOs keep strictness independent of configuration migrations.
@@ -67,8 +68,29 @@ pub struct Entry {
     pub metadata: ConnectionMetadata,
     pub credential: Option<Secret>,
 }
+pub struct ScreenEntry {
+    pub name: String,
+    pub mcp_url: String,
+    pub token: Option<Secret>,
+}
 pub struct Payload {
     pub entries: Vec<Entry>,
+    pub desktops: Vec<ScreenEntry>,
+}
+impl Payload {
+    fn version(&self) -> u32 {
+        if self.desktops.is_empty() {
+            1
+        } else {
+            2
+        }
+    }
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PublicScreen {
+    name: String,
+    mcp_url: String,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -84,6 +106,21 @@ struct PublicFile {
     version: u32,
     mode: String,
     connections: Vec<PublicEntry>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_screens"
+    )]
+    desktops: Option<Vec<PublicScreen>>,
+}
+
+// An explicitly present null collection is invalid, including on legacy v1.
+fn present_screens<'de, D, T>(d: D) -> Result<Option<Vec<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Vec::<T>::deserialize(d).map(Some)
 }
 
 // Parse strings directly into a zeroizing owner. No serde_json::Value secret tree.
@@ -120,10 +157,19 @@ struct PrivateEntry {
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct PrivateScreen {
+    name: String,
+    mcp_url: String,
+    token: Credential,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct PrivateFile {
     format: String,
     version: u32,
     connections: Vec<PrivateEntry>,
+    #[serde(default, deserialize_with = "present_screens")]
+    desktops: Option<Vec<PrivateScreen>>,
 }
 // Serialization exists only for a private borrowed wrapper, never the public sensitive owner.
 struct PrivateOutput<'a>(&'a Payload);
@@ -158,10 +204,41 @@ impl Serialize for PrivateOutput<'_> {
                 o.end()
             }
         }
-        let mut o = s.serialize_struct("Payload", 3)?;
+        struct Screens<'a>(&'a [ScreenEntry]);
+        struct Screen<'a>(&'a ScreenEntry);
+        impl Serialize for Screen<'_> {
+            fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+                let mut o = s.serialize_struct("Screen", 3)?;
+                o.serialize_field("name", &self.0.name)?;
+                o.serialize_field("mcp_url", &self.0.mcp_url)?;
+                o.serialize_field(
+                    "token",
+                    self.0
+                        .token
+                        .as_ref()
+                        .ok_or_else(|| serde::ser::Error::custom("token required"))?
+                        .expose(),
+                )?;
+                o.end()
+            }
+        }
+        impl Serialize for Screens<'_> {
+            fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+                let mut o = s.serialize_seq(Some(self.0.len()))?;
+                for e in self.0 {
+                    o.serialize_element(&Screen(e))?;
+                }
+                o.end()
+            }
+        }
+        let version = self.0.version();
+        let mut o = s.serialize_struct("Payload", if version == 1 { 3 } else { 4 })?;
         o.serialize_field("format", FORMAT)?;
-        o.serialize_field("version", &1u32)?;
+        o.serialize_field("version", &version)?;
         o.serialize_field("connections", &Entries(&self.0.entries))?;
+        if version == 2 {
+            o.serialize_field("desktops", &Screens(&self.0.desktops))?;
+        }
         o.end()
     }
 }
@@ -198,6 +275,7 @@ struct EncryptedFile {
     ciphertext: String,
 }
 pub struct LockedFile {
+    version: u32,
     salt: [u8; 16],
     nonce: [u8; 12],
     ciphertext: Vec<u8>,
@@ -208,7 +286,10 @@ pub enum Decoded {
 }
 impl Payload {
     pub fn validate(&mut self) -> Result<(), ApiError> {
-        if self.entries.is_empty() || self.entries.len() > 64 {
+        if (self.entries.is_empty() && self.desktops.is_empty())
+            || self.entries.len() > 64
+            || self.desktops.len() > 64
+        {
             return Err(ApiError::Capacity);
         }
         let mut origins = HashSet::new();
@@ -234,6 +315,26 @@ impl Payload {
                 + e.credential.as_ref().map_or(0, |s| s.expose().len())
                 + 128;
         }
+        let mut urls = HashSet::new();
+        for e in &mut self.desktops {
+            if e.name.is_empty()
+                || e.name.len() > 128
+                || e.name.trim() != e.name
+                || e.name.chars().any(char::is_control)
+            {
+                return Err(ApiError::Protocol);
+            }
+            e.mcp_url = crate::instance_mcp::canonical_url(&e.mcp_url)?;
+            if !urls.insert(e.mcp_url.clone())
+                || e.token.as_ref().is_some_and(|t| !t.expose().is_ascii())
+            {
+                return Err(ApiError::Protocol);
+            }
+            size += e.name.len()
+                + e.mcp_url.len()
+                + e.token.as_ref().map_or(0, |t| t.expose().len())
+                + 128;
+        }
         if size > MAX_PAYLOAD {
             return Err(ApiError::Capacity);
         }
@@ -241,7 +342,7 @@ impl Payload {
     }
 }
 fn check_header(format: &str, version: u32) -> Result<(), ApiError> {
-    if format != FORMAT || version != 1 {
+    if format != FORMAT || !matches!(version, 1 | 2) {
         Err(ApiError::Protocol)
     } else {
         Ok(())
@@ -274,7 +375,20 @@ pub fn decode(bytes: &[u8]) -> Result<Decoded, ApiError> {
             if f.mode != "without-credentials" || bytes.len() > MAX_PAYLOAD {
                 return Err(ApiError::Protocol);
             }
+            if (f.version == 1) != f.desktops.is_none() {
+                return Err(ApiError::Protocol);
+            }
             let mut p = Payload {
+                desktops: f
+                    .desktops
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|e| ScreenEntry {
+                        name: e.name,
+                        mcp_url: e.mcp_url,
+                        token: None,
+                    })
+                    .collect(),
                 entries: f
                     .connections
                     .into_iter()
@@ -305,6 +419,7 @@ pub fn decode(bytes: &[u8]) -> Result<Decoded, ApiError> {
                 return Err(ApiError::Protocol);
             }
             Ok(Decoded::Encrypted(LockedFile {
+                version: f.version,
                 salt,
                 nonce,
                 ciphertext,
@@ -330,8 +445,14 @@ fn derive(password: &str, salt: &[u8; 16]) -> Result<Zeroizing<[u8; 32]>, ApiErr
         .map_err(|_| ApiError::Protocol)?;
     Ok(key)
 }
-fn aad(salt: &[u8; 16], nonce: &[u8; 12]) -> Vec<u8> {
-    [DOMAIN, &[0], salt, nonce].concat()
+fn aad(version: u32, salt: &[u8; 16], nonce: &[u8; 12]) -> Vec<u8> {
+    [
+        if version == 1 { DOMAIN } else { DOMAIN_V2 },
+        &[0],
+        salt,
+        nonce,
+    ]
+    .concat()
 }
 pub fn unlock(file: LockedFile, password: Zeroizing<String>) -> Result<Payload, ApiError> {
     let key = derive(&password, &file.salt)?;
@@ -340,7 +461,7 @@ pub fn unlock(file: LockedFile, password: Zeroizing<String>) -> Result<Payload, 
     cipher
         .decrypt_in_place(
             Nonce::from_slice(&file.nonce),
-            &aad(&file.salt, &file.nonce),
+            &aad(file.version, &file.salt, &file.nonce),
             &mut *bytes,
         )
         .map_err(|_| ApiError::Auth)?;
@@ -349,7 +470,20 @@ pub fn unlock(file: LockedFile, password: Zeroizing<String>) -> Result<Payload, 
     }
     let f: PrivateFile = serde_json::from_slice(&bytes).map_err(|_| ApiError::Protocol)?;
     check_header(&f.format, f.version)?;
+    if f.version != file.version || (f.version == 1) != f.desktops.is_none() {
+        return Err(ApiError::Protocol);
+    }
     let mut p = Payload {
+        desktops: f
+            .desktops
+            .unwrap_or_default()
+            .into_iter()
+            .map(|e| ScreenEntry {
+                name: e.name,
+                mcp_url: e.mcp_url,
+                token: Some(e.token.0),
+            })
+            .collect(),
         entries: f
             .connections
             .into_iter()
@@ -369,12 +503,27 @@ pub fn encode(
     password: Option<Zeroizing<String>>,
 ) -> Result<Vec<u8>, ApiError> {
     payload.validate()?;
+    let version = payload.version();
     match password {
         None => {
             let f = PublicFile {
                 format: FORMAT.into(),
-                version: 1,
+                version,
                 mode: "without-credentials".into(),
+                desktops: if version == 2 {
+                    Some(
+                        payload
+                            .desktops
+                            .into_iter()
+                            .map(|e| PublicScreen {
+                                name: e.name,
+                                mcp_url: e.mcp_url,
+                            })
+                            .collect(),
+                    )
+                } else {
+                    None
+                },
                 connections: payload
                     .entries
                     .into_iter()
@@ -420,6 +569,7 @@ fn encrypt(
             Ok(())
         }
     }
+    let version = payload.version();
     let mut bytes = Zeroizing::new(Vec::with_capacity(MAX_PAYLOAD + 16));
     serde_json::to_writer(Bounded(&mut bytes), &PrivateOutput(&payload))
         .map_err(|_| ApiError::Capacity)?;
@@ -429,11 +579,15 @@ fn encrypt(
     let key = derive(&password, &salt)?;
     Aes256Gcm::new_from_slice(key.as_ref())
         .map_err(|_| ApiError::Protocol)?
-        .encrypt_in_place(Nonce::from_slice(&nonce), &aad(&salt, &nonce), &mut *bytes)
+        .encrypt_in_place(
+            Nonce::from_slice(&nonce),
+            &aad(version, &salt, &nonce),
+            &mut *bytes,
+        )
         .map_err(|_| ApiError::Protocol)?;
     let f = EncryptedFile {
         format: FORMAT.into(),
-        version: 1,
+        version,
         mode: "encrypted".into(),
         kdf: Kdf::default(),
         cipher: "aes-256-gcm".into(),

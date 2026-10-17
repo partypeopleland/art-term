@@ -828,7 +828,7 @@ impl RuntimeSessions {
             return Ok(HistoryReply::Unsupported);
         }
         if conn.closed.load(Ordering::SeqCst) { return Err(SessionError::Cancelled.into()) }
-        if slot.is_none() && !matches!(request, HistoryRequest::Viewport) {
+        if slot.is_none() && !matches!(request, HistoryRequest::Viewport | HistoryRequest::TerminalMouse { enabled: true }) {
             return Ok(HistoryReply::Error { error: "expired".into() });
         }
         // The frozen profile stays available while recovery temporarily takes

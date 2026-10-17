@@ -76,10 +76,12 @@ it('stops previews under settings, restores prior visibility and never clears to
  expect(wrapper.find('.desktop-sidebar .desktop-preview img').exists()).toBe(true)
  controller.setPreviewVisible(tab,false);await wrapper.get('[data-testid="desktop-settings"]').trigger('click');await wrapper.get('[data-testid="desktop-workspace"]').trigger('click');await flush();expect(tab.previewVisible).toBe(false)
 })
-it('reads connected history without a button and releases the first reader on tab switch',async()=>{
+it('uses one xterm renderer without snapshot polling and releases native control on tab switch',async()=>{
  const {wrapper,controller,transport,terms,attach}=await setup();const first=await attach()
  expect(wrapper.find('[data-testid="open-desktop-history"]').exists()).toBe(false)
- expect(transport.runtimeHistory).toHaveBeenCalledWith(first.sessionId,{op:'viewport'});expect(terms[0].disposed).toBe(false)
+ expect(transport.runtimeHistory).toHaveBeenCalledWith(first.sessionId,{op:'terminalMouse',enabled:true});expect(terms[0].disposed).toBe(false)
+ expect(wrapper.find('.desktop-history').exists()).toBe(false)
+ expect(transport.runtimeHistory.mock.calls.some(([,r])=>r.op==='viewport')).toBe(false)
  const second=makeTarget('other','host');controller.openTarget({dto:makeHost('host',[second]),expanded:true},second,false);await flush()
  expect(transport.runtimeHistory).toHaveBeenCalledWith(first.sessionId,{op:'close'});expect(terms[0].disposed).toBe(false)
 })

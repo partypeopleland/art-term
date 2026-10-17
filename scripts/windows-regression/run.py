@@ -92,56 +92,69 @@ def label(name):
 
 def inline_scroll(app, fixture):
     app.main_page()
-    require(not app.find('[data-testid=desktop-main], [data-testid=desktop-connect], [data-testid=open-desktop-history]'), 'obsolete workspace/history navigation remains')
-    layout = app.driver.execute_script("const r=s=>document.querySelector(s).getBoundingClientRect();const l=r('.desktop-sidebar'),t=r('.desktop-connect-page'),d=r('.desktop-main-page'),p=r('.desktop-preview');return {width:l.width,right:t.left>=l.right-1,below:p.top>=d.bottom-1,vertical:getComputedStyle(document.querySelector('.dashboard')).flexDirection==='column'};")
-    require(abs(layout['width'] - 200) <= 1 and layout['right'] and layout['below'] and layout['vertical'], 'workspace layout is not fixed200/stacked/preview-below/right-terminal')
+    require(not app.find('.desktop-history, [data-testid=open-desktop-history]'), 'custom text rendering layer remains')
     name = create_shell(app, fixture, app.profiles()[0])
-    fixture.append_lines(name, 1, 1800, wide=True)
-    css = '.pane .desktop-history .history-viewport'
-    viewport = app.wait(lambda: next((e for e in app.find(css) if e.is_displayed() and 'ROW-1800' in e.text), None), 30)
-    require(app.driver.execute_script("const h=arguments[0];return h.scrollWidth<=h.clientWidth && [...h.querySelectorAll('.history-line')].some(e=>e.offsetHeight>17);", viewport), 'native long rows do not wrap without horizontal overflow')
-    app.wait(lambda: sum(e['method'] == 'history' and e['name'] == name and e['action'] == 'older' for e in fixture.snapshot()['events']) >= 3)
-    def ids():
-        return app.driver.execute_script("return [...arguments[0].querySelectorAll('[data-line-id]')].map(e=>Number(e.dataset.lineId));", viewport)
-    def wheel(amount):
-        ActionChains(app.driver).scroll_from_origin(ScrollOrigin.from_element(viewport), 0, amount).perform()
-    original = ids()[0]
-    wheel(-10000)
-    app.wait(lambda: ids()[0] < original)
-    anchored = app.driver.execute_script("const h=arguments[0];return h.querySelector('[data-line-id=\"'+arguments[1]+'\"]').getBoundingClientRect().top-h.getBoundingClientRect().top;", viewport, original)
-    require(abs(anchored - 4) <= 2, f'older page moved the reading anchor ({anchored:.2f}px)')
-    divider = app.node('sidebar-divider')
-    ActionChains(app.driver).move_to_element(divider).click_and_hold().move_by_offset(120, 0).release().perform()
-    app.wait(lambda: app.driver.execute_script("return Math.abs(document.querySelector('.desktop-sidebar').getBoundingClientRect().width-320)<2"))
-    app.wait(lambda: app.driver.execute_script("const h=arguments[0],e=h.querySelector('[data-line-id=\"'+arguments[1]+'\"]');return Math.abs(e.getBoundingClientRect().top-h.getBoundingClientRect().top-4)<=2;", viewport, original))
-    ActionChains(app.driver).move_to_element(app.node('sidebar-divider')).click_and_hold().move_by_offset(-120, 0).release().perform()
-    for _ in range(4):
-        first = ids()[0]
-        wheel(-10000)
-        app.wait(lambda: ids()[0] < first)
-    require(len(ids()) == 1024, 'history window did not remain bounded at 1024 rows')
-    held = app.driver.execute_script('return arguments[0].scrollTop;', viewport)
-    fixture.append_lines(name, 1801, 25)
-    app.driver.execute_async_script('const done=arguments[0];setTimeout(done,750);')
-    require('ROW-1825' not in viewport.text and abs(app.driver.execute_script('return arguments[0].scrollTop;', viewport) - held) <= 1, 'new output moved the reading position')
-    for _ in range(10):
-        if 'ROW-1825' in viewport.text:
-            break
-        last = ids()[-1]
-        wheel(100000)
-        app.wait(lambda: ids()[-1] > last or 'ROW-1825' in viewport.text)
-    require('ROW-1825' in viewport.text, 'scrolling down did not resume latest output')
-    viewport.find_elements(By.CSS_SELECTOR, '.history-line')[-1].click()
-    ActionChains(app.driver).send_keys('INLINE_KEYBOARD' + Keys.ENTER).perform()
-    app.wait(lambda: app.contains(name, 'INLINE_KEYBOARD'))
-    app.wait(lambda: 'INLINE_KEYBOARD' in viewport.text)
-    app.driver.save_screenshot(str(app.run / 'workspace-inline.png'))
+    fixture.append_lines(name, 1, 96)
+    css = '.pane:not([style*="display: none"]) .xterm-rows'
+    def text():
+        return app.driver.execute_script('return document.querySelector(arguments[0])?.textContent || "";', css)
+    def wait_inline(stage, predicate):
+        try:
+            return app.wait(predicate)
+        except Exception:
+            geometry = app.driver.execute_script("""
+const screen=document.querySelector('.pane:not([style*="display: none"]) .xterm-screen');
+const pane=screen?.closest('.pane');
+const box=e=>{const r=e?.getBoundingClientRect();return r?{x:r.x,y:r.y,width:r.width,height:r.height}:null};
+return {screen:box(screen),pane:box(pane),viewport:{width:innerWidth,height:innerHeight},rows:screen?.querySelectorAll('.xterm-rows>div').length};
+""")
+            (app.run / 'inline-failure-stage.json').write_text(json.dumps({'stage':stage,'geometry':geometry}))
+            raise
+
+    wait_inline('initial-live-rows', lambda: 'ROW-0096' in text())
+    screen = app.wait(lambda: next((e for e in app.find('.pane .xterm-screen') if e.is_displayed()), None))
+    before = text()
+    ActionChains(app.driver).scroll_from_origin(ScrollOrigin.from_element(screen), 0, -34).perform()
+    wait_inline('small-wheel-moves', lambda: text() != before)
+    require('ROW-0096' not in text(), 'small upward wheel did not move live terminal rows')
+    held = text()
+    fixture.append_lines(name, 97, 25)
+    app.driver.execute_async_script('const done=arguments[0];setTimeout(done,200);')
+    require(text() == held, 'new output pulled the native viewport away from reading')
+    # Chromium exposes one legacy wheel notch even for a huge synthetic delta.
+    # Drive actual successive gestures until latest, rather than assuming one notch jumps 25 rows.
+    for _ in range(64):
+        if 'ROW-0121' in text(): break
+        ActionChains(app.driver).scroll_from_origin(ScrollOrigin.from_element(screen), 0, 120).perform()
+    wait_inline('wheel-bottom-follows-latest', lambda: 'ROW-0121' in text())
+
+    def probe(marker, expected, absent='', erase=False):
+        app.driver.execute_script(r"""
+const p=window.__reg.latency={name:arguments[0],marker:arguments[1],expected:arguments[2],absent:arguments[3],erase:arguments[4]};
+const root=[...document.querySelectorAll('.pane')].find(e=>e.getBoundingClientRect().width>0);
+const observer=new MutationObserver(()=>{const text=root.querySelector('.xterm-rows')?.textContent||'';
+if(p.received && !p.scheduled && text.includes(p.expected) && (!p.absent || !text.includes(p.absent))){p.scheduled=true;requestAnimationFrame(()=>requestAnimationFrame(()=>{p.painted=performance.now();observer.disconnect();}));}});
+observer.observe(root,{subtree:true,childList:true,characterData:true});
+""", 'openab:' + name, marker, expected, absent, erase)
+
+    marker = '中文測試X'
+    probe(marker, marker)
+    app.terminal(marker)
+    wait_inline('unicode-or-backspace-paint', lambda: app.driver.execute_script('return !!window.__reg.latency.painted;'))
+    unicode_ms = app.driver.execute_script('return window.__reg.latency.painted-window.__reg.latency.received;')
+    require(unicode_ms < 150, f'Unicode commit adds rendering delay ({unicode_ms:.1f}ms)')
+    probe('', '中文測試', marker, True)
+    app.terminal(Keys.BACKSPACE)
+    wait_inline('unicode-or-backspace-paint', lambda: app.driver.execute_script('return !!window.__reg.latency.painted;'))
+    backspace_ms = app.driver.execute_script('return window.__reg.latency.painted-window.__reg.latency.received;')
+    require(backspace_ms < 150, f'Backspace adds rendering delay ({backspace_ms:.1f}ms)')
+    app.driver.save_screenshot(str(app.run / 'workspace-native-xterm.png'))
     events = [e for e in fixture.snapshot()['events'] if e['method'] == 'history' and e['name'] == name]
-    require(any(e['action'] == 'ack' for e in events) and sum(e['action'] == 'older' for e in events) >= 5, 'native history paging/ACK absent')
-    app.main_page()
-    app.node('desktop-settings').click()
-    app.main_page()
-    return {'directWheelPaging': True, 'prefetchedThreePages': True, 'wrappedWithoutHorizontalOverflow': True, 'nativeDragKeepsAnchor': True, 'bounded1024': True, 'anchorPixelError': abs(anchored - 4), 'heldDuringNewOutput': True, 'bottomFollowsLatest': True, 'clickAndRealKeyboard': True, 'singleWorkspaceLayout': layout}
+    require(any(e['action'] == 'terminalMouse' for e in events), 'native tmux mouse control absent')
+    require(not any(e['action'] in ('viewport', 'older') for e in events), 'live display still polls text snapshots')
+    return {'singleXtermRenderer': True, 'smallWheelMovesImmediately': True, 'heldDuringNewOutput': True,
+            'bottomFollowsLatest': True, 'unicodeCommitIpcToPaintMs': unicode_ms, 'backspaceIpcToPaintMs': backspace_ms,
+            'snapshotPollingAbsent': True, 'realTmuxProof': 'separate Linux native_xterm.py proof required'}
 
 
 def create_shell(app, fixture, profile):
@@ -364,6 +377,72 @@ def transfer(app, fixture, config, destination, exported):
             'importAndDpapiRestart': True, 'duplicateDefaultSkip': True, 'explicitUpdatePersists': True}
 
 
+def screen_transfer(app, fixture, source, run, upstream):
+    password = secrets.token_urlsafe(24)
+    screen_file, mixed_file = run / 'screen-only.json', run / 'mixed-connections.json'
+    app.launch(source)
+    app.settings()
+    app.fill('screen-name', 'Portable Screen')
+    app.fill('screen-url', upstream.url)
+    app.fill('screen-token', upstream.token)
+    app.click('儲存 Screen', '[data-testid=screen-form] button')
+    app.wait(lambda: len(app.screens()) == 1)
+    original_screen = app.screens()[0]
+    for mixed, path in [(False, screen_file), (True, mixed_file)]:
+        app.manage()
+        app.node('runtime-export').click()
+        app.wait(lambda: app.find('.runtime-transfer input[value="screen:' + original_screen['id'] + '"]'))[0].click()
+        if mixed:
+            host = app.profiles()[0]
+            app.find('.runtime-transfer input[value="host:' + host['id'] + '"]')[0].click()
+        app.fill('transfer-password', password)
+        app.fill('transfer-confirm', password)
+        app.picker(lambda: app.click('選擇位置並儲存', '.runtime-transfer button'), path)
+        app.wait(lambda: path.exists() and '連線檔案已儲存' in app.node('runtime-transfer').text)
+        raw = path.read_text()
+        require(json.loads(raw)['version'] == 2 and json.loads(raw)['mode'] == 'encrypted', 'Screen export must use encrypted v2')
+        require(upstream.token not in raw and upstream.url not in raw and fixture.credential not in raw, 'portable secrets or metadata leaked')
+        app.click('返回管理', '.runtime-transfer button')
+    app.close()
+    destination = run / 'mixed-import.toml'
+    app.launch(destination); app.manage(); app.node('runtime-import').click()
+    import_file(app, mixed_file, password); app.node('transfer-apply').click()
+    app.wait(lambda: len(app.profiles()) == 1 and len(app.screens()) == 1, 30)
+    restored = app.screens()[0]
+    require(restored['id'] != original_screen['id'] and restored['revision'] == 1 and restored['tokenPresent'], 'Screen destination identity was not regenerated')
+    require(restored['mcpUrl'] == upstream.url and restored['name'] == original_screen['name'], 'Screen metadata did not restore')
+    raw = destination.read_text(encoding='utf-8-sig')
+    document = tomllib.loads(raw)
+    require(document['schema_version'] == 6 and document['desktops'][0]['token_ciphertext'] and upstream.token not in raw, 'Screen DPAPI destination persistence missing')
+    app.close(); app.launch(destination); app.settings()
+    require(app.screens() == [restored] and len(app.profiles()) == 1, 'mixed restart lost saved catalog')
+    row = '[data-testid="saved-screen-' + restored['id'] + '"]'
+    app.click('測試', row + ' button')
+    app.wait(lambda: any('Screen 連線測試通過' in e.text for e in app.find('[data-testid=screen-settings] [role=status]')))
+    app.manage(); app.node('runtime-import').click()
+    import_file(app, mixed_file, password)
+    choices = app.wait(lambda: app.find('.preview-list input[type=checkbox]'))
+    require(len(choices) == 2 and all(not c.is_selected() for c in choices) and not app.node('transfer-apply').is_enabled(), 'mixed duplicates must default skip')
+    before_host = app.profiles()[0]
+    choices[-1].click(); app.node('transfer-apply').click()
+    app.wait(lambda: app.screens()[0]['revision'] == restored['revision'] + 1, 30)
+    require(app.screens()[0]['id'] == restored['id'] and app.profiles()[0] == before_host, 'Screen update changed unrelated Host or identity')
+    app.close()
+    screen_destination = run / 'screen-only-import.toml'
+    app.launch(screen_destination); app.manage(); app.node('runtime-import').click()
+    import_file(app, screen_file, password); app.node('transfer-apply').click()
+    app.wait(lambda: app.profiles() == [] and len(app.screens()) == 1, 30)
+    app.click('返回管理', '.runtime-transfer button')
+    require(app.node('runtime-export').is_enabled(), 'Screen-only device cannot open export')
+    app.node('runtime-export').click()
+    app.wait(lambda: len(app.find('.runtime-transfer fieldset input[type=checkbox]')) == 1)
+    app.close()
+    password = ''
+    return {'screenOnlyAndMixedNativeFiles': True, 'passwordEncryptedV2': True, 'nativePickers': True,
+            'destinationScreenDpapiAndRestart': True, 'importedTokenAuthenticatesMcp': True,
+            'duplicateScreensSkipThenExplicitUpdate': True, 'screenOnlyDeviceExportReachable': True}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--exe', required=True, type=Path)
@@ -395,7 +474,8 @@ def main():
                                ('terminal', lambda: terminal(app, fixture)),
                                ('inline-scroll', lambda: inline_scroll(app, fixture)),
                                ('screens', lambda: preview(app, fixture, config, screens)),
-                               ('transfer', lambda: transfer(app, fixture, config, destination, run / 'transfer.json'))]:
+                               ('transfer', lambda: transfer(app, fixture, config, destination, run / 'transfer.json')),
+                               ('screen-transfer', lambda: screen_transfer(app, fixture, config, run, screens[0]))]:
             stage = name
             outcome = function()
             result['scenarios'][name] = {'passed': True, 'checks': outcome}

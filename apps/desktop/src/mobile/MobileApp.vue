@@ -394,7 +394,7 @@ onBeforeUnmount(() => {
 <template>
   <div ref="rootEl" class="m-app" :data-theme="selectedTheme" :class="{ 'swipe-animating': swipeAnimating, 'swipe-dragging': swipeDragging }" @pointerdown.capture="beginSwipe" @pointermove.capture="moveSwipe" @pointerup.capture="finishSwipe($event)" @pointercancel.capture="finishSwipe($event, true)" @click.capture="guardSwipeClick">
     <RuntimeHosts v-if="runtimeHostsOpen" :transport="transport" :initial-view="hostsView" :initial-category="hostsCategory" :category-filter="hostsCategory"
-      @picker="transferPicker = $event" @close="runtimeHostsOpen = false" @changed="controller.loadCatalog()" @open="openRuntimeSession" />
+      @picker="transferPicker = $event" @close="runtimeHostsOpen = false" @changed="screensChanged" @open="openRuntimeSession" />
     <RuntimeConnectionDialog v-if="runtimeDialogProfile" :profile="runtimeDialogProfile" :transport="transport"
       :initial-group="runtimeDialogSeed"
       @open="openRuntimeTarget" @close="runtimeDialogProfile = null; runtimeDialogSeed = null" />

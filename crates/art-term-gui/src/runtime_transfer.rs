@@ -220,7 +220,7 @@ impl RuntimeTransfer {
         let mut i = self.inner.lock().map_err(|_| ApiError::StateChanged)?;
         Self::check(&i, window, generation)?;
         if i.unfocused
-            && matches!(&pending, Pending::Preview(_, p) if p.entries.iter().any(|e| e.has_credential))
+            && matches!(&pending, Pending::Preview(_, p) if p.entries.iter().any(|e| e.has_secret()))
         {
             return Err(ApiError::StateChanged);
         }
@@ -493,7 +493,7 @@ pub async fn gui_transfer_apply(
         .collect();
     let (generation, pending, lease) = state.take(&label, &token, false)?;
     let mut selected = Vec::new();
-    if choices.len() > 64 {
+    if choices.len() > 128 {
         let _ = state.phase(&label, generation, Phase::Idle);
         return Err(ApiError::Capacity.into());
     }
@@ -558,6 +558,7 @@ mod tests {
             "opaque".into(),
             store
                 .preview_import(transfer::Payload {
+                    desktops: Vec::new(),
                     entries: vec![transfer::Entry {
                         name: "Fixture".into(),
                         origin: "https://fixture.test".into(),
@@ -607,6 +608,24 @@ mod tests {
         assert_eq!(state.cancel("main").status, "committing");
         assert!(state.take("main", "opaque", true).is_err());
         drop(owner);
+        drop(lease);
+    }
+    #[tokio::test]
+    async fn screen_token_preview_is_sensitive_without_hosts() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = HostStore::load(dir.path().join("connections.toml"), Arc::new(Cipher)).unwrap();
+        let preview = store.preview_import(transfer::Payload {
+            entries: Vec::new(),
+            desktops: vec![transfer::ScreenEntry { name: "Screen".into(), mcp_url: "https://screen.test/mcp".into(), token: Some(Secret::new("fictional-screen-secret".into()).unwrap()) }],
+        }).unwrap();
+        let json = serde_json::to_string(&preview.entries).unwrap();
+        assert!(json.contains("hasToken"));
+        assert!(!json.contains("fictional-screen-secret"));
+        let state = Arc::new(RuntimeTransfer::default());
+        let (generation, lease) = state.begin("main").unwrap_or_else(|_| panic!("begin"));
+        state.phase("main", generation, Phase::Picker).unwrap();
+        state.background("main", false);
+        assert!(state.install("main", generation, Pending::Preview("opaque".into(), preview)).is_err());
         drop(lease);
     }
     #[test]

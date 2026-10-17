@@ -54,7 +54,8 @@ function record(cmd,a,v){
  if(cmd==='gui_open')r.sessions[v.id]={name:v.remoteSession,target:v.targetId,tail:'',decoder:new TextDecoder(),bytes:0};
  const s=r.sessions[a.sessionId];
  function collect(value){if(!value || typeof value!=='object')return; for(const [k,x] of Object.entries(value)){
-   if(s && k==='bytes' && Array.isArray(x)){s.bytes+=x.length;s.tail=(s.tail+s.decoder.decode(new Uint8Array(x),{stream:true})).slice(-8192);}
+   if(s && k==='bytes' && Array.isArray(x)){const text=s.decoder.decode(new Uint8Array(x),{stream:true});s.bytes+=x.length;s.tail=(s.tail+text).slice(-8192);
+    const p=r.latency;if(p && p.name===s.name && !p.received && (p.erase ? text.includes('\b') : s.tail.includes(p.marker)))p.received=performance.now();}
    else if(x && typeof x==='object')collect(x);
  }}
  if(cmd==='gui_poll')collect(v);
@@ -171,7 +172,8 @@ class App:
         self.wait(find).click()
 
     def fill(self, testid, text):
-        element = self.node(testid)
+        element = self.wait(lambda: next((e for e in self.find('[data-testid="' + testid + '"]')
+                                          if e.is_displayed() and e.is_enabled() and not e.get_attribute('readonly')), None))
         element.clear()
         element.send_keys(text)
 

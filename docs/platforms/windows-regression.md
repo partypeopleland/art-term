@@ -4,7 +4,7 @@
 
 給 AI 的工作範圍應包含要修改的功能與預期行為。AI 先讀本頁，從下方功能對照找既有保護，再決定需要增加哪個案例；不要以增加測試數量代替驗證具體行為。
 
-Owner 已恢復 Windows 非平台功能同步；語音與 Android plugin 不在本階段。本輪 Linux 只完成來源、DOM 與適用共用核心檢查，Windows EXE／WebView2／DPAPI／選檔器／真 Runtime 必須由 Windows 電腦接續驗收。舊 framing／截圖 Shell 的歷史結果不能代表新版 Screens 或歷史面板已通過。接續範圍見[測試矩陣](../refarch/test-matrix.md#直接-mcp-與獨立-screens-的驗收門檻)。
+Windows 專屬修改須在 Windows 電腦執行。本輪接續單一 xterm 修正，語音與 Android plugin 不在範圍；前端／Rust／真 tmux 的部分歷史結果不能代表最新 Windows GUI、真 Codex 或 OS 中文候選選字已驗收。各次測試需核對實際 source／binary，舊 DesktopHistoryReader 的通過紀錄不能沿用。
 
 ## 各層測到什麼
 
@@ -40,7 +40,7 @@ Vue/controller + test transport     real DPAPI / local TLS-WSS fixtures
 target/windows-regression/venv/Scripts/python.exe scripts/windows-regression/headless-layout.py --driver target/gui-tools/edge/msedgedriver.exe --output target/windows-regression/layout-check
 ```
 
-此檢查使用 Edge headless、隱藏 driver console，以及獨立 `/?desktop` 預覽入口與虛構資料；涵蓋固定200px、分隔線拖曳、換行／定位、有界預載、非阻塞桌面載入、分類設定與草稿清除，並保存截圖及結果。它不執行原生 App、IPC、DPAPI 或系統選檔器，不能代替下面的原生 E2E。完成後關閉自己啟動的預覽 server；正式打包不包含此入口。
+此檢查使用 Edge headless、隱藏 driver console，以及獨立 `/?desktop` 預覽入口與虛構資料；涵蓋固定200px、分隔線拖曳、單一xterm／小幅滾輪／normal scrollback、非阻塞桌面載入、分類設定與草稿清除，並保存截圖及結果。它不執行原生 App、IPC、DPAPI 或系統選檔器，不能代替下面的原生 E2E。完成後關閉自己啟動的預覽 server；正式打包不包含此入口。
 
 以下指令均在 Windows 的專案根目錄執行。需要已安裝 Rust MSVC、C++ Build Tools、Node/npm、PowerShell 與 Python；正常使用 App 的人不需要這些開發工具。首次安裝相關工具依其官方文件，由 AI 先檢查現有版本並沿用。
 
@@ -78,7 +78,7 @@ Microsoft Edge WebDriver 必須匹配 App 使用的 **WebView2 Runtime**，不�
 | 連線保存 | 缺 TOML 正常開空清單；新增／測試／改名與分類；空白憑證編輯仍保留原憑證；重開後 id、revision、分類及能力保持；刪最後一筆後仍能重開空清單。 |
 | 終端與工作 | 由畫面建立及選擇 Shell，真 xterm 輸入與呈現 Unicode；resize、兩分頁不串線；暫時斷線後沿用 token／游標，不建立或 renew，也不重播輸入；關頁只 detach。 |
 | Screens 與直接預覽 | 透過真 IPC／DPAPI 新增、編輯、刪除 Screen，重開保留；每分頁明確選擇、A／B 切換與取消；圖片直接走原生 MCP、正確解碼及來源核對，舊回覆不覆蓋新目標；定時／手動／停止保持終端。 |
-| 共用畫面與歷史 | 同頁左側直向清單／左下預覽／右側終端、分類收合與狀態點、全頁設定、首頁 Windows 版本／完整更新文件、四主題及新分頁色彩；直接滾輪讀頁／補頁錨點／新輸出不跳／到底追尾／彩色1024行界限／ACK／keep／close，xterm 硬體鍵盤與原 mouse mode 不變。 |
+| 共用畫面與原生捲動 | 保留直向清單／預覽／終端布局、設定／首頁／四主題；無文字覆蓋層或snapshot polling。normal xterm 5000行scrollback、單次小幅wheel位移、閱讀中輸出不跳及到底追尾、Unicode／Backspace從PTY抵達到可見的時間；真tmux alternate／copy-mode另驗，不以普通echo fixture冒稱通過。 |
 | 加密搬移 | 原生選檔器匯出含憑證加密檔；在另一份空設定匯入；錯密碼不改設定，重新解鎖後套用並重開可連；相同網址預設略過，明確選取更新才變更 revision。 |
 
 測試不安裝或執行 coding CLI；只驗證 App 依明確能力設定送出預期命令。直接 MCP fixture 需傳回真 PNG，走原生 MCP HTTP、Rust 驗證與畫面解碼；不能只替換 IPC 或把任意 bytes 當成截圖。它不代表現場 MCP 或 Shell broker／真 Runtime 已驗收。舊截圖 framing 案例可保留相容保護，不能作為新版 UI 的成功證據。
@@ -96,18 +96,26 @@ Microsoft Edge WebDriver 必須匹配 App 使用的 **WebView2 Runtime**，不�
 | 輸入／ACK／Gap／恢復 | core `openab/tests.rs`：`native_wss_historical_gap_ack_and_live_input_are_byte_exact`、`native_same_retained_token_resumes_from_ack_without_admin_renew`；前端 `runtime-stream.test.ts` | 真 xterm、分頁隔離、同 token 恢復、無輸入重播；ACK 是本機 parse 完成確認，不是遠端 frame。 |
 | 舊截圖相容通道 | core `openab/screenshot.rs`：`decode_screenshot_validates_envelope_and_preserves_wire_bytes`、`decode_status_accepts_only_an_explicit_boolean` 與 framing tests；`openab/tests.rs`：`preview_cancel_during_attach_deletes_only_created_owned_shell`、`preview_burst_larger_than_terminal_queue_is_acknowledged_without_slow_consumer` | 有效圖片與 envelope 錯誤、原生大圖與工作 Shell 隔離；只測 burst bytes 不代表圖片解碼通過。 |
 | 新版 Windows 畫面／Screens | 前端 `app.test.ts`、controller 的 Screen 選擇與生命週期案例；native `instance_desktops.rs`／`runtime_sessions.rs` 與 Windows runner | Dashboard、四主題、設定、版本首頁、Host 管理、每分頁 Screen／來源／clear；真 EXE／DPAPI 與晚到結果原生核對。 |
-| Windows 直接捲動 | 前端 `desktop-history.test.ts`、共用 HostHistoryWindow 測試；Host 的歷史讀頁／退出案例 | 彩色內容、滾輪較早／較新讀頁與到底追尾、窗口界限、ACK／keep／close、取消／晚到回應與不支援時原終端 fallback；真 Windows focus／resize 另驗收。 |
+| Windows 單一 xterm／native mouse | 前端 `native-mouse.test.ts`、`windows-parity.test.ts`；Rust history capability測試；真tmux `native_xterm.py` | capability／Unsupported、lease enable／keep／close／owner交接、首次小幅wheel／child mouse／精確還原；普通normal scrollback與真tmuxalternate分開，GUI繪製延遲、真Codex及OS IME另驗。 |
 | 終端滾動／手機輸入與背景 | 前端 `terminal-wheel.test.ts`、`mobile-input.test.ts`、`mobile-runtime-ipc.test.ts`、`runtime-stream.test.ts` | 保留 IME、背景取消、原 binding 恢復；Windows 的手機尺寸／模擬事件不等於 Android 實機。 |
 
 ## 本次 Windows 同步的接續驗收
 
 在 Windows 電腦使用交接文件所在 commit，執行上方 All 入口，再重新打包 release；Linux 結果、舊 EXE 或 `-SkipBuild` 都不能代表新 Windows 建置。測試程式若有 UI 選擇器／fixture 適配，仍保留真 EXE、IPC、DPAPI、網路層與原生檔案選擇器，不放寬失敗斷言。
 
-新版 runner 對應同頁工作區／設定、inline Shell／th2 建立、直接 MCP 與 history helper wire fixture。自動原生案例是 CRUD／終端／直接輪捲與布局／Screens／搬移五組；輪捲案例以真 WebView2 wheel 檢查1800行跨頁、1024行界限、像素錨點、新輸出保持與到底追尾，並核對左1/3直向清單、左下預覽、右側終端。這仍是隔離協定 fixture，不能代替正式 Host tmux。Screens 以 A／B 不同的 2×2 PNG 完整來源比對與真解碼驗證；不宣稱大圖壓力或舊 framing 通道成功。正式 Host 的歷史讀頁／keep／close、四主題細節、30 秒自動更新、持續背景／晚回覆及真 Shell broker 屬於另行人工驗收，不因五組 runner 成功而自動通過。
+新版 runner 對應同頁工作區／設定、inline Shell／th2 建立及直接 MCP。原生滾輪案例應檢查唯一 xterm、無 overlay／文字 polling、小幅wheel的立即位移、閱讀時新輸出不跳與到底追尾；中文 marker／Backspace 記錄從真 IPC 輸出抵達到畫面可見的時間。這是 loopback 協定 fixture，不是真 tmux／真 Codex，也不涵蓋 OS 候選選字。實際新版 runner 是否執行與結果需逐次記錄，不能套用舊覆蓋層的五組通過紀錄。Screens 來源／解碼、UI布局與其他既有案例保留，各自依當次結果判定。
 
-原生回歸之外，使用隔離連線確認：Host 管理入口仍可編輯／刪除／測試；Host 搬移不含 Screen 且匯入不遺失本機桌面；設定／首頁開啟時輸出繼續處理，關閉後 fit／focus；快捷鍵不攔表單輸入；普通及歷史 Shell 不誤用閱讀面板。與正式 Runtime 的 new Shell／renew／exit、工具 broker、現場 MCP 另記結果，不把固定 client 寫成真 AI CLI 已測。
+原生回歸之外，使用隔離連線確認：Host 管理入口仍可編輯／刪除／測試；Host-only 舊檔仍可匯入，新增 Screen-only／混合檔經原生選檔器還原並重開後使用 DPAPI token；未選取的本機桌面保留；設定／首頁開啟時輸出繼續處理，關閉後 fit／focus；快捷鍵不攔表單輸入；普通及歷史 Shell 皆由同一 xterm 呈現，舊 helper 清楚回報能力不足。與正式 Runtime 的 new Shell／renew／exit、工具 broker、現場 MCP 另記結果，不把固定 client 寫成真 AI CLI 已測。
 
 本輪語音、Android 原生閱讀器及手機手勢不移植，不需要為 Windows 啟用 Android plugin。任一層未執行就寫 NOT_RUN 或具體 BLOCKED，不能以本輪只交程式為由寫成 Windows 已通過。交接完成後僅推開發分支，未經 Owner 後續決定不 merge／tag／release。
+
+## 原生 xterm 的分層驗證
+
+先以 normal buffer 驗證原生 scrollback，再用專用工作驗證完整 Windows xterm→官方 Runtime→私有 tmux alternate 路徑。記錄單次小幅wheel前後的原生位置，不以捲條出現或批量文字最後存在作為位移／延遲證據。真tmux直接SGR mouse測試不包含Windows繪製，Windows echo fixture也不包含真tmux，兩者不能合稱整條路徑已過。
+
+控制lease驗證 READY capability、舊helper不送未知操作、enable pending後close、兩owner交接、child mouse轉送及mouse／copy-mode／WheelUpPane精確還原；60秒保活不能夾帶viewport輪詢。Android snapshot另作相容回歸。真Codex使用任務自己的新會話，OS中文候選選字與Backspace實測不足就留NOT_RUN，不宣稱Owner問題已解決。
+
+本輪AI完成基本驗收與必要審查後可commit／push開發分支，Owner使用回饋不阻止這個提交步驟；仍禁止main／tag／release。
 
 ## 新功能或修正的測試計畫
 

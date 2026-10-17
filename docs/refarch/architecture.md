@@ -58,11 +58,22 @@ Android 終端閱讀器是覆蓋在 WebView 終端位置的原生 View，水平�
 
 瀏覽器預覽沿用手機元件，但以獨立入口注入記憶體 transport、假語音與瀏覽器終端；正式入口使用原生 transport、裝置端辨識及原生閱讀器。預覽不接真實 Runtime，不參與 APK 打包，詳見[手機畫面預覽](../platforms/ui-preview.md)。
 
-## Windows 共用工作區與直接捲動
+## Windows 共用工作區與單一 xterm
 
 Windows App 接入同一套分類 Dashboard、全頁 settings、homepage、四主題及 Screen picker，保留 Host 管理、硬體鍵盤與 xterm。設定／首頁遮蓋時終端元件保持掛載並處理輸出，返回後 fit／focus，表單正常輸入不被終端快捷鍵攔截。語音與 Android 原生閱讀／手勢 plugin 不移植。
 
-Windows 工作區同頁呈現左側約三分之一的直向連線清單、左下的當前桌面預覽與右側多分頁終端。在連線內容區直接滾輪上捲，以共用 HostHistoryWindow 管 viewport／older／ACK／keep／close，彩色顯示最多 1024 行、每批較早頁最多 256 行；閱讀中固定錨點，到底才追尾。xterm 保持 mounted 並處理輸入輸出／resize，歷史呈現不修改遠端 CLI 的 mouse mode 或 Host mouse off。Android 仍用原生 View，兩者共享主機讀頁契約而各自呈現。Windows EXE、WebView2、DPAPI 與原生操作須在 Windows 電腦驗收，Linux DOM／核心檢查不能替代。
+Windows 工作區保留預設 200px 可調左欄、左下桌面預覽與右側多分頁終端。唯一可見終端 renderer 是 xterm：原始 PTY 輸出直接呈現，normal buffer 使用 5000 行 scrollback，tmux alternate 透過 mouse VT／copy-mode 回傳到同一 xterm。沒有 Windows 文字 DOM 覆蓋、500ms snapshot 重繪或 1024／768 行預載。tmux 使用原生位置指示，不合成 normal-buffer 式的假捲軸。
+
+```text
+Windows keyboard / IME -> xterm -> Runtime PTY -> tmux / CLI
+                             ^                        |
+                             +------- raw PTY --------+
+wheel -> normal xterm scrollback OR mouse VT -> tmux copy-mode
+active Windows tab -> capability-gated terminalMouse lease -> private tmux
+Android NativeTerminalReader -> bounded snapshot / older / ACK / keep / close
+```
+
+Windows `terminalMouse` 控制先核對 helper capability，只為可見活動分頁持有 lease；60 秒續租不抓畫面。切頁、隱藏、unmount 釋放，以 owner CAS 保存／還原原 mouse、copy-mode、WheelUpPane 綁定，避免操作其他私有 server 或讓舊 owner 撤銷新 owner。Android 原生 View 與 snapshot 契約保留。Windows EXE／WebView2、真 tmux／Codex 與 OS 中文候選選字仍須各自實測，來源檢查不能代替。
 
 ## 輸出完成後才確認
 
@@ -118,7 +129,7 @@ App --create--> Runtime work Shell --wrapper--> private tmux work pane
  Android native reader: viewport first, upward gesture -> older page
 ```
 
-每個工作使用自己的 socket，tmux 與系統版本並存。輔助程序最多維持兩份 tmux 原生閱讀快照；首次只讀當前畫面，上捲才最多取得 256 行，App 閱讀窗口最多 1024 行。歷史版面與軟換行由 tmux 提供，輔助程序不先擷取完整歷史再切頁。畫面確認已顯示後才釋放舊快照，前插舊頁與新輸出均保留閱讀位置。生命週期、限制與主機準備見[終端歷史](terminal-history.md)。
+每個工作使用自己的 socket，tmux 與系統版本並存。輔助程序最多維持兩份 tmux 原生閱讀快照；Android snapshot 首次只讀當前畫面，上捲才最多取得 256 行，手機閱讀窗口最多 1024 行。Windows 使用原生 mouse lease，不以此窗口覆蓋 xterm。歷史版面與軟換行由 tmux 提供，輔助程序不先擷取完整歷史再切頁。畫面確認已顯示後才釋放舊快照，前插舊頁與新輸出均保留閱讀位置。生命週期、限制與主機準備見[終端歷史](terminal-history.md)。
 
 ## 平台層負責什麼
 

@@ -46,13 +46,13 @@ try {
         '程式旁 connections.toml 是唯一設定來源；不存在、空白或 connections = [] 時正常顯示空清單，不嵌入私人連線。',
         'Host 與 Screens 分開保存於同一 TOML；沒有 Screen 為 schema 5，有 Screen 為 schema 6。管理憑證及 Screen token 由目前 Windows 使用者 DPAPI 保護，不保存明文。',
         '新增第一筆 Screen 前，既有 TOML 備份為同目錄 connections.pre-desktops.toml；降版前先確認相容及備份，不靜默丟棄桌面。',
-        '換裝置：在齒輪的連線設定匯出 Host，含憑證時用密碼加密；自行搬移後在新裝置解鎖、勾選匯入。搬移檔不包含 Screens，Host 匯入會保留本機 Screens。',
+        '換裝置：在齒輪的連線設定選擇匯出 Host／Agent、Screens 或混合清單；管理憑證與 Screen token 以密碼加密整份檔案。自行搬移後在新裝置解鎖、勾選匯入，未選取的本機設定保留。',
         '相同網址預設略過，明確勾選才更新；不含憑證的 JSON 在新裝置需逐筆補入管理憑證。',
         '手動改設定前先關閉 App；覆寫路徑：art-term-gui.exe --config C:/path/connections.toml。請放在可寫目錄。',
         '不讀取使用者目錄中的舊 runtime-hosts-v1.json；舊版本連線需先在舊 App 匯出，再於新版匯入。',
         '每個 live Shell 可獨立選 Screen；App 原生層直接 MCP 取圖，不把截圖命令輸入工作 Shell。停止預覽與取消桌面工具分開操作。',
         '需要 Shell／coding CLI 工具時，先在受控端安裝通用 broker helper，再建立新連線；不注入正在執行的 CLI。Screen 選擇限定該 Shell，不是 Host 全域設定。',
-        '在連線內容直接用滾輪上捲，背景預載最多三批較早彩色紀錄，文字隨寬度換行、不出現水平捲軸；閱讀時固定位置，捲到底部才追隨新輸出。選Screen後立即返回CLI，預覽區顯示載入狀態。此版不移植Android語音或原生閱讀plugin。',
+        '連線內容只使用原生xterm直接呈現PTY；一般畫面有5000行scrollback與垂直捲軸，tmux alternate使用原生mouse／copy-mode位置指示，不再有文字覆蓋層或背景預載。活動Windows終端需新版helper terminalMouse能力，舊helper提示更新但仍可輸入。選Screen載入及既有UI操作保留；Android原生閱讀不變。',
         '整個交付資料夾一起搬移，請保留設定、備份與授權檔案；DPAPI 密文不能直接移給不同 Windows 帳號。',
         '關分頁只本機脫離；遠端工作仍受 TTL／Runtime 生命週期限制，退出工作 Bash 則結束該工作。'
     )

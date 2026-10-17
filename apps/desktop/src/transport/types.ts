@@ -231,24 +231,34 @@ export interface RuntimeHostTestDto {
 }
 
 export type TransferAction = 'add' | 'update' | 'skip'
-export interface TransferEntry {
+interface TransferEntryBase {
   key: string
   name: string
+  matchStatus: 'new' | 'duplicate' | 'ambiguous'
+}
+export interface TransferHostEntry extends TransferEntryBase {
+  kind?: 'host'
   origin: string
   metadata: ConnectionMetadata
   hasCredential: boolean
-  matchStatus: 'new' | 'duplicate' | 'ambiguous'
   target: RuntimeHostDto | null
 }
+export interface TransferScreenEntry extends TransferEntryBase {
+  kind: 'screen'
+  mcpUrl: string
+  hasToken: boolean
+  target: InstanceDesktop | null
+}
+export type TransferEntry = TransferHostEntry | TransferScreenEntry
 export interface TransferPreview {
   status: 'cancelled' | 'requiresPassword' | 'preview'
   token: string | null
   entries: TransferEntry[]
 }
 export interface TransferExportInput {
-  selected: { id: string; expectedRevision: number }[]
+  selected: { kind?: 'host' | 'screen'; id: string; expectedRevision: number }[]
   includeCredentials: boolean
   password: string
 }
 export interface TransferChoice { key: string; action: TransferAction; credential?: string }
-export interface TransferResult { added: number; updated: number; skipped: number; profiles: RuntimeHostDto[] }
+export interface TransferResult { added: number; updated: number; skipped: number; profiles: RuntimeHostDto[]; desktops?: InstanceDesktop[] }

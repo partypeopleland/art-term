@@ -5,12 +5,12 @@ use crate::instance_mcp::{DesktopProfile, DesktopSnapshot};
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct DesktopRecord {
+pub(super) struct DesktopRecord {
     #[serde(flatten)]
-    profile: DesktopProfile,
-    token_ciphertext: Vec<u8>,
+    pub(super) profile: DesktopProfile,
+    pub(super) token_ciphertext: Vec<u8>,
 }
-fn desktop_context(profile: &DesktopProfile) -> CredentialContext {
+pub(super) fn desktop_context(profile: &DesktopProfile) -> CredentialContext {
     CredentialContext {
         schema: 2,
         host_id: format!("instance-mcp:{}", profile.id),
@@ -34,7 +34,7 @@ fn validate(items: &[DesktopRecord]) -> Result<(), ApiError> {
     Ok(())
 }
 impl HostStore {
-    fn desktop_records(&self) -> Result<Vec<DesktopRecord>, ApiError> {
+    pub(super) fn desktop_records(&self) -> Result<Vec<DesktopRecord>, ApiError> {
         self.ensure_source()?;
         let Some(bytes) = read_source(&self.path)? else { return Ok(Vec::new()); };
         let value: toml::Value = toml::from_str(std::str::from_utf8(&bytes).map_err(|_| ApiError::Protocol)?).map_err(|_| ApiError::Protocol)?;
@@ -92,7 +92,11 @@ impl HostStore {
         desktops.remove(index);
         self.save_desktop_records(&records, &desktops)
     }
-    fn save_desktop_records(&self, records: &[Record], desktops: &[DesktopRecord]) -> Result<(), ApiError> {
+    pub(super) fn save_desktop_records(&self, records: &[Record], desktops: &[DesktopRecord]) -> Result<(), ApiError> {
+        let bytes = self.encode_desktop_records(records, desktops)?;
+        self.persist_bytes(&bytes)
+    }
+    pub(super) fn encode_desktop_records(&self, records: &[Record], desktops: &[DesktopRecord]) -> Result<Vec<u8>, ApiError> {
         check_path(&self.path)?;
         self.ensure_source()?;
         validate_records(records)?;
@@ -104,9 +108,10 @@ impl HostStore {
             Some(desktops.iter().map(toml::Value::try_from).collect::<Result<_,_>>().map_err(|_| ApiError::Protocol)?)
         };
         let bytes = toml::to_string(&document).map_err(|_| ApiError::Protocol)?.into_bytes();
-        self.persist_bytes(&bytes)
+        if bytes.len() as u64 > MAX_FILE { return Err(ApiError::Capacity); }
+        Ok(bytes)
     }
-    fn backup_before_desktops(&self) -> Result<(), ApiError> {
+    pub(super) fn backup_before_desktops(&self) -> Result<(), ApiError> {
         let Some(bytes) = read_source(&self.path)? else { return Ok(()); };
         let backup = self.path.with_file_name("connections.pre-desktops.toml");
         let mut options = fs::OpenOptions::new();

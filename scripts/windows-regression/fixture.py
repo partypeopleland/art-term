@@ -156,9 +156,9 @@ class Fixture:
                              start=start, end=end, hasOlder=start > 0,
                              records=[{'id': i + 1, 'text': records[i], 'styles': [[0, len(records[i].encode('utf-16-le')) // 2, 0x569cd6, -1, 0]] if records[i] else []} for i in range(start, end)])
                 event.update(epoch=epoch, before=end, limit=limit)
-            elif op in ('ack', 'keep', 'close'):
+            elif op in ('ack', 'keep', 'close', 'terminalMouse'):
                 reply['type'] = 'ack'
-                if op != 'close':
+                if op not in ('close', 'terminalMouse'):
                     reply['epoch'] = request['epoch']
                     event['epoch'] = request['epoch']
             else:
@@ -203,7 +203,7 @@ class Fixture:
                                              historyWork='th2-' + history[1].decode(), historyEpoch=0, historySnapshots={})
                                     s['previewInput'] = b''
                                     await self.output(s, (json.dumps({'v': 1, 'type': 'ready', 'requestId': 0,
-                                        'key': history[1].decode(), 'nonce': s['historyNonce'], 'instance': s['historyInstance']}) + '\n').encode())
+                                        'key': history[1].decode(), 'nonce': s['historyNonce'], 'instance': s['historyInstance'], 'terminalMouse': True}) + '\n').encode())
                         elif len(s['previewInput']) >= 4:
                             size = struct.unpack('!I', s['previewInput'][:4])[0]
                             if size > 16384:
@@ -230,7 +230,7 @@ class Fixture:
                             await self.output(s, b'Fixed PTY fixture ready (no commands executed)\r\n')
                     else:
                         s['input'] += message.data
-                        await self.output(s, message.data.replace(b'\r', b'\r\n'))
+                        await self.output(s, b''.join(b'\b \b' if value in (8, 127) else b'\r\n' if value == 13 else bytes([value]) for value in message.data))
                 elif message.type == WSMsgType.TEXT:
                     control = json.loads(message.data)
                     if control.get('v') != 1:

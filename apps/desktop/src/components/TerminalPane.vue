@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import NativeTerminalReader from './NativeTerminalReader.vue'
-import DesktopHistoryReader from './DesktopHistoryReader.vue'
+import { useNativeMouse } from '../terminal/native-mouse'
 import { NativeHistoryKey } from '../terminal/native'
 import type { AppController, TabState } from '../state/controller'
 import type { HostHistoryRequest, HostHistoryRequestFn } from '../terminal/native'
-import { asConnectionError } from '../transport/types'
 import { TerminalFactoryKey, createDesktopXtermTerminal } from '../terminal/handle'
 
 const props = defineProps<{
@@ -13,7 +12,7 @@ const props = defineProps<{
   active: boolean
   controller: AppController
   readerVisible?: boolean
-  inlineHistory?: boolean
+  nativeScroll?: boolean
 }>()
 
 const el = ref<HTMLElement | null>(null)
@@ -27,13 +26,11 @@ const desktopHistoryRequest = computed<HostHistoryRequestFn>(() => {
   const session = props.tab.sessionId
   return async request => {
     if (props.tab.sessionId !== session) return { kind: 'unsupported' }
-    try { return await props.controller.historyRequest(props.tab, request) }
-    catch (error) {
-      if (request.op === 'viewport' && asConnectionError(error)?.kind === 'capacity') return { kind: 'error', error: 'busy' }
-      throw error
-    }
+    return props.controller.historyRequest(props.tab, request)
   }
 })
+useNativeMouse(() => !!props.nativeScroll && props.active && !nativeReader && !!props.tab.runtime && props.tab.status === 'live' && props.tab.key === props.controller.activeKey.value,
+  () => props.tab.sessionId, () => desktopHistoryRequest.value, historyNotice)
 
 function fitAndReport(): void {
   const term = props.tab.term
@@ -78,9 +75,6 @@ onBeforeUnmount(() => {
 <template>
   <div class="pane" v-show="active">
     <div ref="el" class="term-host" />
-    <DesktopHistoryReader v-if="inlineHistory && !nativeReader && tab.runtime && tab.status === 'live' && tab.key === controller.activeKey.value"
-      :key="tab.sessionId ?? tab.key" :request="desktopHistoryRequest" :history-notice="historyNotice"
-      :visible="active" :terminal="tab.term" />
     <NativeTerminalReader v-if="nativeReader && active && tab.status === 'live'"
       :key="tab.sessionId ?? tab.key" :terminal="tab.term"
       :history-request="tab.runtime ? historyRequest : undefined" :history-notice="historyNotice"

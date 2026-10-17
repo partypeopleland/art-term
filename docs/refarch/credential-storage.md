@@ -51,7 +51,7 @@ HostStore 使用同目錄暫存檔及原子替換，revision/context保護憑證
 
 App 原生層解密 token 後直接呼叫 MCP，不經 WebView 讀回。使用者明確接入工具時，透過關 echo 的短命 configure Shell 傳給受控端 adapter，只有行程記憶體保存本次 URL／token，不放 command line、環境變數、PTY 回顯或 log。adapter 的 owner-only socket 防其他帳號存取，同 UID 程序仍是信任邊界。
 
-停止預覽不會清除 adapter 的工具憑證；「取消桌面工具」送 clear，關頁也 best-effort clear，斷網可能無法立即送達。stdin EOF／CLI 結束會釋放 adapter 記憶體。完整握手、大小限制與生命週期見[工具 bridge](runtime-desktop.md)。Host 匯出／匯入不含 Screen URL／token，也不得覆寫本機 Screen 集合。
+停止預覽不會清除 adapter 的工具憑證；「取消桌面工具」送 clear，關頁也 best-effort clear，斷網可能無法立即送達。stdin EOF／CLI 結束會釋放 adapter 記憶體。完整握手、大小限制與生命週期見[工具 bridge](runtime-desktop.md)。連線搬移可同時包含 Host 與 Screens；Screen token 僅隨整份密碼加密檔搬移，目的裝置再以自己的平台金鑰保護。未選取的本機 Screen 保留，分頁桌面選擇與工具授權不搬移。詳見[連線搬移](connection-transfer.md)。
 
 ## 金鑰遺失時為何拒絕開啟
 
