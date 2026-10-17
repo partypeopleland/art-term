@@ -454,12 +454,14 @@ describe('Windows shell runtime-agent retirement surface', () => {
     try {
       const controller = (wrapper.vm as unknown as { controller: AppController }).controller
       await flush()
-      await wrapper.find('[data-runtime-label="beta"]').trigger('click')
+      await wrapper.get('[data-testid="runtime-beta"] .attach-button').trigger('click')
       await flush()
       expect(controller.tabs[0].status).toBe('live')
 
       t.openError = new ConnectionError('stateChanged', 'runtime state changed')
-      await wrapper.find('[data-runtime-label="hana"]').trigger('click')
+      await wrapper.get('[data-testid="desktop-main"]').trigger('click')
+      await flush()
+      await wrapper.get('[data-testid="runtime-hana"] .attach-button').trigger('click')
       await flush()
 
       // The failed tab is gone; the unrelated live tab is untouched.

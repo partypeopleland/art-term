@@ -160,13 +160,13 @@ describe('shared App with runtime profiles (no Tauri)', () => {
     wrapper.unmount()
   })
 
-  it('a primary profile click quick-connects the single ready Shell', async () => {
+  it('an inline attach explicitly connects the single ready Shell', async () => {
     const t = new FakeTransport(PROFILES)
     seedRuntime(t)
     const { wrapper, controller, transport } = mountApp(t)
     await flush()
 
-    await wrapper.find('[data-runtime-label="nuc"]').trigger('click')
+    await wrapper.find('[data-testid="runtime-nuc"] .attach-button').trigger('click')
     await flush()
 
     expect(transport.openCalls.map((c) => c.targetId)).toEqual(['opq-computer-nuc'])
@@ -187,7 +187,7 @@ describe('shared App with runtime profiles (no Tauri)', () => {
     const originalSession = original.sessionId
     // A profile refresh (id/revision churn) must not touch the live tab.
     transport.runtimeHostsData = PROFILES.map((p) => ({ ...p, revision: p.revision + 1 }))
-    await wrapper.find('[data-testid="refresh-catalog"]').trigger('click')
+    await controller.loadCatalog()
     await flush()
     expect(original.targetId).toBe('opq-agent-hana')
     expect(original.sessionId).toBe(originalSession)
@@ -296,7 +296,7 @@ describe('shared App with runtime profiles (no Tauri)', () => {
     for (const s of transport.sessions.values()) expect(s.writes).toHaveLength(0)
   })
 
-  it('reuses a live tab by target identity and reconnects an exited tab on the same target', async () => {
+  it('reuses a live tab, removes a finished Shell, and opens a fresh tab on explicit reconnect', async () => {
     const t = new FakeTransport(PROFILES)
     const { controller, transport, terms } = mountApp(t)
     await flush()
@@ -309,7 +309,8 @@ describe('shared App with runtime profiles (no Tauri)', () => {
 
     transport.feed('s1', { bytes: [], exitCode: 0 })
     await flush()
-    expect(controller.tabs[0].status).toBe('exited')
+    expect(controller.tabs).toHaveLength(0)
+    expect(terms[0].disposed).toBe(true)
 
     controller.openTarget(agentsGroup, AGENTS.targets[0], false) // exited → reconnect same target
     await flush()
@@ -318,7 +319,8 @@ describe('shared App with runtime profiles (no Tauri)', () => {
     expect(transport.openCalls[1].targetId).toBe('opq-agent-hana')
     expect(controller.tabs[0].status).toBe('live')
     expect(controller.tabs[0].sessionId).toBe('s2')
-    expect(terms[0].resetCount).toBe(1)
+    expect(terms[0].resetCount).toBe(0)
+    expect(terms).toHaveLength(2)
   })
 
   it('enforces the 32-tab cap and closes tabs locally only', async () => {

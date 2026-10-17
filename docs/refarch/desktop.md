@@ -40,7 +40,7 @@ App 不新增 Codex 專用啟動按鈕，不自動執行 CLI。新 Shell 的 sco
 
 ## 相容與驗收邊界
 
-舊 `desktop_transport` 繼續解析以保留 Host 相容，但不決定 Android 的 Screen 按鈕。Android 明確選取 Screen 後只走直接 MCP，不啟用舊 `preview.py` 轉送路徑。原生後端仍保留未選 Screen 的 Windows 舊分頁相容路徑，依其既有 Host mapping 透過 Runtime 專用截圖 Shell 取圖；這不是 Android 新 Screen 流程的前置或備援。Windows 功能驗收暫停，不能把此相容程式碼當成新版 Windows 已驗收。既有 schema 5 不會自行產生 Screen。獨立 Screen 不包含在目前 Host 匯出／匯入中；新增前的備份與降版條件見[設定遷移](connections.md#舊設定與版本升級)。
+舊 `desktop_transport` 繼續解析以保留 Host 相容，但不決定新版 Android／Windows 的 Screen 按鈕。兩平台明確選取 Screen 後只走直接 MCP，不啟用舊 `preview.py` 轉送路徑。原生後端仍保留未選 Screen 的 Windows 舊分頁相容路徑，依其既有 Host mapping 透過 Runtime 專用截圖 Shell 取圖；這不是新版 Screen 流程的前置或備援。Windows 已同步共用 Screen 清單／設定／選單，原生 EXE／DPAPI 與現場 Runtime 驗收由 Windows 電腦接續，不能把 Linux 或舊相容程式碼當成已驗收。既有 schema 5 不會自行產生 Screen。獨立 Screen 不包含在目前 Host 匯出／匯入中；新增前的備份與降版條件見[設定遷移](connections.md#舊設定與版本升級)。
 
 固定 client 的 MCP E2E 能驗證產品路由、完整工具結果及官方 Runtime configure 通道，不能代表真的 AI 模型或 Codex CLI 已實測。App／手機與現場 MCP 的驗收各自列出實際結果，不以舊截圖 helper 的通過紀錄代替。範圍見[測試矩陣](test-matrix.md)。
 

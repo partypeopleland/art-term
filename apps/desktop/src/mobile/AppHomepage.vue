@@ -2,6 +2,8 @@
 import { computed, ref } from 'vue'
 import appInfo from 'virtual:art-term-info'
 
+const props = withDefaults(defineProps<{ platform?: 'android' | 'windows' }>(), { platform: 'android' })
+const currentVersion = computed(() => props.platform === 'windows' ? appInfo.windowsVersion : appInfo.version)
 const selectedVersion = ref<string | null>(null)
 const selectedRelease = computed(() => appInfo.releases.find(release => release.version === selectedVersion.value))
 const highlights = (content: string) => content.split('\n').filter(line => /^- /.test(line)).slice(0, 3).map(line => line.replace(/^- /, '').replace(/\*\*/g, ''))
@@ -41,11 +43,11 @@ const documentBlocks = computed(() => {
         <div class="app-home-mark" aria-hidden="true">&gt;_</div>
         <div><span class="eyebrow">YOUR REMOTE WORKSPACE</span><h1>art-term<span>.</span></h1><p>遠端 Shell、工作助理與共享畫面，隨手連接。</p></div>
       </section>
-      <section class="version-card"><div><span class="eyebrow">CURRENT VERSION</span><h2>當前版本</h2></div><div class="version-value">{{ appInfo.version }}<small>Android · Build {{ appInfo.androidBuild }}</small></div></section>
+      <section class="version-card"><div><span class="eyebrow">CURRENT VERSION</span><h2>當前版本</h2></div><div class="version-value">{{ currentVersion }}<small>{{ platform === 'windows' ? 'Windows' : `Android · Build ${appInfo.androidBuild}` }}</small></div></section>
       <p class="art-note"><span class="art-note-cursor" aria-hidden="true">▍</span><span class="art-note-author">art說:</span><span class="art-note-message">有bug是很正常的~</span><span class="art-note-spark" aria-hidden="true">✦</span></p>
       <header class="release-heading"><h2>近期更新</h2><span>RELEASE NOTES</span></header>
       <button v-for="release in appInfo.releases" :key="release.version" class="release-card" @click="selectedVersion = release.version">
-        <div class="release-title"><strong>v{{ release.version }}</strong><span v-if="release.version === appInfo.version" class="latest-badge">目前版本</span><span class="release-arrow" aria-hidden="true">↗</span></div>
+        <div class="release-title"><strong>v{{ release.version }}</strong><span v-if="release.version === currentVersion" class="latest-badge">目前版本</span><span class="release-arrow" aria-hidden="true">↗</span></div>
         <ul v-if="highlights(release.content).length"><li v-for="highlight in highlights(release.content)" :key="highlight">{{ highlight }}</li></ul>
         <span class="read-release">閱讀完整更新說明 →</span>
       </button>

@@ -14,7 +14,7 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.remote.client_config import ClientConfig
 from selenium.webdriver.common.proxy import Proxy, ProxyType
 
-HIDDEN = subprocess.CREATE_NO_WINDOW
+HIDDEN = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 
 
 def require(condition, message):
@@ -140,7 +140,7 @@ class App:
             self.owned = [p for p in apps() if p['parent'] == self.process.pid and Path(p['path']).resolve() == self.exe]
         require(len(self.owned) == 1, 'ambiguous test GUI ownership')
         self.driver.set_script_timeout(45)
-        self.wait(lambda: self.find('[data-testid=runtime-host-manage]'))
+        self.wait(lambda: self.find('[data-testid=desktop-main]'))
         self.metadata['observer'] = self.driver.execute_script(OBSERVER)
         self.metadata['browserVersion'] = self.driver.capabilities.get('browserVersion')
         self.metadata['driverVersion'] = self.driver.capabilities.get('msedge', {}).get('msedgedriverVersion')
@@ -156,7 +156,7 @@ class App:
         return self.driver.find_elements(By.CSS_SELECTOR, css)
 
     def node(self, testid):
-        return self.wait(lambda: self.find('[data-testid="' + testid + '"]'))[0]
+        return self.wait(lambda: [e for e in self.find('[data-testid="' + testid + '"]') if e.is_displayed()])[-1]
 
     def click(self, text, css='button'):
         def find():
@@ -180,8 +180,23 @@ class App:
         return self.invoke('gui_runtime_hosts')
 
     def manage(self):
-        self.node('runtime-host-manage').click()
+        self.settings()
+        self.node('desktop-manage-hosts').click()
         self.node('runtime-create')
+
+    def settings(self):
+        self.node('desktop-settings').click()
+        self.node('screen-settings')
+
+    def main_page(self):
+        self.node('desktop-main').click()
+        self.wait(lambda: any(e.is_displayed() for e in self.find('.desktop-main-page')))
+
+    def connect_page(self):
+        self.node('desktop-connect').click()
+
+    def screens(self):
+        return self.invoke('gui_instance_desktops')
 
     def terminal(self, text):
         textarea = self.wait(lambda: self.driver.execute_script("return [...document.querySelectorAll('.pane .xterm-helper-textarea')].find(e=>e.closest('.pane').getBoundingClientRect().width>0) || null;"))
@@ -192,8 +207,8 @@ class App:
     def contains(self, name, text):
         return self.driver.execute_script("return Object.values(window.__reg.sessions).some(s=>s.name===arguments[0] && s.tail.includes(arguments[1]));", 'openab:' + name, text)
 
-    def rendered(self):
-        return self.driver.execute_script("const i=document.querySelector('img.shot');return !!i && i.complete && i.naturalWidth===512 && i.naturalHeight===256;")
+    def rendered(self, image=None):
+        return self.driver.execute_script("const i=[...document.querySelectorAll('img.shot')].find(e=>e.getBoundingClientRect().width>0);return !!i && i.complete && i.naturalWidth===2 && i.naturalHeight===2 && (!arguments[0] || i.src===arguments[0]);", image)
 
     def shots(self):
         return self.driver.execute_script('return window.__reg.shots;')

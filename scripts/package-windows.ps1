@@ -39,20 +39,22 @@ try {
     Copy-Item -LiteralPath (Join-Path $projectRoot 'docs/third-party-notices.md') -Destination (Join-Path $outputRoot 'THIRD-PARTY-NOTICES.md')
     $instructions = @(
         '# art-term Windows', '',
-        '需要 Windows 10 1809 以上、WebView2 Runtime 與可達 Runtime Host 的網路。',
-        '開啟 art-term-gui.exe，按「新增 openab-pty 連線」選擇 Host／Agent 分類，填入可信 HTTPS 根網址與管理憑證。',
-        '點名稱開啟 Shell；右側「Shell」可列出、選擇或建立工作。', '',
-        '程式旁 connections.toml 是唯一連線來源；不存在、空白或 connections = [] 時顯示空清單，可直接新增或匯入。',
-        '新增、編輯、刪除及匯入皆寫回同一份 TOML（schema_version=5）；管理憑證以目前 Windows 使用者 DPAPI 保護後保存，沒有明文憑證。',
-        '換裝置：在「管理」多選匯出連線，含憑證時用密碼加密；自行搬移檔案後，在新裝置選檔解鎖並勾選匯入。',
+        '需要 Windows 10 1809 以上、WebView2 Runtime 與可達 Runtime Host／instance-mcp 的網路。',
+        '開啟 art-term-gui.exe；固定頂列的品牌開啟版本與更新紀錄，Main 顯示 Computers／Agents／Screens，Connect 顯示已開啟分頁。',
+        '齒輪開啟全頁設定，可選科技感、深黑、柔光或懷舊主題，並新增 Host／Agent／Screen、匯入或匯出 Host。',
+        '在主機旁點既有工作名稱 attach／接管，＋建立新的歷史工作；多筆可展開。Host 管理入口可編輯、刪除與測試連線。', '',
+        '程式旁 connections.toml 是唯一設定來源；不存在、空白或 connections = [] 時正常顯示空清單，不嵌入私人連線。',
+        'Host 與 Screens 分開保存於同一 TOML；沒有 Screen 為 schema 5，有 Screen 為 schema 6。管理憑證及 Screen token 由目前 Windows 使用者 DPAPI 保護，不保存明文。',
+        '新增第一筆 Screen 前，既有 TOML 備份為同目錄 connections.pre-desktops.toml；降版前先確認相容及備份，不靜默丟棄桌面。',
+        '換裝置：在齒輪的連線設定匯出 Host，含憑證時用密碼加密；自行搬移後在新裝置解鎖、勾選匯入。搬移檔不包含 Screens，Host 匯入會保留本機 Screens。',
         '相同網址預設略過，明確勾選才更新；不含憑證的 JSON 在新裝置需逐筆補入管理憑證。',
-        '修改設定後重啟；覆寫路徑：art-term-gui.exe --config C:/path/connections.toml。',
+        '手動改設定前先關閉 App；覆寫路徑：art-term-gui.exe --config C:/path/connections.toml。請放在可寫目錄。',
         '不讀取使用者目錄中的舊 runtime-hosts-v1.json；舊版本連線需先在舊 App 匯出，再於新版匯入。',
-        '請將整包放在可寫目錄；手動修改或刪除 TOML 前先關閉 App。刪除後重開為空清單，舊檔與金鑰不會自動移除。',
-        'Android 同樣使用裝置內唯一 connections.toml；首次使用可新增或匯入，APK 不嵌入預設連線。',
-        '桌面沿用既有管理憑證，由 App 建立專用截圖 Shell 呼叫 Host helper，圖片經原 Runtime 連線回傳；不會把截圖指令送進工作 Shell。',
-        '整個交付資料夾一起搬移，請保留設定與授權檔案。',
-        '關分頁只本機脫離；遠端 Shell 仍受 TTL 及 runtime 生命週期限制。'
+        '每個 live Shell 可獨立選 Screen；App 原生層直接 MCP 取圖，不把截圖命令輸入工作 Shell。停止預覽與取消桌面工具分開操作。',
+        '需要 Shell／coding CLI 工具時，先在受控端安裝通用 broker helper，再建立新連線；不注入正在執行的 CLI。Screen 選擇限定該 Shell，不是 Host 全域設定。',
+        '歷史按鈕開獨立彩色閱讀面板，向上分批載入；即時 xterm 保留硬體鍵盤與既有滑鼠操作。此版不移植 Android 語音或原生閱讀 plugin。',
+        '整個交付資料夾一起搬移，請保留設定、備份與授權檔案；DPAPI 密文不能直接移給不同 Windows 帳號。',
+        '關分頁只本機脫離；遠端工作仍受 TTL／Runtime 生命週期限制，退出工作 Bash 則結束該工作。'
     )
     Set-Content -LiteralPath (Join-Path $outputRoot 'README.md') -Value $instructions -Encoding UTF8
     $manifest = foreach ($name in @('art-term-gui.exe','connections.toml','README.md','LICENSE','THIRD-PARTY-NOTICES.md')) {

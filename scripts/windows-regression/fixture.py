@@ -4,9 +4,9 @@ import base64
 import copy
 import datetime
 import hashlib
-import io
+import json
+import struct
 import ipaddress
-import random
 import re
 import secrets
 import ssl
@@ -16,7 +16,6 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
-from PIL import Image
 
 
 class Fixture:
@@ -28,11 +27,6 @@ class Fixture:
         self.loop = asyncio.new_event_loop()
         self.thread = threading.Thread(target=self.loop.run_forever, daemon=True)
         self.thread.start()
-        image = Image.frombytes('RGB', (512, 256), random.Random(47).randbytes(512 * 256 * 3))
-        out = io.BytesIO()
-        image.save(out, format='PNG', compress_level=0)
-        self.png = out.getvalue()
-        assert len(self.png) > 256 * 1024
         self.ca = root / 'fixture-ca.der'
         self.context = self._certificates()
         self.call(self._start())
@@ -50,7 +44,8 @@ class Fixture:
               .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
               .sign(key, hashes.SHA256()))
         server_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-        server = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(server_key.public_key())
+        server_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, 'art-term loopback fixture server')])
+        server = (x509.CertificateBuilder().subject_name(server_name).issuer_name(name).public_key(server_key.public_key())
                   .serial_number(x509.random_serial_number()).not_valid_before(now - datetime.timedelta(minutes=1))
                   .not_valid_after(now + datetime.timedelta(days=1))
                   .add_extension(x509.SubjectAlternativeName([x509.IPAddress(ipaddress.ip_address('127.0.0.1'))]), False)
@@ -99,7 +94,7 @@ class Fixture:
             if name in self.sessions:
                 return web.json_response({}, status=409)
             self.sessions[name] = {'generation': 1, 'token': secrets.token_hex(32), 'history': b'',
-                                   'input': b'', 'previewInput': b'', 'resizes': [], 'attaches': [], 'ws': None}
+                                   'input': b'', 'previewInput': b'', 'bootstrap': False, 'controlNonce': None, 'resizes': [], 'attaches': [], 'ws': None}
             return web.json_response(self.grant(name))
         if name not in self.sessions:
             return web.json_response({}, status=404)
@@ -144,23 +139,43 @@ class Fixture:
         try:
             async for message in ws:
                 if message.type == WSMsgType.BINARY:
-                    s['input'] += message.data
                     if name.startswith('mcshot-'):
+                        # Exec-only configure receiver: no command execution or secret retention.
                         s['previewInput'] += message.data
-                        match = re.fullmatch(rb'python3 "\$HOME/\.local/share/art-term/openab-pty/preview\.py" (status|screenshot) ([a-f0-9]{32})\n', s['previewInput'])
-                        if match:
-                            import json
-                            action, nonce = match[1].decode(), match[2].decode()
-                            value = {'enabled': True} if action == 'status' else {
-                                'mime': 'image/png', 'image_base64': base64.b64encode(self.png).decode(), 'bytes': len(self.png)}
-                            self.events.append({'method': 'preview', 'name': name, 'action': action})
-                            data = ('ARTTERM_PREVIEW_BEGIN:' + nonce + '\r\n' + json.dumps(value, separators=(',', ':')) +
-                                    '\r\nARTTERM_PREVIEW_END:' + nonce + ':0\r\n').encode()
-                            await self.output(s, data)
+                        if s['controlNonce'] is None:
+                            match = re.fullmatch(rb'exec python3 "\$HOME/\.local/share/art-term/tools/instance_bridge\.py" control --binding (th2-[a-f0-9]{24}) --nonce ([a-f0-9]{32})\n', s['previewInput'])
+                            if match:
+                                s['controlNonce'] = match[2].decode()
+                                s['previewInput'] = b''
+                                await self.output(s, ('ARTTERM_TOOLS_READY:' + s['controlNonce'] + '\r\n').encode())
+                        elif len(s['previewInput']) >= 4:
+                            size = struct.unpack('!I', s['previewInput'][:4])[0]
+                            if size > 16384:
+                                raise ValueError('configure frame too large')
+                            if len(s['previewInput']) == size + 4:
+                                payload = json.loads(base64.b64decode(s['previewInput'][4:], validate=True))
+                                if payload.get('op') not in ('configure', 'clear'):
+                                    raise ValueError('unsupported configure operation')
+                                self.events.append({'method': 'tools-control', 'name': name, 'action': payload['op']})
+                                # No adapter/model exists. Explicitly report zero adapters.
+                                answer = {'ok': True, 'adapters': 0, 'targets': []}
+                                s['previewInput'] = b''
+                                payload.clear()
+                                await self.output(s, ('ARTTERM_TOOLS_RESULT:' + s['controlNonce'] + ':' + json.dumps(answer) + '\r\n').encode())
+                    elif name.startswith('th2-') and not s['bootstrap']:
+                        s['previewInput'] += message.data
+                        if s['previewInput'].endswith(b'\n'):
+                            key = name[4:].encode()
+                            if not s['previewInput'].startswith(b'if [ -f ') or key not in s['previewInput'] or b'tmux-shell.py' not in s['previewInput']:
+                                raise ValueError('unexpected history bootstrap')
+                            s['bootstrap'] = True
+                            s['previewInput'] = b''
+                            self.events.append({'method': 'bootstrap', 'name': name})
+                            await self.output(s, b'Fixed PTY fixture ready (no commands executed)\r\n')
                     else:
+                        s['input'] += message.data
                         await self.output(s, message.data.replace(b'\r', b'\r\n'))
                 elif message.type == WSMsgType.TEXT:
-                    import json
                     control = json.loads(message.data)
                     if control.get('v') != 1:
                         raise ValueError('control version')
@@ -179,8 +194,8 @@ class Fixture:
         return ws
 
     async def _snapshot(self):
-        return {'events': copy.deepcopy(self.events), 'pngBytes': len(self.png), 'sessions': {
-            name: {'generation': s['generation'], 'input': s['input'].decode('utf-8'),
+        return {'events': copy.deepcopy(self.events), 'pngBytes': 0, 'sessions': {
+            name: {'generation': s['generation'], 'input': s['input'].decode('utf-8'), 'bootstrap': s['bootstrap'],
                    'historyBytes': len(s['history']), 'resizes': copy.deepcopy(s['resizes']),
                    'attaches': copy.deepcopy(s['attaches']), 'attached': s['ws'] is not None}
             for name, s in self.sessions.items()}}
@@ -196,6 +211,16 @@ class Fixture:
 
     def disconnect(self, name):
         self.call(self._disconnect(name))
+
+    def finish(self, name):
+        async def finish():
+            ws = self.sessions[name]['ws']
+            if ws is None:
+                raise RuntimeError('fixture work socket absent')
+            # Send the peer close frame before the handler can complete its
+            # default close handshake (aiohttp concurrent close otherwise races).
+            await ws._writer.close(code=4004, message=b'fixture finished')
+        self.call(finish())
 
     def close(self):
         async def stop():

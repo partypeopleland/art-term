@@ -4,7 +4,7 @@
 
 給 AI 的工作範圍應包含要修改的功能與預期行為。AI 先讀本頁，從下方功能對照找既有保護，再決定需要增加哪個案例；不要以增加測試數量代替驗證具體行為。
 
-目前 Windows 功能開發／驗收暫停。下列桌面 framing／專用截圖 Shell 案例屬於舊版相容流程，不能代表新版直接 MCP／Screens 已通過；新門檻見[測試矩陣](../refarch/test-matrix.md#直接-mcp-與獨立-screens-的驗收門檻)。
+Owner 已恢復 Windows 非平台功能同步；語音與 Android plugin 不在本階段。本輪 Linux 只完成來源、DOM 與適用共用核心檢查，Windows EXE／WebView2／DPAPI／選檔器／真 Runtime 必須由 Windows 電腦接續驗收。舊 framing／截圖 Shell 的歷史結果不能代表新版 Screens 或歷史面板已通過。接續範圍見[測試矩陣](../refarch/test-matrix.md#直接-mcp-與獨立-screens-的驗收門檻)。
 
 ## 各層測到什麼
 
@@ -63,16 +63,17 @@ Microsoft Edge WebDriver 必須匹配 App 使用的 **WebView2 Runtime**，不�
 
 `Unit` 包含前端與 Rust 的單元／元件／協定整合檢查；`E2E` 仍會重新確認前端及 EXE 建置，不沿用來源不明的舊產物。只跑其中一層時，報告必須寫明範圍，不能寫成完整回歸通過。需要使用另一個已備妥的 Python 環境時，可指定 `-PythonPath`，其中必須安裝相同 requirements。
 
-## 原生 E2E 的四個流程
+## 原生 E2E 的操作範圍
 
 | 流程 | 主要操作與必須成立的結果 |
 |---|---|
 | 連線保存 | 缺 TOML 正常開空清單；新增／測試／改名與分類；空白憑證編輯仍保留原憑證；重開後 id、revision、分類及能力保持；刪最後一筆後仍能重開空清單。 |
 | 終端與工作 | 由畫面建立及選擇 Shell，真 xterm 輸入與呈現 Unicode；resize、兩分頁不串線；暫時斷線後沿用 token／游標，不建立或 renew，也不重播輸入；關頁只 detach。 |
-| 桌面預覽 | 專用截圖 Shell 傳回可解碼的大圖；首圖、實際等待 30 秒自動更新、手動更新、停用清圖；工作 Shell 不收到截圖命令，只有自建暫時 Shell 被刪除，終端繼續可用。 |
+| Screens 與直接預覽 | 透過真 IPC／DPAPI 新增、編輯、刪除 Screen，重開保留；每分頁明確選擇、A／B 切換與取消；圖片直接走原生 MCP、正確解碼及來源核對，舊回覆不覆蓋新目標；定時／手動／停止保持終端。 |
+| 共用畫面與歷史 | Main／Connect、分類收合與狀態點、全頁設定、首頁 Windows 版本／完整更新文件、四主題及新分頁色彩；歷史按鈕面板初頁／向上讀頁／彩色1024行界限／ACK／keep／close，xterm 硬體鍵盤與原 mouse mode 不變。 |
 | 加密搬移 | 原生選檔器匯出含憑證加密檔；在另一份空設定匯入；錯密碼不改設定，重新解鎖後套用並重開可連；相同網址預設略過，明確選取更新才變更 revision。 |
 
-測試不安裝或執行 coding CLI；只驗證 App 依明確能力設定送出預期命令。桌面 fixture 傳回真 PNG，走完整 framing、Rust 驗證與畫面解碼；不是把任意 bytes 當成截圖。它也不執行 Linux 的 preview helper，helper 自身的驗證仍屬 Host 測試範圍。
+測試不安裝或執行 coding CLI；只驗證 App 依明確能力設定送出預期命令。直接 MCP fixture 需傳回真 PNG，走原生 MCP HTTP、Rust 驗證與畫面解碼；不能只替換 IPC 或把任意 bytes 當成截圖。它不代表現場 MCP 或 Shell broker／真 Runtime 已驗收。舊截圖 framing 案例可保留相容保護，不能作為新版 UI 的成功證據。
 
 ## 功能與既有測試對照
 
@@ -85,9 +86,20 @@ Microsoft Edge WebDriver 必須匹配 App 使用的 **WebView2 Runtime**，不�
 | 搬移加密與原子套用 | core `openab/transfer_tests.rs`：`reject_untrusted_files_and_authenticated_changes`、`atomic_batch_metadata_reload_stale_and_failure`；GUI `runtime_transfer.rs`：`bounded_ttl_window_binding_busy_cancel_late_and_commit_grant` | 原生 picker roundtrip、錯密碼、重複 origin、取消／背景／過期；Android SAF 另作實機驗證。 |
 | Runtime list／建立／續期 | core `openab/tests.rs`：`native_https_official_list_does_not_require_custom_fields`、`explicit_official_renew_is_one_post_without_custom_conditions`；前端 `runtime-sessions.test.ts` | 使用者選取與自動恢復的區分；管理請求結果不確定時不自動重送。 |
 | 輸入／ACK／Gap／恢復 | core `openab/tests.rs`：`native_wss_historical_gap_ack_and_live_input_are_byte_exact`、`native_same_retained_token_resumes_from_ack_without_admin_renew`；前端 `runtime-stream.test.ts` | 真 xterm、分頁隔離、同 token 恢復、無輸入重播；ACK 是本機 parse 完成確認，不是遠端 frame。 |
-| 圖片／截圖通道 | core `openab/screenshot.rs`：`decode_screenshot_validates_envelope_and_preserves_wire_bytes`、`decode_status_accepts_only_an_explicit_boolean` 與 framing tests；`openab/tests.rs`：`preview_cancel_during_attach_deletes_only_created_owned_shell`、`preview_burst_larger_than_terminal_queue_is_acknowledged_without_slow_consumer` | 有效圖片與 envelope 錯誤、原生大圖與工作 Shell 隔離；只測 burst bytes 不代表圖片解碼通過。 |
-| 自動預覽／分頁／關閉 | 前端 `app.test.ts`：`captures immediately, then every 30s, only for the active tab; hide stops new captures`；GUI `runtime_sessions.rs`：`in_flight_screenshot_is_discarded_after_disable_or_close_native` | 原生首圖／auto／manual／停用；晚到 callback 不寫入新分頁。 |
+| 舊截圖相容通道 | core `openab/screenshot.rs`：`decode_screenshot_validates_envelope_and_preserves_wire_bytes`、`decode_status_accepts_only_an_explicit_boolean` 與 framing tests；`openab/tests.rs`：`preview_cancel_during_attach_deletes_only_created_owned_shell`、`preview_burst_larger_than_terminal_queue_is_acknowledged_without_slow_consumer` | 有效圖片與 envelope 錯誤、原生大圖與工作 Shell 隔離；只測 burst bytes 不代表圖片解碼通過。 |
+| 新版 Windows 畫面／Screens | 前端 `app.test.ts`、controller 的 Screen 選擇與生命週期案例；native `instance_desktops.rs`／`runtime_sessions.rs` 與 Windows runner | Dashboard、四主題、設定、版本首頁、Host 管理、每分頁 Screen／來源／clear；真 EXE／DPAPI 與晚到結果原生核對。 |
+| Windows 歷史面板 | 前端 `desktop-history.test.ts`、共用 HostHistoryWindow 測試；Host 的歷史讀頁／退出案例 | 彩色內容、較早／較新／最新／返回、窗口界限、ACK／keep／close、取消／晚到回應與不支援提示；真 Windows focus／resize 另驗收。 |
 | 終端滾動／手機輸入與背景 | 前端 `terminal-wheel.test.ts`、`mobile-input.test.ts`、`mobile-runtime-ipc.test.ts`、`runtime-stream.test.ts` | 保留 IME、背景取消、原 binding 恢復；Windows 的手機尺寸／模擬事件不等於 Android 實機。 |
+
+## 本次 Windows 同步的接續驗收
+
+在 Windows 電腦使用交接文件所在 commit，執行上方 All 入口，再重新打包 release；Linux 結果、舊 EXE 或 `-SkipBuild` 都不能代表新 Windows 建置。測試程式若有 UI 選擇器／fixture 適配，仍保留真 EXE、IPC、DPAPI、網路層與原生檔案選擇器，不放寬失敗斷言。
+
+新版 runner 已對應 Main／設定、inline Shell／th2 建立與直接 MCP fixture，仍待 Windows 首次執行；Linux fixture smoke 只能驗證 fixture 的協定行為。自動原生案例是 CRUD／終端／Screens／搬移四組，Screens 以 A／B 不同的 2×2 PNG 完整來源比對與真解碼驗證；不宣稱大圖壓力或舊 framing 通道成功。上表的歷史面板、主題／頁面布局與焦點、30 秒自動更新、持續背景／晚回覆及真 Shell broker 屬於另行人工驗收，不因四組 runner 成功而自動通過。
+
+原生回歸之外，使用隔離連線確認：Host 管理入口仍可編輯／刪除／測試；Host 搬移不含 Screen 且匯入不遺失本機桌面；設定／首頁開啟時輸出繼續處理，關閉後 fit／focus；快捷鍵不攔表單輸入；普通及歷史 Shell 不誤用閱讀面板。與正式 Runtime 的 new Shell／renew／exit、工具 broker、現場 MCP 另記結果，不把固定 client 寫成真 AI CLI 已測。
+
+本輪語音、Android 原生閱讀器及手機手勢不移植，不需要為 Windows 啟用 Android plugin。任一層未執行就寫 NOT_RUN 或具體 BLOCKED，不能以本輪只交程式為由寫成 Windows 已通過。交接完成後僅推開發分支，未經 Owner 後續決定不 merge／tag／release。
 
 ## 新功能或修正的測試計畫
 

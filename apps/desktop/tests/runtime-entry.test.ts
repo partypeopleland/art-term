@@ -1,8 +1,15 @@
 import { showMobileMain } from './mobile-actions'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { nextTick } from 'vue'
-import App from '../src/App.vue'
+import { computed, defineComponent, nextTick, onBeforeUnmount, onMounted, provide, ref } from 'vue'
+import type { PropType } from 'vue'
+import { createAppController, type ControllerOptions } from '../src/state/controller'
+import { createRuntimeEntry, runtimeConnectedIds } from '../src/state/runtime-entry'
+import { TerminalFactoryKey, type TerminalFactory } from '../src/terminal/handle'
+import type { Transport } from '../src/transport/types'
+import CategoryList from '../src/components/CategoryList.vue'
+import TerminalPane from '../src/components/TerminalPane.vue'
+import RuntimeConnectionDialog from '../src/components/RuntimeConnectionDialog.vue'
 import MobileApp from '../src/mobile/MobileApp.vue'
 import type { AppController } from '../src/state/controller'
 import type { HostDto, RuntimeHostDto, TargetDto } from '../src/transport/types'
@@ -68,10 +75,46 @@ function mobileRuntimeTransport(store: RuntimeHostDto[], listed: HostDto = ready
   })
 }
 
+// The quick-entry helper remains shared with MobileApp. Keep its chooser,
+// cancellation and local-tab reuse contract independent of the Windows dashboard.
+const EntryHarness = defineComponent({
+  components: { CategoryList, TerminalPane, RuntimeConnectionDialog },
+  props: {
+    transport: { type: Object as PropType<Transport>, required: true },
+    terminalFactory: { type: Function as PropType<TerminalFactory>, required: true },
+    controllerOptions: { type: Object as PropType<ControllerOptions>, required: true }
+  },
+  setup(props, { expose }) {
+    provide(TerminalFactoryKey, props.terminalFactory)
+    const controller = createAppController(props.transport, props.controllerOptions)
+    const profile = ref<RuntimeHostDto | null>(null), seed = ref<HostDto | null>(null)
+    function open(host: HostDto, target: TargetDto) {
+      profile.value = null; seed.value = null
+      controller.openTarget({ dto: host, expanded: true }, target, false)
+    }
+    const entry = createRuntimeEntry(props.transport, controller, {
+      activateTab: tab => controller.setActive(tab.key),
+      openChooser: (p, group) => { profile.value = { ...p }; seed.value = group },
+      openTarget: open, showError: text => { controller.uiNotice.value = text }
+    })
+    const connected = computed(() => runtimeConnectedIds(controller.tabs))
+    onMounted(() => { void controller.loadCatalog() })
+    onBeforeUnmount(() => { entry.dispose(); controller.dispose() })
+    expose({ controller })
+    return { controller, profile, seed, entry, connected, open }
+  },
+  template: `<div>
+    <CategoryList :catalog-loading="controller.catalogLoading.value" :runtime-profiles-error="controller.runtimeProfilesError.value" :runtime-profiles="controller.runtimeProfiles.value" :runtime-pending="entry.pendingId.value" :runtime-connected="connected" @runtime-open="entry.primary" @runtime-shell="entry.shell" />
+    <TerminalPane v-for="tab in controller.tabs" :key="tab.key" :tab="tab" :active="tab.key === controller.activeKey.value" :controller="controller" />
+    <RuntimeConnectionDialog v-if="profile" :profile="profile" :transport="transport" :initial-group="seed" @open="open" @close="profile = null; seed = null" />
+    <span>{{ controller.uiNotice.value }}</span>
+  </div>`
+})
+
 const wrappers: ReturnType<typeof mount>[] = []
 function mountApp<T extends FakeTransport>(transport: T) {
   const terms: FakeTerm[] = []
-  const wrapper = mount(App, {
+  const wrapper = mount(EntryHarness, {
     props: {
       transport,
       terminalFactory: () => {

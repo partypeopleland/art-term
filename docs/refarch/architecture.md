@@ -58,6 +58,12 @@ Android 終端閱讀器是覆蓋在 WebView 終端位置的原生 View，水平�
 
 瀏覽器預覽沿用手機元件，但以獨立入口注入記憶體 transport、假語音與瀏覽器終端；正式入口使用原生 transport、裝置端辨識及原生閱讀器。預覽不接真實 Runtime，不參與 APK 打包，詳見[手機畫面預覽](../platforms/ui-preview.md)。
 
+## Windows 共用畫面與獨立歷史面板
+
+Windows App 接入同一套分類 Dashboard、全頁 settings、homepage、四主題及 Screen picker，保留 Host 管理、硬體鍵盤與 xterm。設定／首頁遮蓋時終端元件保持掛載並處理輸出，返回後 fit／focus，表單正常輸入不被終端快捷鍵攔截。語音與 Android 原生閱讀／手勢 plugin 不移植。
+
+Windows 明確「歷史」按鈕開獨立面板，以共用 HostHistoryWindow 管 viewport／older／ACK／keep／close，彩色顯示最多 1024 行、每批較早頁最多 256 行。xterm 保持即時終端與原滾輪／Host mouse off；歷史面板不修改遠端 CLI 的 mouse mode。Android 仍用原生 View，兩者共享主機讀頁契約而各自呈現。Windows EXE、WebView2、DPAPI 與原生操作須在 Windows 電腦驗收，Linux DOM／核心檢查不能替代。
+
 ## 輸出完成後才確認
 
 ```text
@@ -76,7 +82,7 @@ Runtime output -> WSS binding -> bounded queue -> xterm parse
 
 有界佇列限制等待處理的 bytes 與事件數，避免終端或背景分頁無限累積資料。xterm 完成一批輸出的解析後，控制器才經 IPC 確認 exact batch，由 native SessionHandle 更新本機已呈現游標。這個 ACK（已處理確認）不是每批送給 Runtime 的遠端 frame；恢復連線時才以已呈現游標作為 since，向 Runtime 請求後續輸出。不能因收到資料就提前確認。若 Runtime 告知 Gap（輸出已缺段），App 清理待送輸入並重置顯示，再處理可補送的輸出。短暫斷線只恢復原 binding，不重建 Shell，也不重播結果不確定的輸入。完整生命週期見 [連線與工作](sessions.md)。
 
-核心同時提供尺寸／大小界限及 PNG／JPEG 驗證。Screen 與 Host 是同一 TOML 中兩個獨立集合；原生層直接連 Screen 的 instance-mcp 擷取圖片，不經 PTY，不建立截圖 Shell。Screen 由每個 live Shell 分頁明確選取，與舊 Host 桌面能力欄位無關。原生後端另外保留未選 Screen 的 Windows 舊分頁 Runtime 截圖相容路徑；Android 新選擇始終直接 MCP，不退回該路徑。
+核心同時提供尺寸／大小界限及 PNG／JPEG 驗證。Screen 與 Host 是同一 TOML 中兩個獨立集合；原生層直接連 Screen 的 instance-mcp 擷取圖片，不經 PTY，不建立截圖 Shell。Screen 由每個 live Shell 分頁明確選取，與舊 Host 桌面能力欄位無關。原生後端另外保留未選 Screen 的 Windows 舊分頁 Runtime 截圖相容路徑；Android／Windows 新選擇始終直接 MCP，不退回該路徑。
 
 ```text
 connections.toml: Host profiles + independent encrypted Screen profiles

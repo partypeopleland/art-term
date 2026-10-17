@@ -4,6 +4,7 @@ import type { Plugin } from 'vite'
 
 const reportRoot = fileURLToPath(new URL('../../docs/report/', import.meta.url))
 const configPath = fileURLToPath(new URL('../../crates/art-term-gui/tauri.android.conf.json', import.meta.url))
+const windowsConfigPath = fileURLToPath(new URL('../../crates/art-term-gui/tauri.conf.json', import.meta.url))
 const moduleId = 'virtual:art-term-info'
 const resolvedId = `\0${moduleId}`
 
@@ -16,8 +17,9 @@ export function appInfoPlugin(): Plugin {
     resolveId(id) { if (id === moduleId) return resolvedId },
     load(id) {
       if (id !== resolvedId) return
-      if (building) this.addWatchFile(configPath)
+      if (building) { this.addWatchFile(configPath); this.addWatchFile(windowsConfigPath) }
       const config = JSON.parse(readFileSync(configPath, 'utf8'))
+      const windows = JSON.parse(readFileSync(windowsConfigPath, 'utf8'))
       const releases = readdirSync(reportRoot)
         .filter(name => /^\d+\.\d+\.\d+\.md$/.test(name))
         .sort((a, b) => {
@@ -30,11 +32,11 @@ export function appInfoPlugin(): Plugin {
           if (building) this.addWatchFile(path)
           return { version: name.slice(0, -3), content: readFileSync(path, 'utf8') }
         })
-      return `export default ${JSON.stringify({ version: config.version, androidBuild: config.bundle.android.versionCode, releases })}`
+      return `export default ${JSON.stringify({ version: config.version, windowsVersion: windows.version, androidBuild: config.bundle.android.versionCode, releases })}`
     },
-    configureServer(server) { server.watcher.add([reportRoot, configPath]) },
+    configureServer(server) { server.watcher.add([reportRoot, configPath, windowsConfigPath]) },
     handleHotUpdate(context) {
-      if (context.file.startsWith(reportRoot) || context.file === configPath) {
+      if (context.file.startsWith(reportRoot) || context.file === configPath || context.file === windowsConfigPath) {
         const module = context.server.moduleGraph.getModuleById(resolvedId)
         if (module) context.server.moduleGraph.invalidateModule(module)
         context.server.ws.send({ type: 'full-reload' })

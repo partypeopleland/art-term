@@ -137,47 +137,39 @@ describe('saved runtime Computers in the shared catalog', () => {
     await flush()
     expect(wrapper.find('[data-runtime-label]').exists()).toBe(false)
 
-    await wrapper.get('[data-testid="runtime-host-settings"]').trigger('click')
+    await wrapper.get('[data-testid="desktop-settings"]').trigger('click')
     await flush()
     await wrapper.get('[data-testid="name"]').setValue('nuc')
     await wrapper.get('[data-testid="base-url"]').setValue('https://runtime.example.test')
     await wrapper.get('[data-testid="credential"]').setValue('fixture-admin')
     await wrapper.get('form').trigger('submit')
     await flush()
-    await button(wrapper, '關閉')
+    await wrapper.get('[data-testid="desktop-main"]').trigger('click')
     await flush()
 
     const cat = wrapper.get('[data-testid="cat-computers"]')
     const entry = cat.get('[data-runtime-label="nuc"]')
     expect(entry.text()).toContain('nuc')
-    expect(entry.text()).toContain('openab-pty')
+    expect(cat.text()).toContain('Computers')
     // Local metadata only — never advertised as online before a probe.
-    expect(cat.get('[data-testid^="runtime-"] .dot').classes()).not.toContain('on')
+    expect(cat.get('[data-testid^="runtime-status-"]').classes()).not.toContain('on')
     expect(transport.runtimeHosts.mock.calls.length).toBeGreaterThanOrEqual(3)
   })
 
-  it('initial boot loads stored entries without opening settings; click only lists Shell', async () => {
+  it('initial boot lists stored Shells read-only; explicit attach uses the issued target', async () => {
     const store: RuntimeHostDto[] = [profile]
     const transport = runtimeTransport(store)
     const { wrapper, transport: t } = mountApp(transport)
     await flush()
 
     expect(wrapper.find('[data-runtime-label="nuc"]').exists()).toBe(true)
-    expect(t.runtimeSessions).not.toHaveBeenCalled()
-    expect(t.openCalls).toEqual([])
-
-    await wrapper.get('[data-runtime-label="nuc"]').trigger('click')
-    await flush()
-    const dialog = wrapper.get('[data-testid="runtime-connection-dialog"]')
-    expect(dialog.text()).toContain('nuc 的 Shell')
     expect(t.runtimeSessions).toHaveBeenCalledExactlyOnceWith(profile.id, 7)
-    // Listing only — no automatic create/open/takeover.
     expect(t.runtimeCreateSession).not.toHaveBeenCalled()
     expect(t.openCalls).toEqual([])
-    expect(dialog.text()).toContain('返回連線清單')
+    expect(wrapper.text()).toContain('shell-one')
 
     // Explicit connect emits the backend-issued target unchanged.
-    await dialogButton(wrapper, '連線')
+    await wrapper.get('.attach-button').trigger('click')
     await flush()
     expect(t.openCalls).toEqual([{ targetId: 'issued-shell-1', rows: 24, cols: 80 }])
     expect(wrapper.find('[data-testid="runtime-connection-dialog"]').exists()).toBe(false)
@@ -258,15 +250,13 @@ describe('saved runtime Computers in the shared catalog', () => {
     expect(wrapper.findAll('[data-runtime-label]')).toHaveLength(64)
   })
 
-  it('backgrounding the dialog prevents a late create from connecting', async () => {
+  it('backgrounding the inline list prevents a late create from connecting', async () => {
     const transport = runtimeTransport([profile])
     const pending = deferred<TargetDto>()
     transport.runtimeCreateHistorySession.mockReturnValueOnce(pending.promise)
     const { wrapper, transport: t } = mountApp(transport)
     await flush()
-    await wrapper.get('[data-runtime-label="nuc"]').trigger('click')
-    await flush()
-    await wrapper.get('.runtime-sessions form').trigger('submit')
+    await wrapper.get('.new-connection').trigger('click')
     await flush()
     setVisibility(true)
     await flush()
@@ -279,20 +269,19 @@ describe('saved runtime Computers in the shared catalog', () => {
     expect(t.runtimeCreateHistorySession).toHaveBeenCalledExactlyOnceWith(profile.id, 7)
   })
 
-  it('closing the dialog via the return button clears the selection only', async () => {
+  it('closing host management preserves the existing live session', async () => {
     const transport = runtimeTransport([profile])
     const { wrapper, transport: t, controller } = mountApp(transport)
     await flush()
     // An existing session stays untouched by dialog lifecycle.
     controller.openTarget({ dto: sessionGroup, expanded: true }, issuedTarget, false)
     await flush()
-    // The Shell button always opens the manager — a live same-host tab
-    // would only make the primary click reactivate instead.
-    await wrapper.get(`[data-testid="runtime-shell-${profile.id}"]`).trigger('click')
+    await wrapper.get('[data-testid="desktop-settings"]').trigger('click')
+    await wrapper.get('[data-testid="desktop-manage-hosts"]').trigger('click')
     await flush()
-    await dialogButton(wrapper, '返回連線清單')
+    await button(wrapper, '關閉')
     await flush()
-    expect(wrapper.find('[data-testid="runtime-connection-dialog"]').exists()).toBe(false)
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
     expect(controller.tabs).toHaveLength(1)
     expect(controller.tabs[0].status).toBe('live')
     expect(t.openCalls).toEqual([{ targetId: 'issued-shell-1', rows: 24, cols: 80 }])
