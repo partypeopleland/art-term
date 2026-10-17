@@ -1,5 +1,7 @@
 # Windows 接續建置與驗收
 
+> 2026-10-18 Owner 修正體驗要求後，本分支已改為單一工作區：左側約三分之一是手機相同的直向清單、左下桌面預覽，右側為多分頁終端。Main／Connect 與額外「歷史」按鈕已移除，連線內容直接滾輪讀取舊頁，到底追尾。下文保留原始接力背景；其中舊版畫面與歷史面板操作，以 [Windows 現況](docs/platforms/windows.md)及[回歸指南](docs/platforms/windows-regression.md)為準。發布限制不變，仍不合 main、tag、發布或建 APK。
+
 本文件是 `feat/windows-mobile-parity` 的臨時交接工單，受測來源為**此交接文件所在 commit**。請在另一台 Windows 電腦接續；本輪只 commit／push 開發分支，不 merge main、不 tag、不發布，不新增 release note 或建 APK。語音留下一階段。
 
 ## 來源與資料保護

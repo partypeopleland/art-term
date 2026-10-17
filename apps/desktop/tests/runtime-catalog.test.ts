@@ -144,7 +144,7 @@ describe('saved runtime Computers in the shared catalog', () => {
     await wrapper.get('[data-testid="credential"]').setValue('fixture-admin')
     await wrapper.get('form').trigger('submit')
     await flush()
-    await wrapper.get('[data-testid="desktop-main"]').trigger('click')
+    await wrapper.get('[data-testid="desktop-workspace"]').trigger('click')
     await flush()
 
     const cat = wrapper.get('[data-testid="cat-computers"]')

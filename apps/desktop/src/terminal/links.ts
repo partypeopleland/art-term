@@ -2,6 +2,21 @@ import type { IBufferRange, ILink, Terminal } from '@xterm/xterm'
 
 export type ClipboardWriter = (text: string) => Promise<void>
 
+export function terminalTextLinks(text: string): { start: number; end: number; text: string }[] {
+  const links: { start: number; end: number; text: string }[] = []
+  for (const match of text.matchAll(/https?:\/\/[^\s<>"'`]+/gi)) {
+    let url = match[0].replace(/[.,;:!?，。；！？、”》]+$/, '')
+    while (/[)\]}]$/.test(url)) {
+      const close = url.at(-1)!, open = { ')': '(', ']': '[', '}': '{' }[close]!
+      if (url.split(close).length <= url.split(open).length) break
+      url = url.slice(0, -1)
+    }
+    try { if (!new URL(url).hostname) continue } catch { continue }
+    links.push({ start: match.index!, end: match.index! + url.length, text: url })
+  }
+  return links
+}
+
 function contains(range: IBufferRange, x: number, y: number): boolean {
   return y >= range.start.y && y <= range.end.y &&
     (y !== range.start.y || x >= range.start.x) && (y !== range.end.y || x <= range.end.x)
@@ -27,16 +42,9 @@ function linksForLine(term: Terminal, y: number, activate: ILink['activate']): I
     }
   }
   const links: ILink[] = []
-  for (const match of text.matchAll(/https?:\/\/[^\s<>"'`]+/gi)) {
-    let url = match[0].replace(/[.,;:!?，。；！？、”》]+$/, '')
-    // Retain balanced parentheses in URLs, but drop surrounding Markdown punctuation.
-    while (/[)\]}]$/.test(url)) {
-      const close = url.at(-1)!, open = { ')': '(', ']': '[', '}': '{' }[close]!
-      if (url.split(close).length <= url.split(open).length) break
-      url = url.slice(0, -1)
-    }
-    try { if (!new URL(url).hostname) continue } catch { continue }
-    const first = cells[match.index!], last = cells[match.index! + url.length - 1]
+  for (const match of terminalTextLinks(text)) {
+    const url = match.text
+    const first = cells[match.start], last = cells[match.end - 1]
     if (!first || !last) continue
     const range = { start: { x: first.x, y: first.y }, end: { x: last.x + last.width - 1, y: last.y } }
     if (y >= range.start.y && y <= range.end.y) links.push({ text: url, range, activate })

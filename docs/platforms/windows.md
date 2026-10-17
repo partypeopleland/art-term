@@ -21,15 +21,15 @@ Windows App
 
 ## 畫面與平台操作
 
-固定頂列提供品牌首頁、Main、Connect 與全站齒輪。首頁顯示 Windows 版本與更新文件；Main 使用 Computers／Agents／Screens 分類、數量、收合及本機連線狀態點。Shell 名稱按鈕明確 attach／接管，`＋` 建立新的歷史工作；不從分類推斷工具能力。寬畫面依 Windows 版面呈現，無需模仿手機手勢。
+固定頂列提供品牌首頁與全站齒輪；設定／首頁可返回工作區。工作區同頁分左右兩區：左側約三分之一以手機相同的直向 Computers／Agents／Screens 分類顯示數量、收合及本機連線狀態點，左下是目前分頁的桌面預覽；右側是多分頁連線與終端內容。Shell 名稱按鈕明確 attach／接管，`＋` 建立新的歷史工作；不從分類推斷工具能力。寬畫面使用左右布局同時呈現，上捲閱讀與到底追尾的規則和手機一致。
 
 齒輪開全頁設定，四主題套用所有頁面、對話框、xterm 及之後新增的分頁。連線設定提供新增 Host／Agent／Screen、Host 匯入／匯出與獨立 Screen 編輯／刪除；Windows 另保留可達的 Host 管理入口，以編輯、刪除及測試已有連線。每個 live Shell 可獨立選 Screen、切換或取消工具，來源與生命週期見[桌面](../refarch/desktop.md)。
 
 設定預設放 EXE 旁，或以 `art-term-gui.exe --config C:/art-term-private/connections.toml` 指定可寫路徑。缺檔正常顯示空清單，不嵌入私人預設資料。沒有 Screen 保存 schema 5，有 Screen 保存 schema 6；首次桌面保存前私有備份與降版方式見[設定](../refarch/connections.md)。
 
-切頁用 Alt+[／Alt+] 或 Ctrl+PageUp／PageDown；Ctrl+V 遵守 bracketed-paste，Ctrl+C 由遠端解讀。表單輸入不被終端快捷鍵攔截，關頁／關窗只做本機 detach。點終端 HTTP(S) 連結複製到剪貼簿。終端在設定／首頁遮蓋時仍繼續處理輸出，回 Connect 後重新 fit／focus，不重開連線。
+切頁用 Alt+[／Alt+] 或 Ctrl+PageUp／PageDown；Ctrl+V 遵守 bracketed-paste，Ctrl+C 由遠端解讀。表單輸入不被終端快捷鍵攔截，關頁／關窗只做本機 detach。點終端 HTTP(S) 連結複製到剪貼簿。終端在設定／首頁遮蓋時仍繼續處理輸出，回工作區後重新 fit／focus，不重開連線。
 
-Windows 以明確的「歷史」按鈕開獨立彩色閱讀面板，透過共用 HostHistoryWindow 讀 tmux 歷史：當前頁優先、向上每批最多 256 行、窗口最多 1024 行，保留 viewport／older／ACK／keep／close 生命週期。面板提供「較早紀錄」「較新紀錄」「最新內容」「返回終端」。此面板與即時 xterm 分開，不修改既有滾輪或 Host 的 mouse off，也不載入 Android plugin。普通／舊 Shell 的可用界線、退出 Bash 結束工作及私有 wrapper 準備見[終端歷史](../refarch/terminal-history.md)。
+Windows 在連線內容區直接用滑鼠滾輪閱讀，與手機上捲體驗一致，無需開啟另一面板。共用 HostHistoryWindow 先讀當前頁，往上按需每批補最多 256 行、窗口最多 1024 行，依行識別與像素偏移保留閱讀位置；新輸出不拉走閱讀點，捲到底部才恢復追尾。畫面完成後 ACK、閱讀中 keep、關閉或替換 session 時 close；設定／首頁與背景暫停讀取並保留位置；切換分頁釋放 reader，切回重新讀目前頁，與手機一致。原 xterm 持續解析與收發、保留硬體鍵盤／resize，點一般內容回到輸入焦點；不改 Host mouse off、不載入 Android plugin。不支援主機歷史時仍可操作原終端。普通／舊 Shell 的可用界線、退出 Bash 結束工作及私有 wrapper 準備見[終端歷史](../refarch/terminal-history.md)。
 
 ## 工具鏈與新建置
 
@@ -53,7 +53,7 @@ driver 路徑換成實際位置。回歸入口的 suite、失敗判定及隔離�
 
 ## 原生驗收與交接
 
-先核對交接文件所在 commit 與分支、保留私人資料，再用隔離 TOML／WebView profile 操作真 EXE。至少驗證 Host／Screen DPAPI CRUD、重開、匯入保留 Screens、每分頁 Screen 選擇／切換／clear、首頁／主題／設定、硬體鍵盤與 Unicode、resize、歷史面板、Bash exit 關頁、原 token 恢復及不重播輸入。release 建置不得啟用 `openab-fixture`。
+先核對交接文件所在 commit 與分支、保留私人資料，再用隔離 TOML／WebView profile 操作真 EXE。至少驗證 Host／Screen DPAPI CRUD、重開、匯入保留 Screens、每分頁 Screen 選擇／切換／clear、首頁／主題／設定、硬體鍵盤與 Unicode、resize、直接滾輪歷史、Bash exit 關頁、原 token 恢復及不重播輸入。release 建置不得啟用 `openab-fixture`。
 
 本機 fixture 能保護真 IPC、DPAPI 及畫面整合，仍不能代替正式 Runtime／Tailnet／TLS、現場 MCP 或真 AI CLI。接續 AI 應回報 source commit、工具版本、命令與 exit code、result／log 路徑、EXE manifest／hash，明確分開 PASS／FAIL／NOT_RUN。保留既有 App、連線及遠端工作，不以清除資料排錯。
 

@@ -144,7 +144,7 @@ class App:
             self.owned = [p for p in apps() if p['parent'] == self.process.pid and Path(p['path']).resolve() == self.exe]
         require(len(self.owned) == 1, 'ambiguous test GUI ownership')
         self.driver.set_script_timeout(45)
-        self.wait(lambda: self.find('[data-testid=desktop-main]'))
+        self.wait(lambda: self.find('[data-testid=desktop-workspace-layout]'))
         self.metadata['observer'] = self.driver.execute_script(OBSERVER)
         self.metadata['browserVersion'] = self.driver.capabilities.get('browserVersion')
         self.metadata['driverVersion'] = self.driver.capabilities.get('msedge', {}).get('msedgedriverVersion')
@@ -193,11 +193,13 @@ class App:
         self.node('screen-settings')
 
     def main_page(self):
-        self.node('desktop-main').click()
+        for element in self.find('[data-testid=desktop-workspace]'):
+            if element.is_displayed():
+                element.click()
         self.wait(lambda: any(e.is_displayed() for e in self.find('.desktop-main-page')))
 
     def connect_page(self):
-        self.node('desktop-connect').click()
+        self.main_page()
 
     def screens(self):
         return self.invoke('gui_instance_desktops')

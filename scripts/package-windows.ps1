@@ -40,7 +40,7 @@ try {
     $instructions = @(
         '# art-term Windows', '',
         '需要 Windows 10 1809 以上、WebView2 Runtime 與可達 Runtime Host／instance-mcp 的網路。',
-        '開啟 art-term-gui.exe；固定頂列的品牌開啟版本與更新紀錄，Main 顯示 Computers／Agents／Screens，Connect 顯示已開啟分頁。',
+        '開啟 art-term-gui.exe；固定頂列的品牌開啟版本與更新紀錄，同頁左側約三分之一為直向 Computers／Agents／Screens，左下為目前工作的桌面預覽，右側為已開啟分頁與終端。',
         '齒輪開啟全頁設定，可選科技感、深黑、柔光或懷舊主題，並新增 Host／Agent／Screen、匯入或匯出 Host。',
         '在主機旁點既有工作名稱 attach／接管，＋建立新的歷史工作；多筆可展開。Host 管理入口可編輯、刪除與測試連線。', '',
         '程式旁 connections.toml 是唯一設定來源；不存在、空白或 connections = [] 時正常顯示空清單，不嵌入私人連線。',
@@ -52,7 +52,7 @@ try {
         '不讀取使用者目錄中的舊 runtime-hosts-v1.json；舊版本連線需先在舊 App 匯出，再於新版匯入。',
         '每個 live Shell 可獨立選 Screen；App 原生層直接 MCP 取圖，不把截圖命令輸入工作 Shell。停止預覽與取消桌面工具分開操作。',
         '需要 Shell／coding CLI 工具時，先在受控端安裝通用 broker helper，再建立新連線；不注入正在執行的 CLI。Screen 選擇限定該 Shell，不是 Host 全域設定。',
-        '歷史按鈕開獨立彩色閱讀面板，向上分批載入；即時 xterm 保留硬體鍵盤與既有滑鼠操作。此版不移植 Android 語音或原生閱讀 plugin。',
+        '在連線內容直接用滾輪上捲，按需讀取較早彩色紀錄；閱讀時固定位置，捲到底部才追隨新輸出。點一般內容可繼續鍵盤輸入，不需歷史按鈕或另開面板。此版不移植 Android 語音或原生閱讀 plugin。',
         '整個交付資料夾一起搬移，請保留設定、備份與授權檔案；DPAPI 密文不能直接移給不同 Windows 帳號。',
         '關分頁只本機脫離；遠端工作仍受 TTL／Runtime 生命週期限制，退出工作 Bash 則結束該工作。'
     )

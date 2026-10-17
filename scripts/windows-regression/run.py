@@ -16,6 +16,8 @@ from webview import App, HIDDEN, require, sha
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import Select
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.common.actions.wheel_input import ScrollOrigin
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -89,6 +91,53 @@ def label(name):
     return 's-' + name[4:12] if name.startswith('th2-') else name
 
 
+def inline_scroll(app, fixture):
+    app.main_page()
+    require(not app.find('[data-testid=desktop-main], [data-testid=desktop-connect], [data-testid=open-desktop-history]'), 'obsolete workspace/history navigation remains')
+    layout = app.driver.execute_script("const r=s=>document.querySelector(s).getBoundingClientRect();const w=r('.desktop-workspace'),l=r('.desktop-sidebar'),t=r('.desktop-connect-page'),d=r('.desktop-main-page'),p=r('.desktop-preview');return {ratio:l.width/w.width,right:t.left>=l.right-1,below:p.top>=d.bottom-1,vertical:getComputedStyle(document.querySelector('.dashboard')).flexDirection==='column'};")
+    require(.31 <= layout['ratio'] <= .36 and layout['right'] and layout['below'] and layout['vertical'], 'workspace layout is not left-third/stacked/preview-below/right-terminal')
+    name = create_shell(app, fixture, app.profiles()[0])
+    fixture.append_lines(name, 1, 1800)
+    css = '.pane .desktop-history .history-viewport'
+    viewport = app.wait(lambda: next((e for e in app.find(css) if e.is_displayed() and 'ROW-1800' in e.text), None), 30)
+    def ids():
+        return app.driver.execute_script("return [...arguments[0].querySelectorAll('[data-line-id]')].map(e=>Number(e.dataset.lineId));", viewport)
+    def wheel(amount):
+        ActionChains(app.driver).scroll_from_origin(ScrollOrigin.from_element(viewport), 0, amount).perform()
+    original = ids()[0]
+    wheel(-10000)
+    app.wait(lambda: ids()[0] < original)
+    anchored = app.driver.execute_script("const h=arguments[0];return h.querySelector('[data-line-id=\"'+arguments[1]+'\"]').getBoundingClientRect().top-h.getBoundingClientRect().top;", viewport, original)
+    require(abs(anchored - 4) <= 2, f'older page moved the reading anchor ({anchored:.2f}px)')
+    for _ in range(4):
+        first = ids()[0]
+        wheel(-10000)
+        app.wait(lambda: ids()[0] < first)
+    require(len(ids()) == 1024, 'history window did not remain bounded at 1024 rows')
+    held = app.driver.execute_script('return arguments[0].scrollTop;', viewport)
+    fixture.append_lines(name, 1801, 25)
+    app.driver.execute_async_script('const done=arguments[0];setTimeout(done,750);')
+    require('ROW-1825' not in viewport.text and abs(app.driver.execute_script('return arguments[0].scrollTop;', viewport) - held) <= 1, 'new output moved the reading position')
+    for _ in range(10):
+        if 'ROW-1825' in viewport.text:
+            break
+        last = ids()[-1]
+        wheel(100000)
+        app.wait(lambda: ids()[-1] > last or 'ROW-1825' in viewport.text)
+    require('ROW-1825' in viewport.text, 'scrolling down did not resume latest output')
+    viewport.find_elements(By.CSS_SELECTOR, '.history-line')[-1].click()
+    ActionChains(app.driver).send_keys('INLINE_KEYBOARD' + Keys.ENTER).perform()
+    app.wait(lambda: app.contains(name, 'INLINE_KEYBOARD'))
+    app.wait(lambda: 'INLINE_KEYBOARD' in viewport.text)
+    app.driver.save_screenshot(str(app.run / 'workspace-inline.png'))
+    events = [e for e in fixture.snapshot()['events'] if e['method'] == 'history' and e['name'] == name]
+    require(any(e['action'] == 'ack' for e in events) and sum(e['action'] == 'older' for e in events) >= 5, 'native history paging/ACK absent')
+    app.main_page()
+    app.node('desktop-settings').click()
+    app.main_page()
+    return {'directWheelPaging': True, 'bounded1024': True, 'anchorPixelError': abs(anchored - 4), 'heldDuringNewOutput': True, 'bottomFollowsLatest': True, 'clickAndRealKeyboard': True, 'singleWorkspaceLayout': layout}
+
+
 def create_shell(app, fixture, profile):
     app.main_page()
     before = set(fixture.snapshot()['sessions'])
@@ -140,9 +189,9 @@ def terminal(app, fixture):
     require(first['tokenHash'] == resumed['tokenHash'], 'recovery minted another token')
     require(resumed['since'] == before['sessions'][work_a]['historyBytes'] and resumed['since'] > 0, 'recovery did not use rendered cursor')
     require(after['sessions'][work_a]['input'] == before['sessions'][work_a]['input'], 'recovery replayed input')
-    # Dashboard relists are legitimate; recovery must not mutate remote sessions.
-    mutations = lambda state: [e for e in state['events'] if e['method'] in ('POST', 'DELETE', 'bootstrap')]
-    require(mutations(after) == mutations(before), 'recovery created/renewed/deleted/bootstrap session')
+    # Reader helpers may reopen; the work Shell must keep its original binding.
+    mutations = lambda state: [e for e in state['events'] if e['method'] in ('POST', 'DELETE', 'bootstrap') and not (e.get('name') or '').startswith('mcshot-')]
+    require(mutations(after) == mutations(before), 'recovery created/renewed/deleted/bootstrap work session')
     app.terminal('AFTER_RECOVERY' + Keys.ENTER)
     app.wait(lambda: app.contains(work_a, 'AFTER_RECOVERY'))
     active_tab(app, work_b).find_element(By.CSS_SELECTOR, 'button.close').click()
@@ -213,6 +262,9 @@ def preview(app, fixture, config, screens):
         require(any(e['method'] == 'tools/call' for e in upstream.events), 'direct native MCP screenshot absent')
         return expected
     choose(screens[0])
+    image_fits = app.driver.execute_script("const p=document.querySelector('.desktop-preview').getBoundingClientRect(),i=document.querySelector('img.shot').getBoundingClientRect();return i.top>=p.top && i.bottom<=p.bottom && i.left>=p.left && i.right<=p.right;")
+    require(image_fits, 'desktop image is clipped outside its sidebar preview')
+    app.driver.save_screenshot(str(app.run / 'workspace-screen.png'))
     before = app.shots()
     before_creates = sum(e['method'] == 'POST' and e.get('action') is None for e in fixture.snapshot()['events'])
     app.click('⟳ 更新', '.preview button')
@@ -225,10 +277,11 @@ def preview(app, fixture, config, screens):
     app.node('desktop-toggle').click(); app.node('clear-screen').click()
     app.wait(lambda: not app.find('img.shot'))
     app.wait(lambda: all(not u.sessions for u in screens))
-    app.wait(lambda: not any(name.startswith('mcshot-') for name in fixture.snapshot()['sessions']))
+    tools_helpers = {e['name'] for e in fixture.snapshot()['events'] if e['method'] == 'tools-control'}
+    app.wait(lambda: not tools_helpers.intersection(fixture.snapshot()['sessions']))
     state = fixture.snapshot()
-    owned_created = sorted(e['name'] for e in state['events'] if e['method'] == 'POST' and e.get('action') is None and e['name'].startswith('mcshot-'))
-    owned_deleted = sorted(e['name'] for e in state['events'] if e['method'] == 'DELETE' and e['name'].startswith('mcshot-'))
+    owned_created = sorted(e['name'] for e in state['events'] if e['method'] == 'POST' and e.get('action') is None and e['name'] in tools_helpers)
+    owned_deleted = sorted(e['name'] for e in state['events'] if e['method'] == 'DELETE' and e['name'] in tools_helpers)
     require(owned_created == owned_deleted and owned_created, 'owned configure Shell cleanup mismatch')
     require(any(e['method'] == 'tools-control' and e['action'] == 'configure' for e in state['events']), 'READY configure handshake absent')
     require(any(e['method'] == 'tools-control' and e['action'] == 'clear' for e in state['events']), 'clear handshake absent')
@@ -334,6 +387,7 @@ def main():
         config, destination = run / 'connections.toml', run / 'imported.toml'
         for name, function in [('crud', lambda: crud(app, fixture, config)),
                                ('terminal', lambda: terminal(app, fixture)),
+                               ('inline-scroll', lambda: inline_scroll(app, fixture)),
                                ('screens', lambda: preview(app, fixture, config, screens)),
                                ('transfer', lambda: transfer(app, fixture, config, destination, run / 'transfer.json'))]:
             stage = name

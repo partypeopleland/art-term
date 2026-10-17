@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import DesktopHistoryReader from '../src/components/DesktopHistoryReader.vue'
 import type { HostHistoryPage, HostHistoryRequest, HostHistoryReply } from '../src/terminal/native'
-import { deferred } from './fake'
+import { deferred, FakeTerm } from './fake'
 
 const wrappers: ReturnType<typeof mount>[] = []
 const instance = 'a'.repeat(32)
@@ -17,9 +17,10 @@ function fixture(visible = true) {
     if (value.op === 'older') return page(Math.max(0, value.before - value.limit), value.before, value.epoch)
     return { kind: 'ack', instance, epoch, op: value.op }
   })
-  const wrapper = mount(DesktopHistoryReader, { props: { request, visible } })
+  const terminal = new FakeTerm()
+  const wrapper = mount(DesktopHistoryReader, { props: { request, visible, terminal } })
   wrappers.push(wrapper)
-  return { wrapper, request, advanceEpoch: () => { epoch++ } }
+  return { wrapper, request, terminal, advanceEpoch: () => { epoch++ } }
 }
 async function flush() {
   await flushPromises()
@@ -53,27 +54,29 @@ describe('Windows Host history reader', () => {
     expect(f.request.mock.calls.find(([r]) => r.op === 'ack')?.[0]).toMatchObject({ epoch: 1 })
     const viewport = f.wrapper.get('.history-viewport').element as HTMLElement
     viewport.scrollTop = 8
-    await f.wrapper.get('[data-testid=history-older]').trigger('click'); await flush()
+    await f.wrapper.get('.history-viewport').trigger('wheel', { deltaY: -120 }); await flush()
     expect(f.request.mock.calls.find(([r]) => r.op === 'older')?.[0]).toEqual({ op: 'older', instance, epoch: 1, before: 1776, limit: 256 })
     expect(f.wrapper.findAll('.history-line')).toHaveLength(280)
-    expect(viewport.scrollTop).toBe(256 * 21 + 8)
-    expect(f.wrapper.text()).toContain('閱讀中')
+    expect(viewport.scrollTop).toBe(256 * 17 + 8)
+    expect(f.wrapper.find('button').exists()).toBe(false)
   })
 
   it('bounds the DOM at 1024 rows and can page towards newer content after head navigation', async () => {
     const f = fixture(); await flush()
-    for (let i = 0; i < 5; i++) { await f.wrapper.get('[data-testid=history-older]').trigger('click'); await flush() }
+    for (let i = 0; i < 5; i++) { (f.wrapper.get('.history-viewport').element as HTMLElement).scrollTop = 0; await f.wrapper.get('.history-viewport').trigger('wheel', { deltaY: -120 }); await flush() }
     expect(f.wrapper.findAll('.history-line')).toHaveLength(1024)
     expect(f.wrapper.findAll('.history-line').at(-1)!.attributes('data-line-id')).toBe('1520')
-    expect(f.wrapper.get('[data-testid=history-newer]').attributes('disabled')).toBeUndefined()
-    await f.wrapper.get('[data-testid=history-newer]').trigger('click'); await flush()
+    const viewport = f.wrapper.get('.history-viewport').element as HTMLElement
+    viewport.scrollTop = 100000
+    await f.wrapper.get('.history-viewport').trigger('scroll'); await flush()
     expect(f.wrapper.findAll('.history-line')).toHaveLength(1024)
     expect(f.wrapper.findAll('.history-line').at(-1)!.attributes('data-line-id')).toBe('1776')
-    await f.wrapper.get('[data-testid=history-newer]').trigger('click'); await flush()
+    viewport.scrollTop = 100000
+    await f.wrapper.get('.history-viewport').trigger('scroll'); await flush()
     expect(f.wrapper.findAll('.history-line').at(-1)!.attributes('data-line-id')).toBe('1800')
   })
 
-  it('holds the displayed epoch while reading, renews its lease, and resumes latest explicitly', async () => {
+  it('holds the displayed epoch while reading, renews its lease, and resumes latest at the bottom', async () => {
     vi.useFakeTimers()
     const f = fixture(); await flush()
     await f.wrapper.get('.history-viewport').trigger('pointerdown')
@@ -81,7 +84,8 @@ describe('Windows Host history reader', () => {
     await vi.advanceTimersByTimeAsync(31000); await flush()
     expect(f.request.mock.calls.some(([r]) => r.op === 'keep' && r.epoch === 1)).toBe(true)
     expect(f.request.mock.calls.filter(([r]) => r.op === 'viewport')).toHaveLength(1)
-    await f.wrapper.get('[data-testid=history-latest]').trigger('click'); await flush()
+    ;(f.wrapper.get('.history-viewport').element as HTMLElement).scrollTop = 100000
+    await f.wrapper.get('.history-viewport').trigger('scroll'); await flush()
     expect(f.request.mock.calls.find(([r]) => r.op === 'ack' && r.epoch === 2)).toBeTruthy()
   })
 
@@ -126,13 +130,12 @@ describe('Windows Host history reader', () => {
     expect(wrapper.findAll('.history-line')).toHaveLength(2)
   })
 
-  it('reports unsupported shells without swallowing live terminal input or invoking write', async () => {
+  it('leaves unsupported shells uncovered without swallowing live terminal input or invoking write', async () => {
     const request = vi.fn(async (): Promise<HostHistoryReply> => ({ kind: 'unsupported' }))
     const wrapper = mount(DesktopHistoryReader, { props: { request, visible: true } }); wrappers.push(wrapper)
     await flush()
-    expect(wrapper.text()).toContain('此 Shell 尚不支援主機歷史')
-    await wrapper.get('[data-testid=history-close]').trigger('click')
-    expect(wrapper.emitted('close')).toHaveLength(1)
+    expect(wrapper.get('[data-testid=desktop-history]').isVisible()).toBe(false)
+    expect(wrapper.find('button').exists()).toBe(false)
     expect(request.mock.calls).toHaveLength(1)
   })
 
@@ -145,5 +148,42 @@ describe('Windows Host history reader', () => {
     wrapper.unmount(); wrappers.splice(wrappers.indexOf(wrapper), 1)
     gate.resolve(page(1776, 1800)); await flush()
     expect(request.mock.calls.map(([r]) => r.op)).toEqual(['viewport', 'close'])
+  })
+
+  it('resumes new output on downward wheel at the bottom even without a browser scroll event', async () => {
+    vi.useFakeTimers()
+    const f = fixture(); await flush()
+    await f.wrapper.get('.history-viewport').trigger('pointerdown')
+    f.advanceEpoch()
+    await vi.advanceTimersByTimeAsync(600)
+    await f.wrapper.get('.history-viewport').trigger('wheel', { deltaY: 120 }); await flush()
+    expect(f.request.mock.calls.some(([r]) => r.op === 'ack' && r.epoch === 2)).toBe(true)
+    f.wrapper.get('.history-viewport').element.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 20, clientY: 20 }))
+    f.wrapper.get('.history-viewport').element.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 20, clientY: 20 }))
+    expect(f.terminal.focusCount).toBe(1)
+  })
+
+  it('copies complete styled URLs on click, preserves punctuation, and never copies a drag', async () => {
+    const original = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
+    const writeText = vi.fn(async () => {})
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    try {
+      const p = page(0, 1, 1, 1)
+      p.records[0] = { id: 1, text: 'https://example.test/x.', styles: [[0, 8, 0xff0000, -1, 1]] }
+      const request = async (r: HostHistoryRequest): Promise<HostHistoryReply> => r.op === 'viewport' ? p : { kind: 'ack', instance, op: r.op }
+      const wrapper = mount(DesktopHistoryReader, { props: { request, visible: true } }); wrappers.push(wrapper)
+      await flush()
+      const url = wrapper.findAll('[data-url]')[1]
+      url.element.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 10, clientY: 10 }))
+      url.element.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 30, clientY: 10 }))
+      expect(writeText).not.toHaveBeenCalled()
+      url.element.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 10, clientY: 10 }))
+      url.element.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 10, clientY: 10 })); await flush()
+      expect(writeText).toHaveBeenCalledExactlyOnceWith('https://example.test/x')
+      expect(wrapper.get('[data-line-id="1"]').text()).toBe('https://example.test/x.')
+    } finally {
+      if (original) Object.defineProperty(navigator, 'clipboard', original)
+      else Reflect.deleteProperty(navigator, 'clipboard')
+    }
   })
 })

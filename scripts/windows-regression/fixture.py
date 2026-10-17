@@ -120,6 +120,52 @@ class Fixture:
             await s['ws'].send_bytes(data[pos:pos + 32768])
             await asyncio.sleep(0)
 
+    async def history_request(self, s):
+        while b'\n' in s['previewInput']:
+            raw, s['previewInput'] = s['previewInput'].split(b'\n', 1)
+            request = json.loads(raw)
+            if request.get('v') != 1 or request.get('nonce') != s['historyNonce']:
+                raise ValueError('history request binding mismatch')
+            op = request['op']
+            reply = {'v': 1, 'nonce': s['historyNonce'], 'requestId': request['requestId'],
+                     'instance': s['historyInstance'], 'op': op}
+            event = {'method': 'history', 'name': s['historyWork'], 'action': op}
+            if op in ('viewport', 'older'):
+                if op == 'viewport':
+                    work = self.sessions.get(s['historyWork'])
+                    if work is None:
+                        reply.update(type='error', kind='unavailable')
+                        await self.output(s, (json.dumps(reply) + '\n').encode())
+                        continue
+                    records = work['history'].decode('utf-8').splitlines()[-5000:] or ['']
+                    s['historyEpoch'] += 1
+                    epoch = s['historyEpoch']
+                    rows = work['resizes'][-1][0] if work['resizes'] else 24
+                    columns = work['resizes'][-1][1] if work['resizes'] else 80
+                    s['historySnapshots'][epoch] = (records, rows, columns)
+                    for old in list(s['historySnapshots'])[:-2]:
+                        del s['historySnapshots'][old]
+                    end, limit = len(records), rows
+                else:
+                    epoch, end, limit = request['epoch'], request['before'], request['limit']
+                    if not 1 <= limit <= 256 or epoch not in s['historySnapshots']:
+                        raise ValueError('invalid fixture history page request')
+                    records, rows, columns = s['historySnapshots'][epoch]
+                start = max(0, end - limit)
+                reply.update(type='page', epoch=epoch, columns=columns, rows=rows, rowCount=len(records),
+                             start=start, end=end, hasOlder=start > 0,
+                             records=[{'id': i + 1, 'text': records[i], 'styles': [[0, len(records[i].encode('utf-16-le')) // 2, 0x569cd6, -1, 0]] if records[i] else []} for i in range(start, end)])
+                event.update(epoch=epoch, before=end, limit=limit)
+            elif op in ('ack', 'keep', 'close'):
+                reply['type'] = 'ack'
+                if op != 'close':
+                    reply['epoch'] = request['epoch']
+                    event['epoch'] = request['epoch']
+            else:
+                raise ValueError('unexpected history operation')
+            self.events.append(event)
+            await self.output(s, (json.dumps(reply) + '\n').encode())
+
     async def pty(self, request):
         name = request.match_info['name']
         s = self.sessions.get(name)
@@ -142,12 +188,22 @@ class Fixture:
                     if name.startswith('mcshot-'):
                         # Exec-only configure receiver: no command execution or secret retention.
                         s['previewInput'] += message.data
-                        if s['controlNonce'] is None:
+                        if 'historyNonce' in s:
+                            await self.history_request(s)
+                        elif s['controlNonce'] is None:
                             match = re.fullmatch(rb'exec python3 "\$HOME/\.local/share/art-term/tools/instance_bridge\.py" control --binding (th2-[a-f0-9]{24}) --nonce ([a-f0-9]{32})\n', s['previewInput'])
                             if match:
                                 s['controlNonce'] = match[2].decode()
                                 s['previewInput'] = b''
                                 await self.output(s, ('ARTTERM_TOOLS_READY:' + s['controlNonce'] + '\r\n').encode())
+                            else:
+                                history = re.fullmatch(rb'exec "\$HOME/\.local/share/art-term/openab-pty/node" "\$HOME/\.local/share/art-term/openab-pty/(?:tmux-v2/)?tmux-history\.cjs" ([a-f0-9]{24}) ([a-f0-9]{32})\n', s['previewInput'])
+                                if history:
+                                    s.update(historyNonce=history[2].decode(), historyInstance=secrets.token_hex(16),
+                                             historyWork='th2-' + history[1].decode(), historyEpoch=0, historySnapshots={})
+                                    s['previewInput'] = b''
+                                    await self.output(s, (json.dumps({'v': 1, 'type': 'ready', 'requestId': 0,
+                                        'key': history[1].decode(), 'nonce': s['historyNonce'], 'instance': s['historyInstance']}) + '\n').encode())
                         elif len(s['previewInput']) >= 4:
                             size = struct.unpack('!I', s['previewInput'][:4])[0]
                             if size > 16384:
@@ -221,6 +277,11 @@ class Fixture:
             # default close handshake (aiohttp concurrent close otherwise races).
             await ws._writer.close(code=4004, message=b'fixture finished')
         self.call(finish())
+
+    def append_lines(self, name, start, count):
+        async def append():
+            await self.output(self.sessions[name], ''.join(f'ROW-{i:04d}\r\n' for i in range(start, start + count)).encode())
+        self.call(append())
 
     def close(self):
         async def stop():

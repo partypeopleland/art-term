@@ -58,11 +58,11 @@ Android 終端閱讀器是覆蓋在 WebView 終端位置的原生 View，水平�
 
 瀏覽器預覽沿用手機元件，但以獨立入口注入記憶體 transport、假語音與瀏覽器終端；正式入口使用原生 transport、裝置端辨識及原生閱讀器。預覽不接真實 Runtime，不參與 APK 打包，詳見[手機畫面預覽](../platforms/ui-preview.md)。
 
-## Windows 共用畫面與獨立歷史面板
+## Windows 共用工作區與直接捲動
 
 Windows App 接入同一套分類 Dashboard、全頁 settings、homepage、四主題及 Screen picker，保留 Host 管理、硬體鍵盤與 xterm。設定／首頁遮蓋時終端元件保持掛載並處理輸出，返回後 fit／focus，表單正常輸入不被終端快捷鍵攔截。語音與 Android 原生閱讀／手勢 plugin 不移植。
 
-Windows 明確「歷史」按鈕開獨立面板，以共用 HostHistoryWindow 管 viewport／older／ACK／keep／close，彩色顯示最多 1024 行、每批較早頁最多 256 行。xterm 保持即時終端與原滾輪／Host mouse off；歷史面板不修改遠端 CLI 的 mouse mode。Android 仍用原生 View，兩者共享主機讀頁契約而各自呈現。Windows EXE、WebView2、DPAPI 與原生操作須在 Windows 電腦驗收，Linux DOM／核心檢查不能替代。
+Windows 工作區同頁呈現左側約三分之一的直向連線清單、左下的當前桌面預覽與右側多分頁終端。在連線內容區直接滾輪上捲，以共用 HostHistoryWindow 管 viewport／older／ACK／keep／close，彩色顯示最多 1024 行、每批較早頁最多 256 行；閱讀中固定錨點，到底才追尾。xterm 保持 mounted 並處理輸入輸出／resize，歷史呈現不修改遠端 CLI 的 mouse mode 或 Host mouse off。Android 仍用原生 View，兩者共享主機讀頁契約而各自呈現。Windows EXE、WebView2、DPAPI 與原生操作須在 Windows 電腦驗收，Linux DOM／核心檢查不能替代。
 
 ## 輸出完成後才確認
 

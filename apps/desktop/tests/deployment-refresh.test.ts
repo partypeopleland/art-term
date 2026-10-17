@@ -459,7 +459,6 @@ describe('Windows shell runtime-agent retirement surface', () => {
       expect(controller.tabs[0].status).toBe('live')
 
       t.openError = new ConnectionError('stateChanged', 'runtime state changed')
-      await wrapper.get('[data-testid="desktop-main"]').trigger('click')
       await flush()
       await wrapper.get('[data-testid="runtime-hana"] .attach-button').trigger('click')
       await flush()

@@ -37,7 +37,7 @@ it('lists inline Shells without opening and creates a new history Shell only on 
  expect(transport.runtimeCreateHistorySession).toHaveBeenCalledWith('host',1)
  expect(transport.openCalls[0].targetId).toBe('new-history-shell');expect(controller.tabs[0].status).toBe('live')
 })
-it('keeps terminal mounted and draining under non-toggle full settings, Main and homepage; restores fit/focus',async()=>{
+it('keeps terminal mounted and draining under full settings and homepage; restores the combined workspace',async()=>{
  const {wrapper,controller,transport,terms,attach}=await setup();const tab=await attach();const sid=tab.sessionId!;const term=terms[0]
  await wrapper.get('[data-testid="desktop-settings"]').trigger('click');await flush();const focus=term.focusCount
  await wrapper.get('[data-testid="desktop-settings"]').trigger('click');await flush()
@@ -46,8 +46,12 @@ it('keeps terminal mounted and draining under non-toggle full settings, Main and
  expect(wrapper.find('[data-testid="desktop-manage-hosts"]').exists()).toBe(true)
  expect(wrapper.find('[data-testid="screen-settings"]').exists()).toBe(true)
  await wrapper.get('[aria-label="軟體首頁"]').trigger('click');await flush();expect(wrapper.get('.version-value').text()).toContain('Windows');expect(wrapper.get('.version-value').text()).not.toContain('Android')
- await wrapper.get('[data-testid="desktop-main"]').trigger('click');await flush();expect(transport.closeCalls).toEqual([])
- await wrapper.get('[data-testid="desktop-connect"]').trigger('click');await flush();expect(term.focusCount).toBeGreaterThan(focus);expect(term.fitCount).toBeGreaterThan(1);expect(controller.tabs[0]).toBe(tab)
+ await wrapper.get('[data-testid="desktop-workspace"]').trigger('click');await flush();expect(transport.closeCalls).toEqual([])
+ expect(term.focusCount).toBeGreaterThan(focus);expect(term.fitCount).toBeGreaterThan(1);expect(controller.tabs[0]).toBe(tab)
+ expect(wrapper.get('.desktop-sidebar .desktop-main-page').isVisible()).toBe(true)
+ expect(wrapper.get('.desktop-connect-page').isVisible()).toBe(true)
+ expect(wrapper.find('[data-testid="desktop-main"]').exists()).toBe(false)
+ expect(wrapper.find('[data-testid="desktop-connect"]').exists()).toBe(false)
 })
 it('applies all four themes immediately to existing and future terminals',async()=>{
  const {wrapper,controller,terms,attach}=await setup();await attach()
@@ -62,17 +66,19 @@ it('selects/clears independent Screens on a host without legacy capability and i
  await wrapper.get('[data-testid="desktop-toggle"]').trigger('click');await flush();await wrapper.get('[data-testid="choose-screen-screen-B"]').trigger('click');await flush();expect(second.instanceDesktop?.id).toBe('screen-B');expect(first.instanceDesktop?.id).toBe('screen-A')
  await wrapper.get('[data-testid="desktop-toggle"]').trigger('click');await flush();await wrapper.get('[data-testid="clear-screen"]').trigger('click');await flush();expect(second.instanceDesktop).toBeNull();expect(first.instanceDesktop?.id).toBe('screen-A')
 })
-it('stops all previews away from Connect, restores prior visibility and never clears tools',async()=>{
+it('stops previews under settings, restores prior visibility and never clears tools',async()=>{
  const {wrapper,controller,transport,attach}=await setup();const tab=await attach();await controller.selectInstance(tab,screen);await flush();expect(tab.previewVisible).toBe(true)
- await wrapper.get('[data-testid="desktop-main"]').trigger('click');await flush();expect(tab.previewVisible).toBe(false);expect(tab.instanceDesktop?.id).toBe(screen.id)
+ await wrapper.get('[data-testid="desktop-settings"]').trigger('click');await flush();expect(tab.previewVisible).toBe(false);expect(tab.instanceDesktop?.id).toBe(screen.id)
  const captured=transport.screenshotCalls.length;await flush();expect(transport.screenshotCalls).toHaveLength(captured)
- await wrapper.get('[data-testid="desktop-connect"]').trigger('click');await flush();expect(tab.previewVisible).toBe(true);expect(transport.instanceClear).not.toHaveBeenCalled()
- controller.setPreviewVisible(tab,false);await wrapper.get('[data-testid="desktop-settings"]').trigger('click');await wrapper.get('[data-testid="desktop-connect"]').trigger('click');await flush();expect(tab.previewVisible).toBe(false)
+ await wrapper.get('[data-testid="desktop-workspace"]').trigger('click');await flush();expect(tab.previewVisible).toBe(true);expect(transport.instanceClear).not.toHaveBeenCalled()
+ expect(wrapper.find('.desktop-sidebar .desktop-preview img').exists()).toBe(true)
+ controller.setPreviewVisible(tab,false);await wrapper.get('[data-testid="desktop-settings"]').trigger('click');await wrapper.get('[data-testid="desktop-workspace"]').trigger('click');await flush();expect(tab.previewVisible).toBe(false)
 })
-it('binds history to one tab/session, loads only on explicit open, closes on tab switch and keeps terminal alive',async()=>{
- const {wrapper,controller,transport,terms,attach}=await setup();const first=await attach();expect(transport.runtimeHistory).not.toHaveBeenCalled()
- await wrapper.get('[data-testid="open-desktop-history"]').trigger('click');await flush();expect(transport.runtimeHistory).toHaveBeenCalledWith(first.sessionId,{op:'viewport'});expect(terms[0].disposed).toBe(false)
- const second=makeTarget('other','host');controller.openTarget({dto:makeHost('host',[second]),expanded:true},second,false);await flush();expect(wrapper.find('[data-testid="desktop-history"]').exists()).toBe(false)
+it('reads connected history without a button and releases the first reader on tab switch',async()=>{
+ const {wrapper,controller,transport,terms,attach}=await setup();const first=await attach()
+ expect(wrapper.find('[data-testid="open-desktop-history"]').exists()).toBe(false)
+ expect(transport.runtimeHistory).toHaveBeenCalledWith(first.sessionId,{op:'viewport'});expect(terms[0].disposed).toBe(false)
+ const second=makeTarget('other','host');controller.openTarget({dto:makeHost('host',[second]),expanded:true},second,false);await flush()
  expect(transport.runtimeHistory).toHaveBeenCalledWith(first.sessionId,{op:'close'});expect(terms[0].disposed).toBe(false)
 })
 it('closes only the finished Shell and leaves genuine transport failures as recoverable connection state',async()=>{
@@ -88,11 +94,11 @@ it('does not steal form keyboard shortcuts or detach healthy sessions when docum
  Object.defineProperty(document,'hidden',{configurable:true,value:false});document.dispatchEvent(new Event('visibilitychange'));await flush();if(descriptor)Object.defineProperty(document,'hidden',descriptor)
 })
 
-it('does not navigate away from Main when the background session status or recovery changes',async()=>{
- const {wrapper,controller,attach}=await setup();const tab=await attach();await wrapper.get('[data-testid="desktop-main"]').trigger('click');await flush()
+it('does not leave settings when the background session status or recovery changes',async()=>{
+ const {wrapper,attach}=await setup();const tab=await attach();await wrapper.get('[data-testid="desktop-settings"]').trigger('click');await flush()
  tab.status='connecting';await flush();tab.status='live';await flush()
- expect(wrapper.get('[data-testid="desktop-main"]').attributes('aria-current')).toBe('page')
- expect(wrapper.get('[data-testid="desktop-connect"]').attributes('aria-current')).toBeUndefined()
+ expect(wrapper.get('.desktop-settings-page').isVisible()).toBe(true)
+ expect(wrapper.get('.desktop-workspace').isVisible()).toBe(false)
 })
 
 it('mounts only one host editor when management covers settings and clears the hidden draft', async () => {
@@ -149,11 +155,11 @@ it('restores an explicit new Screen selection after leaving Connect while select
  transport.instanceSelect.mockImplementationOnce(async (sid, id) => { await pending.promise; return select(sid, id) })
  await wrapper.get('[data-testid="desktop-toggle"]').trigger('click'); await flush()
  await wrapper.get('[data-testid="choose-screen-screen-B"]').trigger('click'); await flush()
- await wrapper.get('[data-testid="desktop-main"]').trigger('click'); await flush()
+ await wrapper.get('[data-testid="desktop-settings"]').trigger('click'); await flush()
  pending.resolve(); await flush()
  expect(tab.previewVisible).toBe(false); expect(tab.shot).toBeNull()
  expect(tab.instanceDesktop?.id).toBe('screen-B')
- await wrapper.get('[data-testid="desktop-connect"]').trigger('click'); await flush()
+ await wrapper.get('[data-testid="desktop-workspace"]').trigger('click'); await flush()
  expect(tab.previewVisible).toBe(true); expect(tab.instanceDesktop?.id).toBe('screen-B'); expect(tab.shot).not.toBeNull()
 })
 
