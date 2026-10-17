@@ -584,3 +584,32 @@ async fn public_history_r5_rowcount6001_and_pane501_are_rejected() {
         assert!(owned.0.lock().unwrap().is_empty());
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn bootstrap_selects_persistent_overlay_with_image_fallback() {
+    use std::{os::unix::fs::PermissionsExt, process::Command};
+    let home = tempfile::tempdir().unwrap();
+    let bin = home.path().join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let python = bin.join("python3");
+    std::fs::write(&python, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n").unwrap();
+    std::fs::set_permissions(&python, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let key = "0123456789abcdef01234567";
+    let run = |version: HistoryVersion| {
+        let out = Command::new("bash").args(["-c", &version.bootstrap_command(key).unwrap()])
+            .env("HOME", home.path()).env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .output().unwrap();
+        assert!(out.status.success());
+        String::from_utf8(out.stdout).unwrap()
+    };
+    let base = home.path().join(".local/share/art-term");
+    assert_eq!(run(HistoryVersion::Paged), format!("{}/openab-pty/tmux-v2/tmux-shell.py\n{key}\n", base.display()));
+    std::fs::create_dir_all(base.join("tools")).unwrap();
+    std::fs::write(base.join("tools/tmux-shell.py"), "").unwrap();
+    assert_eq!(run(HistoryVersion::Paged), format!("{}/tools/tmux-shell.py\n{key}\n", base.display()));
+    assert_eq!(run(HistoryVersion::Legacy), format!("{}/openab-pty/tmux-shell.py\n{key}\n", base.display()));
+    for invalid in ["", "0123456789abcdef0123456;", "$(touch /tmp/invalid)"] {
+        assert!(HistoryVersion::Paged.bootstrap_command(invalid).is_err());
+    }
+}

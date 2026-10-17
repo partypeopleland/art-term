@@ -73,6 +73,8 @@ export type RuntimeOutputEvent =
   | { kind: 'ttlWarning'; secondsRemaining: number; absolute: boolean }
 
 export interface ScreenshotDto {
+  desktopId?: string
+  desktopRevision?: number
   mime: string
   base64: string
   source: string
@@ -155,7 +157,19 @@ export function asConnectionError(e: unknown): ConnectionError | null {
   return null
 }
 
+export interface InstanceDesktop { id: string; revision: number; name: string; mcpUrl: string; tokenPresent: boolean }
+export interface InstanceDesktopInput { id?: string; expectedRevision?: number; name: string; mcpUrl: string; token: string }
+export interface InstanceSelection { desktop: InstanceDesktop; toolReady: boolean }
+
 export interface Transport {
+  instanceDesktops?(): Promise<InstanceDesktop[]>
+  instanceSave?(input: InstanceDesktopInput): Promise<InstanceDesktop>
+  instanceDelete?(id: string, expectedRevision: number): Promise<void>
+  instanceTest?(id: string, expectedRevision: number): Promise<void>
+  instanceSelect?(sessionId: string, desktopId: string, expectedRevision: number): Promise<InstanceSelection>
+  instanceClear?(sessionId: string): Promise<void>
+  instanceLaunch?(sessionId: string): Promise<InstanceSelection>
+
   transferExport(input: TransferExportInput): Promise<{ status: 'saved' | 'cancelled' }>
   transferPickImport(): Promise<TransferPreview>
   transferUnlock(token: string, password: string): Promise<TransferPreview>

@@ -66,4 +66,8 @@ pub struct ScreenshotDto {
     pub base64: String,
     pub source: String,
     pub captured_at: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub desktop_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub desktop_revision: Option<u64>,
 }

@@ -109,6 +109,21 @@ async function tapTarget(m: Mounted, label: string): Promise<void> {
   await flush()
 }
 
+const SCREEN = { id: 'screen-test', revision: 1, name: 'Test Screen', mcpUrl: 'https://screen.example.test/mcp', tokenPresent: true }
+async function chooseMobileScreen(m: Mounted): Promise<void> {
+  Object.assign(m.transport, {
+    instanceDesktops: async () => [SCREEN],
+    instanceSelect: async () => ({ desktop: SCREEN, toolReady: false }),
+    instanceClear: async () => {}
+  })
+  m.transport.shot = { ...m.transport.shot, desktopId: SCREEN.id, desktopRevision: SCREEN.revision }
+  await m.controller.loadInstanceDesktops()
+  await m.wrapper.get('[data-testid="desktop-toggle"]').trigger('click')
+  await flush()
+  await m.wrapper.get('[data-testid="choose-screen-screen-test"]').trigger('click')
+  await flush()
+}
+
 function compEvent(type: string, data = ''): Event {
   const e = new Event(type, { bubbles: true })
   Object.assign(e, { data })
@@ -139,7 +154,7 @@ describe('mobile App runtime connection list (no Tauri)', () => {
     expect(wrapper.find('[data-testid="cat-agents"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="cat-computers"]').exists()).toBe(true)
     expect(wrapper.findAll('.connection-section h2').map(heading => heading.text())).toEqual(['Computers', 'Agents', 'Screens'])
-    expect(wrapper.find('[data-testid="cat-screens"]').text()).toContain('尚未開放使用')
+    expect(wrapper.find('[data-testid="cat-screens"]').text()).toContain('尚未新增 Screen')
     expect(wrapper.find('[data-testid="cat-screens"] .attach-button').exists()).toBe(false)
     const text = wrapper.text()
     for (const name of ['hana', 'beta', 'gamma', 'nuc']) expect(text).toContain(name)
@@ -342,8 +357,7 @@ describe('mobile App runtime connection list (no Tauri)', () => {
     await flush()
     await tapTarget(m, 'nuc')
     const tab = m.controller.tabs[0]
-    await m.wrapper.find('[data-testid="desktop-toggle"]').trigger('click')
-    await flush()
+    await chooseMobileScreen(m)
     expect(t.screenshotCalls).toEqual(['m1'])
     setHidden(true)
     await flush()
@@ -367,10 +381,9 @@ describe('mobile App runtime connection list (no Tauri)', () => {
     const tab = m.controller.tabs[0]
 
     const desktopBtn = m.wrapper.find('[data-testid="desktop-toggle"]')
-    expect(desktopBtn.text()).toBe('桌面')
+    expect(desktopBtn.attributes('aria-label')).toBe('選擇 Screen')
     expect(desktopBtn.attributes('aria-pressed')).toBe('false')
-    await desktopBtn.trigger('click')
-    await flush()
+    await chooseMobileScreen(m)
     expect(t.desktopCalls).toEqual([{ sid: 'm1', enabled: true }])
     expect(m.wrapper.find('[data-testid="desktop-toggle"]').attributes('aria-pressed')).toBe('true')
     expect(tab.desktopEnabled).toBe(true)
@@ -409,8 +422,7 @@ describe('mobile App runtime connection list (no Tauri)', () => {
     await tapTarget(m, 'nuc') // tab A, desktop-capable
     const tabA = m.controller.tabs[0]
 
-    await m.wrapper.find('[data-testid="desktop-toggle"]').trigger('click')
-    await flush()
+    await chooseMobileScreen(m)
     expect(tabA.shot).not.toBeNull()
     tabA.shot = null
 
@@ -607,7 +619,7 @@ describe('mobile App runtime connection list (no Tauri)', () => {
 
 
 describe('mobile finished Shell cleanup', () => {
-  it.each(['exit-code', 'runtime-exited'] as const)('returns Connect to target selection after %s', async (ending) => {
+  it.each(['exit-code', 'runtime-exited', 'runtime-missing', 'runtime-operatorKilled', 'recovery-exited', 'recovery-missing', 'ack-exited'] as const)('returns Connect to target selection after %s', async (ending) => {
     const m = mountMobile(runtime())
     try {
       await flush(); await tapTarget(m, 'nuc')
@@ -615,7 +627,12 @@ describe('mobile finished Shell cleanup', () => {
       const session = tab.sessionId!
       expect(m.wrapper.find('[data-testid="no-tabs"]').exists()).toBe(false)
       if (ending === 'exit-code') m.transport.feed(session, { bytes: [], exitCode: 0 })
-      else m.transport.feed(session, { bytes: [], exitCode: null, runtime: { batchId: 0, localGeneration: 1, events: [], ended: 'exited' } })
+      else {
+        const recovering = ending.startsWith('recovery-')
+        if (recovering) m.transport.recoverError = new ConnectionError(ending.slice('recovery-'.length) as 'exited' | 'missing', 'Shell 已結束')
+        if (ending === 'ack-exited') m.transport.runtimeAck = async () => { throw new ConnectionError('exited', 'Shell 已結束') }
+        m.transport.feed(session, { bytes: [], exitCode: null, runtime: { batchId: ending === 'ack-exited' ? 1 : 0, localGeneration: 1, events: [], ended: recovering ? 'transport' : ending.slice('runtime-'.length) } })
+      }
       await flush()
       expect(m.controller.tabs).toHaveLength(0)
       expect(m.wrapper.find('[data-testid="no-tabs"]').exists()).toBe(true)

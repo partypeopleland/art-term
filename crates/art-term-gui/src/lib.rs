@@ -9,6 +9,8 @@ mod runtime_bootstrap;
 #[cfg(target_os = "android")]
 mod runtime_hosts;
 #[cfg(target_os = "android")]
+mod instance_desktops;
+#[cfg(target_os = "android")]
 mod runtime_sessions;
 #[cfg(target_os = "android")]
 mod runtime_transfer;

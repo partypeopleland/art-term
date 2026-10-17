@@ -1,6 +1,6 @@
 # ADR-001：原生 Runtime 客戶端邊界
 
-狀態：已採用。2026-10-11 更新連線保存決策；原生 Runtime 邊界延續既有設計。
+狀態：已採用。2026-10-17 依 Owner 的直接 instance-mcp 決策更新桌面邊界；Runtime 終端邊界與 tmux 歷史延續既有設計。
 
 ## 要解決的問題
 
@@ -34,8 +34,10 @@ UI 透過 Tauri IPC（受權限限制的程序間呼叫）發出操作。共用�
 
 保存位置改變不代表可以更換金鑰。Windows 保留 DPAPI 的保護內容，Android 保留 operator Keystore 的金鑰識別、命名空間、使用標記與附加驗證資料（AAD）。這些資料共同決定舊密文能否解開；清除舊介面時不得刪除使用者資料或重建金鑰。詳見[憑證保存](../refarch/credential-storage.md)。
 
-## 桌面沿用 Runtime 的身分邊界
+## 桌面改用獨立 Screen 身分
 
-桌面預覽使用同一 Runtime 的 HTTPS 管理入口。能否觀看由明確設定授予，建立連線目標時就固定，後續不能靠改顯示名稱把分頁綁到另一台主機。
+Owner 於 2026-10-15 決定由 App 原生層直接持有平台加密的 instance-mcp token 並取得截圖，取代先前 App 只持有 Runtime 憑證、由 Host helper 轉送的限制。Screen 與 Host 各自保存 id／revision，Screen 選擇屬於本機分頁，不由 Runtime origin 或舊 desktop_transport 推定。
 
-觀看只取得既有共享桌面的截圖，關閉預覽不停止主機服務。App 直接連獨立桌面服務仍是[未來提案](../bdr/BDR-002-future-directions.md)，需要另行設計可信入口與觀看授權。目前元件關係見[架構](../refarch/architecture.md)與[桌面預覽](../refarch/desktop.md)。
+WebView 仍不能讀回已保存 token。App 直接向 MCP 截圖，受控端 AI 則由使用者明確啟動的 stdio adapter 使用同一選擇；App 以關 echo 的短命管理通道傳配置，URL／token 只存 adapter 行程記憶體。adapter 本身是 broker，不另建常駐 Shell 或逃離 Runtime kill domain。同 UID 程序仍在信任邊界內。
+
+預覽成功不等於 AI 工具接入，正在執行且未載 adapter 的 AI 也不能宣稱熱插入。工具回傳完整 MCP content／isError／structuredContent；直接截圖避開 PTY，不代表全面過濾工具的圖片內容。停止預覽、取消工具與關閉共享服務分開，App 不重設共用桌面。未選 Screen 的 Windows 舊分頁保留原生 Runtime 截圖相容路徑，Android 新選取 Screen 不使用它。設計及限制見[架構](../refarch/architecture.md)、[桌面預覽](../refarch/desktop.md)與[工具 bridge](../refarch/runtime-desktop.md)。

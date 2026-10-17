@@ -4,6 +4,7 @@
 mod dpapi;
 mod runtime_bootstrap;
 mod runtime_hosts;
+mod instance_desktops;
 mod runtime_sessions;
 mod runtime_transfer;
 use art_term_core::connections::Connections;
@@ -107,13 +108,13 @@ async fn gui_resize(
     runtime.resize(&session_id, rows, cols).map_err(Into::into)
 }
 #[tauri::command]
-async fn gui_close(runtime: State<'_, Arc<RuntimeSessions>>, session_id: String) -> Reply<()> {
+async fn gui_close(hosts: State<'_, Arc<runtime_hosts::RuntimeHosts>>, runtime: State<'_, Arc<RuntimeSessions>>, session_id: String) -> Reply<()> {
     if !RuntimeSessions::is_session(&session_id) {
         return Err(GuiError::Runtime(
             art_term_core::openab::session::SessionError::StateChanged.into(),
         ));
     }
-    runtime.close(&session_id).await.map_err(Into::into)
+    runtime.close_with_tools(&hosts, &session_id).await.map_err(Into::into)
 }
 #[tauri::command]
 async fn gui_desktop(
@@ -290,6 +291,13 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            crate::instance_desktops::gui_instance_desktops,
+            crate::instance_desktops::gui_instance_save,
+            crate::instance_desktops::gui_instance_delete,
+            crate::instance_desktops::gui_instance_test,
+            crate::instance_desktops::gui_instance_select,
+            crate::instance_desktops::gui_instance_clear,
+            crate::instance_desktops::gui_instance_launch,
             gui_platform,
             gui_open,
             gui_poll,
@@ -338,7 +346,7 @@ fn main() {
                 if !shutting_down.swap(true, Ordering::SeqCst) {
                     let app = window.app_handle().clone();
                     tauri::async_runtime::spawn(async move {
-                        app.state::<Arc<RuntimeSessions>>().shutdown().await;
+                        app.state::<Arc<RuntimeSessions>>().shutdown_with_tools(app.state::<Arc<runtime_hosts::RuntimeHosts>>().inner().clone()).await;
                         app.exit(0);
                     });
                 }

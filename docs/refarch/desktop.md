@@ -1,46 +1,49 @@
-# Runtime 桌面預覽
+# 獨立 Screens 與直接 MCP 桌面預覽
 
-App 的桌面按鈕讓使用者確認遠端共享畫面的目前狀態。它沿用工作 Shell 所屬的 Runtime 入口與管理憑證，另外建立一個截圖專用 Shell，呼叫 Host 上的 helper，圖片經同一條 Runtime 連線回到 App。截圖指令不送進使用者正在操作的 Shell 或 coding CLI；畫面仍是主機的共享桌面，並非各個 Shell 專屬，也不是可直接操作的遠端桌面。
+Screen 是保存在 App 的獨立 instance-mcp 桌面入口，與 Computers／Agents 的 Runtime Host 分開。App 原生層直接向選定的 instance-mcp 呼叫 `screenshot`，圖片不經工作 PTY、Runtime 截圖 Shell 或 coding AI 轉送。純終端不需要任何 Screen；同一 Screen 可供多個分頁及其他使用者共同觀看，不提供獨占、租約或桌面重設。
 
-桌面能力只取自唯一 `connections.toml`，不由 Host／Agent 分類推斷。兩種分類都可設定 `desktop_transport="runtime-mcp"`，入口使用原有 `openab_pty_url`。舊 endpoint／Agent 桌面關聯轉為相同 origin 的 Native 路徑，不改用另一個入口。
-
-## 圖片如何回到 App
+## 兩條路徑指向同一桌面
 
 ```text
-App native layer              official openab-pty          Host
-      |                              |
-      +-- existing work WSS -------->+-- work Shell -> coding CLI
-      |
-      +-- create temporary Shell --->+-- screenshot Shell
-      +-- attach, send launcher ---->|          |
-      |                              |          v
-      |                              |     local helper -> instance-mcp
-      |                              |          |
-      |<---- framed JSON + image ----+----------+
-      |
-      +-- delete own temporary Shell
-      v
-active Tab preview
+App native -- direct screenshot ---------------------> instance-mcp -> desktop
+                                                           ^
+Shell client / coding CLI stdio proxy -> Shell broker ------+
+                                             ^
+App -- temporary raw/no-echo configure Shell -+
 ```
 
-官方 Runtime 負責建立 Shell 和傳送輸入／輸出；圖片由本專案 helper 取得，不需要修改 Runtime 或安裝自訂桌面 API。App 使用專用回應標記辨識圖片 JSON，處理終端回顯、換行與分段輸出，驗證完整 PNG／JPEG 及解碼後最多 8 MiB 的界限。若輸出缺段、連線中斷、回應不完整或逾時，就清除該次結果並顯示錯誤，不把部分圖片當成成功。
+預覽與 AI 工具入口是兩個狀態。預覽成功只代表 App 可擷取圖片，不能當成 AI 已載入 MCP。Shell client 與 coding CLI 的標準 MCP stdio proxy 經此 Shell 的記憶體 broker 探索與呼叫同一上游；它完整回傳 MCP `content`、`isError` 與 `structuredContent`，另外帶來源 metadata。App 避開 PTY 傳圖，不表示過濾 AI 工具的圖片結果或只讓 AI 收到文字提示。
 
-每次觀察會短暫多占一個 Runtime Shell 名額；容量不足只使桌面預覽失敗，工作終端繼續使用。App 隱藏自己管理的截圖 Shell，完成、失敗或取消後清理自己的通道，不刪使用者工作。網路中斷可能使遠端刪除暫時失敗，不能把本機關頁等同遠端已刪除；恢復連線後的清理以本機保留的自建通道紀錄為限。
+## 建立、選擇與停止
 
-App 只持有 Runtime 管理憑證。MCP（Model Context Protocol）是 helper 與桌面服務之間的協定，其 URL 和 token 留在主機端受保護設定，不放進 PTY 指令、回顯或 App。準備方式見 [桌面 helper](runtime-desktop.md)。
+Main 的 Screens 列出實際儲存的桌面與數量，可像其他分類收合。全站齒輪的新增連線分類可選 Screen，另有獨立 Screen 編輯／刪除區。名稱、MCP URL 與 token 保存規則見[連線設定](connections.md)，不預填私人入口或憑證。
 
-## 手動與自動觀察
+每個 live Shell 分頁都能開 Screen 選單，與 Host 的舊 `desktop_transport` 無關。第一次可選任意 Screen，再次可切換或停止預覽；清單共用，選擇只作用於本機該分頁。切換先清除舊圖，後端依 Screen id／revision 與本次請求核對來源，關頁、背景、切換或設定修改後的晚到圖片不得重新顯示。App 重開或接管工作後不假定舊選擇仍有效，需重新選擇及核對。
 
-按桌面按鈕後先確認 helper 可擷取，再立即取得圖片；active Tab 每 30 秒更新一次，也可手動更新或隱藏圖片。失敗清除舊截圖，停用／關頁取消本次擷取與後續排程；切到背景停止圖片更新。這些操作不停止共享桌面或 instance-mcp，也不終止工作 Shell。
+預覽標題顯示所選 Screen，圖片下方不顯示擷取時間或工具接入說明，以保留畫面空間；擷取與操作錯誤仍顯示。立即擷取、定時與手動更新只在當前可見分頁進行；停止預覽只停止取圖，並不清除已配置的 AI 工具。「取消桌面工具」才向該 Shell broker 送 clear，清除其 token 並停止預覽。關頁 best-effort clear，斷網時不保證立即清除遠端記憶體；Shell supervisor 結束時釋放；CLI stdio EOF 不清除 Shell 選擇。所有操作都不停止共享桌面、瀏覽器、instance-mcp 或使用者工作 Shell。
 
-helper 直接呼叫既有桌面 screenshot，不用 browser 截圖替代，不列舉可能卡住的瀏覽器工具。所有觀看者看到同一桌面；App 不安裝、啟停或輪替共享服務。桌面為選配，純終端連線不需要 helper。
+## 原生 MCP 傳輸
 
-App 直接連獨立桌面入口仍是 [未來計畫](../bdr/BDR-002-future-directions.md)。目前圖片透過官方 Runtime 的專用 Shell 回傳。
+App 原生層保存及解密 token，WebView 只接收非秘密 metadata 與已驗證圖片，不能讀回已存 token。每次操作協商 MCP `initialize`、`notifications/initialized` 與 `Mcp-Session-Id`，接受有界 JSON／SSE，核對 JSON-RPC id、error、`isError`、PNG／JPEG 與尺寸。預覽直接呼叫 screenshot，不以 `tools/list` 成功作為前置。
 
-## 舊設定的相容邊界
+URL 不允許帳密、query 或 fragment。HTTPS 使用正常憑證驗證；HTTP 僅允許 loopback 或 Tailnet 位址 `100.64.0.0/10`、`fd7a:115c:a1e0::/48`。每次新連線解析並固定到驗證過的位址，不接受 redirect 或環境 proxy。App 與 adapter 使用同一規則。JSON／SSE 最多 16 MiB，截圖上限 20 秒；每次操作結束 best-effort DELETE MCP session，不因失敗重播工具呼叫。圖片及回應另受格式、大小與尺寸界限保護。
 
-舊 SSH 欄位只在讀取設定時作有界相容輸入，解析後丟棄；App 沒有 SSH executor、pin IO 或帳密授權。沒有可轉換 Runtime origin 的 SSH-only endpoint 保留中繼資料並產生「桌面不可用」警告，不阻止其他有效 Runtime。既有私鑰、pins、known_hosts、DPAPI 與 operator Keystore 不刪除或重建。
+工具取消依逾時／關閉連線收尾；協定可用時 best-effort 發送 `notifications/cancelled`。取消不能保證撤銷上游已開始的操作。錯誤訊息不回顯 token 或完整私人設定。
+
+## 選擇供本連線 Shell 與 coding CLI 使用
+
+Owner 最新範圍是 App 連入的工作 Shell，以及它裡面的 coding CLI；Discord Agent 暫不接入，整台 Host 共用的 broker 也不在範圍。新工作 Shell 在 Bash／CLI 啟動前就持有未配置的 supervisor broker，因此可先選 Screen，再由 Shell 命令或稍後啟動的 coding CLI 使用相同選擇。CLI 結束不清除 Shell 選擇，明確取消工具或 Shell 結束才拒絕新工具呼叫。
+
+App 不新增 Codex 專用啟動按鈕，不自動執行 CLI。新 Shell 的 scoped wrapper 提供 Codex stdio 接線，不修改主機全域配置或恢復固定上游 token。既有正在執行的 Shell／AI 不注入命令；helper 安裝後需建立新連線。其他支援標準 MCP 的 CLI 可用 `art-term-screen mcp-config` 取得無 URL／token／固定 binding 的通用 stdio 入口，依各自原生設定登記一次；啟動時只解析當前 App Shell 的活 broker，不掃描 Host。不宣稱所有 CLI 零配置或既有 AI 熱插入。完整邊界見[Shell 工具 bridge](runtime-desktop.md)。
+
+這是本次整合設計；實際安裝、PTY／Runtime 行為與手機驗收依當次結果確認，預覽成功不等於 Shell／CLI 工具已驗收。
+
+## 相容與驗收邊界
+
+舊 `desktop_transport` 繼續解析以保留 Host 相容，但不決定 Android 的 Screen 按鈕。Android 明確選取 Screen 後只走直接 MCP，不啟用舊 `preview.py` 轉送路徑。原生後端仍保留未選 Screen 的 Windows 舊分頁相容路徑，依其既有 Host mapping 透過 Runtime 專用截圖 Shell 取圖；這不是 Android 新 Screen 流程的前置或備援。Windows 功能驗收暫停，不能把此相容程式碼當成新版 Windows 已驗收。既有 schema 5 不會自行產生 Screen。獨立 Screen 不包含在目前 Host 匯出／匯入中；新增前的備份與降版條件見[設定遷移](connections.md#舊設定與版本升級)。
+
+固定 client 的 MCP E2E 能驗證產品路由、完整工具結果及官方 Runtime configure 通道，不能代表真的 AI 模型或 Codex CLI 已實測。App／手機與現場 MCP 的驗收各自列出實際結果，不以舊截圖 helper 的通過紀錄代替。範圍見[測試矩陣](test-matrix.md)。
 
 ## 附錄：實作與參考
 
-[桌面能力 mapping](../../crates/art-term-core/src/runtime_preview.rs)、[native session 與預覽](../../crates/art-term-gui/src/runtime_sessions.rs)、[預覽畫面](../../apps/desktop/src/components/PreviewPanel.vue)、[官方 client contract](https://github.com/openabdev/openab-pty/blob/b82a36620a76c84a67bc6a7ab316cbc60a30e1a9/runtime/CLIENT-CONTRACT.md)。
+[預覽元件](../../apps/desktop/src/components/PreviewPanel.vue)、[產品規格](../../.coordination/tasks/instance-mcp-20261015/spec.md)、[憑證保護](credential-storage.md)。

@@ -22,11 +22,11 @@
 | 網路 | Host 與使用端已登入正確 Tailnet；Host 有可用的 `*.ts.net` 名稱、MagicDNS 與 HTTPS certificates。存取政策需允許使用端到 Host TCP 8443。缺少 Tailscale 時依官網處理，不在本文件另維護其安裝流程；不自行重設 Tailnet 政策或現有路由。 |
 | 下載 | 新裝預設需能以 HTTPS 取得官方 GHCR 產物。受限網路可使用 Host 維護指南的可信 binary 方式，不跳過來源與 SHA256 驗證。 |
 | coding CLI | 只在使用者需要時處理，需安裝及登入於相同 Shell 帳號。Runtime 不代裝 CLI。 |
-| 桌面 | 只有使用者要求桌面預覽才需要 instance-mcp、可用桌面環境與 helper 設定；不阻擋純終端安裝。 |
+| 桌面 | 只有使用者要求桌面才需要 instance-mcp 與可用桌面環境；App 直接連 MCP，不需要舊截圖 helper。AI 工具另需通用記憶體 adapter，不阻擋純終端安裝。 |
 
 **不要把 Rust、Cargo、rustup、Docker 或 App 的編譯工具鏈加入受控端前置。** 預設 installer 用 Python 從固定官方 GHCR 映像抽取 binary，驗證 image／config／layer／binary 雜湊後原生執行，沒有容器或原始碼編譯步驟。也不要卸載既有 Rust／Cargo，其他工作可能仍依賴它們。
 
-完整 checkout 應包含 `scripts/init-host.sh` 與 `scripts/openab-runtime/` 的 host_bundle.py、official_artifact.py、desktop_bundle.py、preview.py、mcp_preview.py。保留腳本 LF 換行。
+終端安裝的完整 checkout 應包含 `scripts/init-host.sh` 與 `scripts/openab-runtime/` 的 host_bundle.py、official_artifact.py 及其依賴；舊桌面交易檔只用於維護既有安裝，不是新版預覽前置。保留腳本 LF 換行。
 
 可用以下唯讀查核確認目標環境；不要輸出任何 credential 檔案內容：
 
@@ -98,9 +98,15 @@ bash scripts/init-host.sh --show-credential
 
 請使用者在 art-term 新增 openab-pty 連線，填入名稱、Host 分類、Base URL 與管理憑證，測試連線後建立 Shell。使用 `pwd` 或其他無副作用操作確認是指定主機／帳號；需要 CLI 時再確認其可啟動。沒有實際操作 App 的能力，就將這一步交給使用者，不宣稱已完成手機或 Windows 驗收。
 
-## 4. 只有需要時才啟用桌面預覽
+## 4. 只有需要時才準備 Screen 與工具入口
 
-使用者提出桌面需求後，先依 [Runtime 桌面 helper](refarch/runtime-desktop.md) 確認可達的 instance-mcp 與桌面環境，準備 owner-only MCP 設定，再使用 `--enable-desktop`。不得把 token 寫進命令列或對話。這只設定本專案 helper，不修改官方 openab-pty，也不代裝 instance-mcp 或接管其他共享服務。
+App 直接預覽需要使用端可達的 instance-mcp 及桌面環境，不需要 `--enable-desktop`、主機端 desktop.json 或舊截圖 helper。向管理者確認 MCP URL、認證及網路，讓使用者在全站齒輪新增 Screen，再於 live Shell 分頁選擇。不能從 Runtime URL／credential 推測 MCP 入口，也不能將 token 寫進命令列、對話或公開設定。
+
+需要此 App 工作 Shell 及其中的 coding CLI 使用桌面工具時，先完成 tmux 主機準備，再以工作 Shell 的一般使用者在受控端專案根目錄執行 `bash scripts/install-instance-tools.sh --with-tmux-wrapper`，安裝通用 supervisor、Shell client／rc 與持久化 tools/tmux-shell.py；App 新建 Shell 優先使用此 wrapper，缺少時退回原有版本，不改 image symlink 或要求 Pod 重啟；[Shell 工具 bridge](refarch/runtime-desktop.md#安裝與既有連線)說明檔案、私有備份及限制。受控端 Python 標準函式庫即可，程式不保存本次 URL／token／config；驗證相同帳號可達上游與 owner-only runtime 目錄。
+
+helper 安裝後建立新連線，新 Shell 的 broker 先於 Bash 存在。App 選 Screen 後，Shell 命令及稍後啟動的 scoped Codex 使用同一選擇；CLI 結束不清除 Shell 選擇。不要注入既有正在跑的 Shell／CLI，不重啟工作，不修改全域 CLI 設定、Discord Agent 或恢復已移除的固定上游認證。其他支援標準 MCP 的 CLI，可在新 App Shell 執行 `art-term-screen mcp-config`，取得非秘密 command／args，依該 CLI 原生配置登記一次；不要寫固定 Shell binding、上游 URL／token。不猜各 CLI 語法，也不宣稱全部自動發現；wrapper 的 alias／絕對路徑繞過及 `--current-shell` 解析限制見工具文件。
+
+不修改官方 Runtime、不重啟既有工作，也不代裝或重設 instance-mcp／共享桌面。若舊 helper 與設定存在，先核對其他使用者用途及備份，不能為移除轉送路徑而刪其他 AI 的工具設定或共用服務。App 截圖成功與 Shell 工具接入分別回報；固定測試 client 不等於真 Codex／AI 已實測。
 
 ## 回報格式
 

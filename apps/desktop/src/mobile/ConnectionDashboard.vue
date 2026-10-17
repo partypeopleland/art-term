@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import HostConnections from './HostConnections.vue'
-import type { RuntimeHostDto, HostDto, TargetDto, Transport } from '../transport/types'
+import type { InstanceDesktop, RuntimeHostDto, HostDto, TargetDto, Transport } from '../transport/types'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
+  screens?: InstanceDesktop[]
+  screensError?: string
   transport: Transport
   active: boolean
   catalogLoading: boolean
@@ -12,7 +14,7 @@ const props = defineProps<{
   runtimePending: string | null
   /** Only a live local tab lights the connection indicator. */
   runtimeConnected: Set<string>
-}>()
+}>(), { screens: () => [], screensError: '' })
 const emit = defineEmits<{
   open: [host: HostDto, target: TargetDto]
   create: [category: 'host' | 'agent']
@@ -55,10 +57,14 @@ const sections = computed(() => [
         <button class="category-toggle" :aria-expanded="!collapsed.screens" aria-controls="category-content-screens" @click="toggleCategory('screens')">
         <span class="section-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M8 10h8M8 14h5" /></svg></span>
         <div class="section-titles"><h2 id="heading-screens">Screens</h2><span>畫面工作區</span></div>
-        <span class="section-count" aria-label="0 個設定">00</span>
+        <span class="section-count" :aria-label="`${screens.length} 個設定`">{{ screens.length.toString().padStart(2, '0') }}</span>
         </button>
       </header>
-      <div v-show="!collapsed.screens" id="category-content-screens" class="screen-placeholder"><span class="screen-grid" aria-hidden="true"><i /><i /><i /><i /></span><div><strong>為你的畫面留個位置</strong><p>未來功能，尚未開放使用</p></div><span class="placeholder-plus" aria-hidden="true">+</span></div>
+      <div v-show="!collapsed.screens" id="category-content-screens" class="section-content">
+        <p v-if="screensError" class="dashboard-error" role="alert">{{ screensError }}</p>
+        <div v-for="screen in screens" :key="screen.id" class="saved-screen-row" :data-testid="`screen-${screen.id}`"><span class="screen-status-dot" /><div><strong>{{ screen.name }}</strong><span>{{ screen.mcpUrl }}</span></div></div>
+        <div v-if="!screens.length && !screensError" class="empty-section"><span class="empty-line" aria-hidden="true" /><span>尚未新增 Screen，請到齒輪的畫面設定新增</span></div>
+      </div>
     </section>
   </div>
 </template>
@@ -134,4 +140,9 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 @media (max-width: 340px) { .category-toggle { gap: 6px; } }
 
 .category-toggle .section-count { margin-left: auto; }
+.saved-screen-row { display: flex; align-items: center; gap: 10px; padding: 8px 3px; border-top: 1px solid var(--border); }
+.saved-screen-row > div { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.saved-screen-row strong { font-size: 12px; font-weight: 550; }
+.saved-screen-row > div > span { font-size: 10px; color: var(--text-dim); overflow-wrap: anywhere; }
+.screen-status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--dot-idle); flex: none; }
 </style>

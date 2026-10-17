@@ -15,6 +15,8 @@ target/android-regression/venv/bin/python scripts/android-regression/ui_refresh.
 
 本流程已在 Android 15／API 35 模擬器實際操作 APK，涵蓋六組 Android 案例及一組雙向跨平台案例。測試 APK 是 x86_64 debug＋`openab-fixture`，不是更新私人手機的 ARM64 release APK。測試使用真正的 Android 系統與產品程式，但模擬器不具有實體手機的 ARM64、硬體 Keystore、安全硬體與各廠牌省電行為。每次執行是否通過，仍以該次完整結果與清理狀態判定。
 
+直接 MCP／Screens 版本須另覆蓋原生 Keystore 的桌面 CRUD／重開、每分頁選擇／切換、背景／晚到圖片、工具狀態及 Host 匯入保留桌面。舊截圖 helper 案例或 APK 建置成功不代表這些項目已通過；完整門檻見[測試矩陣](../refarch/test-matrix.md#直接-mcp-與獨立-screens-的驗收門檻)。固定 client 的工具 E2E 不代表真 AI 模型已測。
+
 ## 依賴與資料流
 
 需要 Windows、Python 3.12 以上、Git、Node/npm、Rust Android target、JDK 17、Android SDK／NDK，以及 `system-images;android-35;google_apis;x86_64`。沿用專案既有 `target/android-tools/environment.json`；模擬器須通過實際 `emulator -accel-check`，不能單憑系統資訊欄位判斷虛擬化不可用。另需至少 8 GiB 可用磁碟供新測試裝置，建置快取也需要額外空間。

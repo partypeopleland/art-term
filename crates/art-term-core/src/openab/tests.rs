@@ -1428,3 +1428,65 @@ fn newer_connection_document_preserves_inactive_desktops_through_host_edits() {
         .unwrap()
         .is_empty());
 }
+
+#[test]
+fn standalone_desktop_rejects_plaintext_or_malformed_schema6_records() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("connections.toml");
+    std::fs::write(&path, "schema_version = 6\nconnections = []\n[[desktops]]\nid = 'broken'\ntoken = 'must-not-be-accepted'\n").unwrap();
+    let store = HostStore::load(path, Arc::new(FixtureCipher)).unwrap();
+    assert!(store.desktops().is_err(),
+        "active desktop catalog must reject unvalidated plaintext/unknown records");
+}
+
+#[test]
+fn standalone_desktop_roundtrip_backup_and_host_mutations_are_independent() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("connections.toml");
+    let store = HostStore::load(path.clone(), Arc::new(FixtureCipher)).unwrap();
+    let host = store.add("Host".into(), "https://host.example/".into(), secret()).unwrap();
+    let original = std::fs::read(&path).unwrap();
+    let desktop = store.save_desktop(None, None, "Screen A".into(), "http://127.0.0.1:8765/mcp".into(), Some(Secret::new("desktop-private-token".into()).unwrap())).unwrap();
+    assert_eq!(std::fs::read(dir.path().join("connections.pre-desktops.toml")).unwrap(), original);
+    let raw = std::fs::read_to_string(&path).unwrap();
+    assert!(raw.contains("schema_version = 6"));
+    assert!(!raw.contains("desktop-private-token"));
+    assert_eq!(store.snapshot(&host.id).unwrap().credential.expose(), secret().expose());
+    let updated = store.save_desktop(Some(&desktop.id), Some(desktop.revision), "Renamed".into(), desktop.mcp_url.clone(), None).unwrap();
+    assert_eq!(updated.revision, 2);
+    assert_eq!(store.desktop(&updated.id).unwrap().token.expose(), "desktop-private-token");
+    assert!(store.save_desktop(Some(&updated.id), Some(1), "Stale".into(), updated.mcp_url.clone(), None).is_err());
+    assert!(store.save_desktop(Some(&updated.id), Some(2), "Changed URL".into(), "http://127.0.0.1:9999/mcp".into(), None).is_err());
+    store.delete(&host.id, host.revision).unwrap();
+    drop(store);
+    let store = HostStore::load(path.clone(), Arc::new(FixtureCipher)).unwrap();
+    assert_eq!(store.desktops().unwrap(), [updated.clone()]);
+    assert_eq!(store.desktop(&updated.id).unwrap().token.expose(), "desktop-private-token");
+    assert!(store.list().unwrap().is_empty());
+    store.delete_desktop(&updated.id, updated.revision).unwrap();
+    assert!(std::fs::read_to_string(path).unwrap().contains("schema_version = 5"));
+    assert_eq!(std::fs::read(dir.path().join("connections.pre-desktops.toml")).unwrap(), original);
+}
+
+#[test]
+fn standalone_desktop_token_context_and_host_import_preserve_the_catalog() {
+    use super::profiles::{ImportAction, ImportSelection};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("connections.toml");
+    let store = HostStore::load(path.clone(), Arc::new(FixtureCipher)).unwrap();
+    let desktop = store.save_desktop(None, None, "Screen".into(), "http://localhost:9876/mcp".into(), Some(secret())).unwrap();
+    let preview = store.preview_import(super::transfer::Payload { entries: vec![super::transfer::Entry {
+        name: "Imported host".into(), origin: "https://import.example/".into(), metadata: Default::default(), credential: Some(secret())
+    }] }).unwrap();
+    let key = preview.entries[0].key.clone();
+    store.apply_import(preview, vec![ImportSelection { key, action: ImportAction::Add, credential: None }]).unwrap();
+    assert_eq!(store.desktops().unwrap(), [desktop.clone()]);
+    assert_eq!(store.desktop(&desktop.id).unwrap().token.expose(), secret().expose());
+    drop(store);
+    let mut document: toml::Value = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    document["desktops"][0]["revision"] = toml::Value::Integer(2);
+    std::fs::write(&path, toml::to_string(&document).unwrap()).unwrap();
+    let tampered = HostStore::load(path, Arc::new(FixtureCipher)).unwrap();
+    assert!(tampered.desktop(&desktop.id).is_err(), "desktop revision must authenticate the token");
+    assert_eq!(tampered.list().unwrap().len(), 1, "invalid desktop data must not destroy Hosts");
+}

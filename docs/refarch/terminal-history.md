@@ -16,9 +16,17 @@ App 確認畫面已顯示 -> 保留顯示快照、釋放前一份快照
 
 Android 原生閱讀窗口最多 1024 行；上捲前插舊頁、持續輸出、開關鍵盤及視窗尺寸改變時，依原生列識別與像素位置維持閱讀點。停在底部才跟隨最新輸出。畫面呈現完成才確認快照，避免尚未顯示的頁面取代使用者正在閱讀的資料。
 
+新建工作的生命週期以原始 Shell 為準：退出 Bash 時會結束該工作的私有 tmux session，閱讀快照不會讓已退出的工作繼續存活，App 因此能關閉對應分頁。退出 Codex 等前景程式回到 Bash，或只釋放閱讀快照，都不會結束工作或影響其他分頁。
+
 關閉分頁只脫離工作並清理自己的讀頁程序。App 強制結束時，未收到有效請求的輔助程序在 120 秒後清理自身；新 App 可立即建立新的讀頁程序接回仍活著的工作。此流程不會終止其他分頁的輔助程序。
 
 工作顯示名稱自動產生為 `s-` 加八位十六進位字元，重新連線維持相同名稱。Runtime 使用完整的 `th2-` 加 24 位識別，不能用短顯示名稱推測工作身分。既有一般 Shell 或早期 `th-` 工作仍可連線，但不自動轉成新協定；需要新式歷史時請建立新 Shell，再於其中恢復自己的 CLI 工作。
+
+## 新 Shell 的桌面工具生命週期
+
+本次 Screen 整合在新 tmux 工作中先啟動 Shell-owned supervisor，再啟動互動 Bash，binding 使用完整 `th2-` 工作名稱。Shell client 及其 coding CLI 共用該 Shell 的記憶體選擇；不是 Host 全域服務。CLI EOF 不清除選擇，明確 clear 拒絕新工具呼叫，Shell／tmux／Runtime 結束則移除 socket 並清記憶體。App 背景或切 Main 只停止取圖。
+
+歷史仍由原 tmux pane 與讀頁 helper 管理，supervisor 以自有 PTY 維持 Bash 前景程序群組及 resize，pipe-death guard 清理 supervisor 非正常結束後的自有 session，不增加常駐 Runtime Shell、不改 namespace／歷史 manifest；Ctrl+C、job control、resize、退出狀態與 kill 清理須另經真 PTY／Runtime 驗證。Screen 工具安裝另將建立 wrapper 放在持久化 `~/.local/share/art-term/tools/tmux-shell.py`，App 新建時優先使用，缺少時退回原有版本 wrapper；原 tmux-v2 binary／讀頁 helper 及可能指向 image 的 symlink 不改動，不需要更新映像或重啟 Pod。安裝不重啟既有工作；已執行的 Shell 不注入新啟動定義，需建立新連線，缺 helper 時仍可普通 Bash 相容。設計、工具介面與驗收界線見[Shell 工具 bridge](runtime-desktop.md)。
 
 ## 保存界線
 
@@ -71,4 +79,4 @@ PY
 
 ## 附錄：實作與參考
 
-[主機 wrapper](../../scripts/openab-runtime/tmux-v2/tmux-shell.py)、[讀頁 helper](../../scripts/openab-runtime/tmux-v2/tmux-history.ts)、[協定驗證](../../crates/art-term-core/src/openab/history.rs)、[App 原生閱讀器](../../apps/desktop/src/components/NativeTerminalReader.vue)。
+[主機 wrapper](../../scripts/openab-runtime/tmux-v2/tmux-shell.py)、[讀頁 helper](../../scripts/openab-runtime/tmux-v2/tmux-history.ts)、[協定驗證](../../crates/art-term-core/src/openab/history.rs)、[App 原生閱讀器](../../apps/desktop/src/components/NativeTerminalReader.vue)、[工作退出與歷史快照回歸](../../scripts/instance-mcp-regression/history_exit.py)。

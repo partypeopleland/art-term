@@ -13,7 +13,8 @@ art-term 讓 Windows 電腦或 Android 手機連到 Linux 受控端，操作終�
 | 終端服務 | 官方 openab-pty，由你的 AI 依本專案文件安裝與設定。 |
 | 使用裝置 | 已安裝 art-term 的 Windows 電腦或 Android 手機。 |
 | coding CLI（選配） | 你要使用的 CLI 已在受控端安裝並登入。 |
-| 桌面預覽（選配） | 可用的 instance-mcp 與桌面環境；只用終端就不需要。 |
+| 桌面預覽（選配） | 手機／電腦可達的 instance-mcp、其 URL／token 與桌面環境；在 App 的 Screens 獨立保存。只用終端就不需要。 |
+| Codex 桌面工具（選配） | 受控端同帳號可達相同 instance-mcp，安裝通用 Shell broker／工具 client；新工作 Shell 及其中的 Codex 共用選擇，Discord Agent 暫不包含。 |
 
 **受控端不需要為 art-term 安裝 Rust、Cargo 或 Docker。** 安裝流程直接使用官方執行檔；所選 CLI 若另有依賴，交由 AI 依該工具的文件處理。
 
@@ -34,3 +35,5 @@ AI 需要能讀取本專案檔案，並能操作你指定的 Linux 受控端。�
 ```
 
 完成後，在 art-term 新增連線，填入 AI 提供的網址，再依指示取得並填入管理憑證。開啟 Shell 並確認能操作受控端，即可開始使用。
+
+桌面不需要啟用舊 Runtime 截圖 helper。使用者在全站齒輪新增 Screen，於 live Shell 分頁明確選擇；App 直接取圖。需要讓已連入的 Shell 及其中的 coding CLI 操作相同桌面時，請 AI 依[工具 bridge](refarch/runtime-desktop.md)準備通用程式，安裝後建立一次新連線；先選 Screen 再啟動 Codex 也可使用，不需要 App 額外啟動入口。其他支援標準 MCP 的 CLI 可用 `art-term-screen mcp-config` 取得通用入口，依各自設定登記一次；不需固定桌面 token 或 Shell binding。此 Shell 整合仍須依當次交付驗證，不把安裝完成當成實機通過。Screen token 不貼聊天、不填入受控端永久設定；Host 匯出／匯入不包含 Screen。

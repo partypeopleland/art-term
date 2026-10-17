@@ -1,3 +1,5 @@
+#[path = "instance_profiles.rs"]
+mod instance_profiles;
 use super::{
     api::ApiError,
     secret::{CredentialCipher, CredentialContext, Secret},
@@ -491,6 +493,9 @@ impl HostStore {
         // silently replaced while preserving a different file's extensions.
         self.ensure_source()?;
         let bytes = encode(records, source.as_deref())?;
+        self.persist_bytes(&bytes)
+    }
+    fn persist_bytes(&self, bytes: &[u8]) -> Result<(), ApiError> {
         if bytes.len() as u64 > MAX_FILE {
             return Err(ApiError::Capacity);
         }
@@ -503,6 +508,7 @@ impl HostStore {
             .sync_all()
             .map_err(|_| ApiError::StateChanged)?;
         check_path(&self.path)?;
+        self.ensure_source()?;
         // tempfile persist uses atomic replace (MoveFileExW on Windows), never remove-first.
         temp.persist(&self.path)
             .map_err(|_| ApiError::StateChanged)?;

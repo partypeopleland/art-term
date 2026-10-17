@@ -2,9 +2,30 @@
 
 這張表回答「目前哪些操作受到測試保護，以及改功能時要驗證什麼」。單元測試負責精確的失敗情境；原生 E2E 操作真正的 Windows EXE 或 Android APK，確認產品各層能一起運作；Linux 測試再檢查真正的官方 Runtime 與 helper。三者的通過條件不同，不能互相取代。
 
+以下舊流程記錄屬於當時的 Runtime 截圖 helper 設計，不能代表直接 MCP 版本已通過。直接 MCP 新增驗收門檻列在下一節；每次執行仍需記錄實際 PASS／FAIL／BLOCKED／NOT_RUN。
+
 2026-10-11 已分別驗證 Windows 四組原生流程、Android 六組流程與一組雙向跨平台搬移案例，以及 Linux 真 Runtime／helper、一次既有 MCP 擷取和 53 個 Host tests。下面列出已有案例的保護範圍；每次修改後，仍需以對應入口產出的結果、來源版本與清理狀態判定該次是否通過，不能沿用舊版本的通過紀錄。
 
-## 主要操作保護
+## 直接 MCP 與獨立 Screens 的驗收門檻
+
+下表列出本次應驗證的行為，不宣稱已執行；以當次結果與版本判定。固定 client 代替 AI 模型，但必須走正式產品 adapter、HTTP 與工具執行，不能 mock 產品路由。
+
+| 範圍 | 必須驗證 |
+|---|---|
+| Screen 保存與遷移 | 原生加密 CRUD／重開、同 URL 保留 token、改 URL 必須重填、id／revision／context 拒絕混用；schema 5 啟動不改檔，首筆 Screen 前私有備份、有 Screen 寫 schema 6；Host CRUD／匯入不丟桌面 |
+| MCP HTTP 傳輸 | 真 JSON／SSE、initialize／initialized／session、JSON-RPC id／error／isError、PNG／JPEG、尺寸／16 MiB／逾時；TLS、DNS pinning、HTTP Tailnet／loopback、拒 redirect／環境 proxy、session 清理 |
+| App 原生截圖 | 直接 MCP screenshot，不經 Runtime PTY 或依賴 tools/list；切換／背景／關頁拒舊回覆；圖片來源 Screen id／revision 一致，定時／手動／停止保持終端 |
+| 分頁與 UI | 真 APK／Keystore：Main Screens 清單與數量、齒輪 Screen 新增／編輯／刪除、每 live Shell 獨立選擇／切換、舊 desktop_transport 不控制入口、PreviewPanel 來源及工具狀態一致 |
+| Adapter 工具行為 | 固定 client 經正式 stdio adapter→真測試 HTTP A／B 上游；工具探索保留 cursor，原名稱／參數與完整 content／isError／structuredContent 保留；A→B、不同比例圖片、兩 adapter 共用 A 且只切其中一個 |
+| 選擇版本 | current_target／list 回來源，call 的 expected_target 不符拒絕；進行中 A 呼叫留 A、新呼叫用 B，不把舊結果顯示成 B；取消不宣稱撤銷上游副作用 |
+| 真官方 Runtime configure | Rust 原生 configure→未修改官方 Runtime 管理 PTY→adapter→固定 client→A／B；raw／關 echo READY 握手，token 不在 replay／history／cmdline／environ／log；管理 Shell 刪除與名額恢復；renew 後仍可 configure／clear |
+| 工具生命週期 | 無 adapter 不假報 ready、auth／timeout／isError、clear／EOF 清記憶體／socket、背景／晚到回應、App 重啟／takeover 不沿用未核對選擇；owner／0700／非 symlink 及同 UID 邊界 |
+| CLI 契約 | 確定性檢查 Codex -c stdio command／args 不含 URL／token、timeout 75秒、其他 CLI 不猜語法、不對既有程式偷偷輸入；此項不等於真 Codex／AI 已測 |
+| 回歸 | tmux 歷史按需讀頁、輸入／ACK／重連、固定滑動頂列／四主題／語音與鍵列、Host 搬移保留獨立 Screens、無私人預填 |
+
+ARM64 手機、現場網路／MCP、實際 Codex CLI 與 AI 模型各自需要明確結果；固定 client E2E、命令契約或舊 helper 案例不替代它們。無授權不操作 Owner 手機或既有共享服務。
+
+## 既有操作保護（歷史 helper 流程）
 
 | 功能／風險 | Windows 原生 E2E | Android APK 原生 E2E | Linux／單元測試補強 |
 |---|---|---|---|
@@ -51,7 +72,7 @@ Windows／APK 的 debug fixture CA 只限定測試建置，仍實際驗證 TLS�
 完成後列出案例 ID、實際通過／失敗／未執行、受測版本，以及仍需實機確認的項目。
 ```
 
-執行入口分別是 [Windows](../platforms/windows-regression.md)、[Android APK](../platforms/android-regression.md)、[Linux](../platforms/linux-regression.md)。先 Windows、再相同核心的 APK；Linux 可並行驗證 Host側，但不代替兩端 App操作。
+執行入口分別是 [Windows](../platforms/windows-regression.md)、[Android APK](../platforms/android-regression.md)、[Linux](../platforms/linux-regression.md)。目前以 Android APK 為主，Windows 功能驗收暫停；Linux 驗證官方 Runtime／adapter 與 Host 側，不能代替 APK 操作或手機驗收。
 
 ## 仍需另外驗收
 
