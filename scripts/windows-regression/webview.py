@@ -13,6 +13,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.remote.client_config import ClientConfig
 from selenium.webdriver.common.proxy import Proxy, ProxyType
+from selenium.common.exceptions import StaleElementReferenceException
 
 HIDDEN = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
 
@@ -98,7 +99,10 @@ class App:
     def wait(self, predicate, seconds=20):
         deadline = time.monotonic() + seconds
         while time.monotonic() < deadline:
-            value = predicate()
+            try:
+                value = predicate()
+            except StaleElementReferenceException:
+                value = False
             if value:
                 return value
             time.sleep(.12)
@@ -221,6 +225,8 @@ class App:
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=HIDDEN)
         try:
             out, _ = process.communicate(timeout=25)
+            if process.returncode != 0:
+                (self.run / 'native-picker-failure.log').write_bytes(out)
             require(process.returncode == 0 and json.loads(out.decode('utf-8-sig'))['invoked'], 'owned native picker failed')
         finally:
             if process.poll() is None:
