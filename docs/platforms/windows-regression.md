@@ -34,6 +34,14 @@ Vue/controller + test transport     real DPAPI / local TLS-WSS fixtures
 
 ## 準備與執行
 
+若 Owner 正在使用電腦而要求不顯示 App，可先用完全背景的桌面預覽檢查。啟動 `npm.cmd --prefix apps/desktop run preview:ui` 後，以既有 Python 環境執行：
+
+```powershell
+target/windows-regression/venv/Scripts/python.exe scripts/windows-regression/headless-layout.py --driver target/gui-tools/edge/msedgedriver.exe --output target/windows-regression/layout-check
+```
+
+此檢查使用 Edge headless、隱藏 driver console，以及獨立 `/?desktop` 預覽入口與虛構資料；涵蓋固定200px、分隔線拖曳、換行／定位、有界預載、非阻塞桌面載入、分類設定與草稿清除，並保存截圖及結果。它不執行原生 App、IPC、DPAPI 或系統選檔器，不能代替下面的原生 E2E。完成後關閉自己啟動的預覽 server；正式打包不包含此入口。
+
 以下指令均在 Windows 的專案根目錄執行。需要已安裝 Rust MSVC、C++ Build Tools、Node/npm、PowerShell 與 Python；正常使用 App 的人不需要這些開發工具。首次安裝相關工具依其官方文件，由 AI 先檢查現有版本並沿用。
 
 Microsoft Edge WebDriver 必須匹配 App 使用的 **WebView2 Runtime**，不是只核對平常瀏覽的 Edge。AI 依 Microsoft 官方文件取得相符的 Windows x64 driver，放在專案內 ignored 工具目錄，或以 `-EdgeDriverPath` 明確指定。腳本不自動升級瀏覽器、不更改系統憑證。需要一個可互動的 Windows 桌面；執行前關閉自己開啟的 art-term 視窗，測試不會代關既有 App。

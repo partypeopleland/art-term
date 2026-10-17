@@ -36,7 +36,6 @@ def safe_output(value):
 
 def add(app, fixture, name='Regression runtime'):
     app.manage()
-    app.node('runtime-create').click()
     app.fill('name', name)
     app.fill('base-url', fixture.origin)
     app.fill('credential', fixture.credential)
@@ -94,12 +93,14 @@ def label(name):
 def inline_scroll(app, fixture):
     app.main_page()
     require(not app.find('[data-testid=desktop-main], [data-testid=desktop-connect], [data-testid=open-desktop-history]'), 'obsolete workspace/history navigation remains')
-    layout = app.driver.execute_script("const r=s=>document.querySelector(s).getBoundingClientRect();const w=r('.desktop-workspace'),l=r('.desktop-sidebar'),t=r('.desktop-connect-page'),d=r('.desktop-main-page'),p=r('.desktop-preview');return {ratio:l.width/w.width,right:t.left>=l.right-1,below:p.top>=d.bottom-1,vertical:getComputedStyle(document.querySelector('.dashboard')).flexDirection==='column'};")
-    require(.31 <= layout['ratio'] <= .36 and layout['right'] and layout['below'] and layout['vertical'], 'workspace layout is not left-third/stacked/preview-below/right-terminal')
+    layout = app.driver.execute_script("const r=s=>document.querySelector(s).getBoundingClientRect();const l=r('.desktop-sidebar'),t=r('.desktop-connect-page'),d=r('.desktop-main-page'),p=r('.desktop-preview');return {width:l.width,right:t.left>=l.right-1,below:p.top>=d.bottom-1,vertical:getComputedStyle(document.querySelector('.dashboard')).flexDirection==='column'};")
+    require(abs(layout['width'] - 200) <= 1 and layout['right'] and layout['below'] and layout['vertical'], 'workspace layout is not fixed200/stacked/preview-below/right-terminal')
     name = create_shell(app, fixture, app.profiles()[0])
-    fixture.append_lines(name, 1, 1800)
+    fixture.append_lines(name, 1, 1800, wide=True)
     css = '.pane .desktop-history .history-viewport'
     viewport = app.wait(lambda: next((e for e in app.find(css) if e.is_displayed() and 'ROW-1800' in e.text), None), 30)
+    require(app.driver.execute_script("const h=arguments[0];return h.scrollWidth<=h.clientWidth && [...h.querySelectorAll('.history-line')].some(e=>e.offsetHeight>17);", viewport), 'native long rows do not wrap without horizontal overflow')
+    app.wait(lambda: sum(e['method'] == 'history' and e['name'] == name and e['action'] == 'older' for e in fixture.snapshot()['events']) >= 3)
     def ids():
         return app.driver.execute_script("return [...arguments[0].querySelectorAll('[data-line-id]')].map(e=>Number(e.dataset.lineId));", viewport)
     def wheel(amount):
@@ -109,6 +110,11 @@ def inline_scroll(app, fixture):
     app.wait(lambda: ids()[0] < original)
     anchored = app.driver.execute_script("const h=arguments[0];return h.querySelector('[data-line-id=\"'+arguments[1]+'\"]').getBoundingClientRect().top-h.getBoundingClientRect().top;", viewport, original)
     require(abs(anchored - 4) <= 2, f'older page moved the reading anchor ({anchored:.2f}px)')
+    divider = app.node('sidebar-divider')
+    ActionChains(app.driver).move_to_element(divider).click_and_hold().move_by_offset(120, 0).release().perform()
+    app.wait(lambda: app.driver.execute_script("return Math.abs(document.querySelector('.desktop-sidebar').getBoundingClientRect().width-320)<2"))
+    app.wait(lambda: app.driver.execute_script("const h=arguments[0],e=h.querySelector('[data-line-id=\"'+arguments[1]+'\"]');return Math.abs(e.getBoundingClientRect().top-h.getBoundingClientRect().top-4)<=2;", viewport, original))
+    ActionChains(app.driver).move_to_element(app.node('sidebar-divider')).click_and_hold().move_by_offset(-120, 0).release().perform()
     for _ in range(4):
         first = ids()[0]
         wheel(-10000)
@@ -135,7 +141,7 @@ def inline_scroll(app, fixture):
     app.main_page()
     app.node('desktop-settings').click()
     app.main_page()
-    return {'directWheelPaging': True, 'bounded1024': True, 'anchorPixelError': abs(anchored - 4), 'heldDuringNewOutput': True, 'bottomFollowsLatest': True, 'clickAndRealKeyboard': True, 'singleWorkspaceLayout': layout}
+    return {'directWheelPaging': True, 'prefetchedThreePages': True, 'wrappedWithoutHorizontalOverflow': True, 'nativeDragKeepsAnchor': True, 'bounded1024': True, 'anchorPixelError': abs(anchored - 4), 'heldDuringNewOutput': True, 'bottomFollowsLatest': True, 'clickAndRealKeyboard': True, 'singleWorkspaceLayout': layout}
 
 
 def create_shell(app, fixture, profile):

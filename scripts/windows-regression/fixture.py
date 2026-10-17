@@ -278,9 +278,9 @@ class Fixture:
             await ws._writer.close(code=4004, message=b'fixture finished')
         self.call(finish())
 
-    def append_lines(self, name, start, count):
+    def append_lines(self, name, start, count, wide=False):
         async def append():
-            await self.output(self.sessions[name], ''.join(f'ROW-{i:04d}\r\n' for i in range(start, start + count)).encode())
+            await self.output(self.sessions[name], ''.join(f'ROW-{i:04d}' + (' 繁體中文 English 自動換行' * 24 if wide and i % 7 == 0 else '') + '\r\n' for i in range(start, start + count)).encode())
         self.call(append())
 
     def close(self):

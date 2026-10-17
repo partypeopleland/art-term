@@ -1,22 +1,35 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { useModalFocus } from '../components/modal-focus'
 import { themes, selectedTheme, selectTheme } from './theme'
 import RuntimeTransfer from '../components/RuntimeTransfer.vue'
 import RuntimeHosts from '../components/RuntimeHosts.vue'
 import ScreenSettings from './ScreenSettings.vue'
 import type { RuntimeHostDto, Transport } from '../transport/types'
-const props = withDefaults(defineProps<{ embedded?: boolean; transport?: Transport; hosts?: RuntimeHostDto[] }>(), { hosts: () => [] })
+type SettingsSection = 'appearance' | 'connections' | 'screens'
+const props = withDefaults(defineProps<{ embedded?: boolean; desktop?: boolean; initialSection?: SettingsSection; transport?: Transport; hosts?: RuntimeHostDto[] }>(), { hosts: () => [], initialSection: 'appearance' })
 const emit = defineEmits<{ close: []; changed: []; picker: [active: boolean] }>()
 const transferMode = ref<'import' | 'export' | null>(null)
+const section = ref<SettingsSection>(props.initialSection)
+const pickerActive = ref(false)
+const sections = [{ id: 'appearance', title: '外觀設定', hint: '主題與配色' }, { id: 'connections', title: '連線設定', hint: '主機、助理與搬移' }, { id: 'screens', title: '畫面設定', hint: '桌面來源與認證' }] as const
+watch(() => props.initialSection, value => { if (!pickerActive.value) section.value = value })
+function picker(active: boolean) { pickerActive.value = active; emit('picker', active) }
+function choose(value: SettingsSection) { if (!pickerActive.value) { transferMode.value = null; section.value = value } }
 const dialog = ref<HTMLElement | null>(null)
 if (!props.embedded) useModalFocus(dialog, () => emit('close'))
 </script>
 
 <template>
-  <div class="settings-backdrop" :class="{ 'embedded-settings-page': embedded }" @click.self="emit('close')">
+  <div class="settings-backdrop" :class="{ 'embedded-settings-page': embedded, 'desktop-settings': desktop }" @click.self="!pickerActive && emit('close')">
+    <nav v-if="desktop" class="desktop-section-nav" aria-label="設定分類">
+      <span class="settings-eyebrow">GLOBAL SETTINGS</span>
+      <button v-for="item in sections" :key="item.id" :data-testid="`settings-${item.id}`" :aria-current="section === item.id ? 'page' : undefined" :disabled="pickerActive" @click="choose(item.id)"><strong>{{ item.title }}</strong><small>{{ item.hint }}</small></button>
+    </nav>
+    <div class="settings-content">
     <section ref="dialog" class="settings-panel" :role="embedded ? 'region' : 'dialog'" :aria-modal="embedded ? undefined : true" aria-labelledby="settings-title" tabindex="-1">
-      <header><div><span class="settings-eyebrow">GLOBAL SETTINGS</span><h2 id="settings-title">外觀設定</h2></div><button v-if="!embedded" class="settings-close" aria-label="關閉設定" @click="emit('close')">×</button></header>
+      <header><div><span class="settings-eyebrow">GLOBAL SETTINGS</span><h2 id="settings-title">{{ desktop ? sections.find(item => item.id === section)?.title : '外觀設定' }}</h2></div><button v-if="!embedded" class="settings-close" aria-label="關閉設定" @click="emit('close')">×</button></header>
+      <template v-if="!desktop || section === 'appearance'">
       <div class="settings-label">THEME <span>套用至所有頁面</span></div>
       <div class="theme-options" role="group" aria-label="Theme">
         <button v-for="theme in themes" :key="theme.id" class="theme-option" :class="{ selected: selectedTheme === theme.id }" :aria-pressed="selectedTheme === theme.id" @click="selectTheme(theme.id)">
@@ -25,20 +38,22 @@ if (!props.embedded) useModalFocus(dialog, () => emit('close'))
         </button>
       </div>
       <p class="settings-note">立即生效，自動記住此裝置的選擇。</p>
-      <section v-if="transport" class="connection-transfer-settings" aria-labelledby="transfer-settings-title">
+      </template>
+      <section v-if="transport && (!desktop || section === 'connections')" class="connection-transfer-settings" aria-labelledby="transfer-settings-title">
         <div class="settings-eyebrow">CONNECTIONS</div>
         <h2 id="transfer-settings-title">連線設定</h2>
         <div class="transfer-setting-actions">
-          <button :aria-pressed="transferMode === 'import'" @click="transferMode = 'import'"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M4 16v4h16v-4" /></svg><span>匯入連線</span></button>
-          <button :disabled="!hosts.length" :aria-pressed="transferMode === 'export'" @click="transferMode = 'export'"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m-4 4 4-4 4 4M4 16v4h16v-4" /></svg><span>匯出連線</span></button>
+          <button data-testid="runtime-import" :disabled="pickerActive" :aria-pressed="transferMode === 'import'" @click="transferMode = 'import'"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M4 16v4h16v-4" /></svg><span>匯入連線</span></button>
+          <button data-testid="runtime-export" :disabled="pickerActive || !hosts.length" :aria-pressed="transferMode === 'export'" @click="transferMode = 'export'"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m-4 4 4-4 4 4M4 16v4h16v-4" /></svg><span>匯出連線</span></button>
         </div>
-        <RuntimeTransfer v-if="transferMode" :key="transferMode" :mode="transferMode" :transport="transport" :hosts="hosts" @close="transferMode = null" @changed="emit('changed')" @picker="emit('picker', $event)" />
-        <div class="new-connection-settings">
+        <RuntimeTransfer v-if="transferMode" :key="transferMode" :mode="transferMode" :transport="transport" :hosts="hosts" @close="transferMode = null" @changed="emit('changed')" @picker="picker" />
+        <div v-else class="new-connection-settings">
           <RuntimeHosts embedded :transport="transport" initial-view="create" @changed="emit('changed')" />
         </div>
       </section>
-      <ScreenSettings v-if="transport?.instanceDesktops" :transport="transport" @changed="emit('changed')" />
+      <ScreenSettings v-if="transport?.instanceDesktops && (!desktop || section === 'screens')" :transport="transport" @changed="emit('changed')" />
     </section>
+    </div>
   </div>
 </template>
 
@@ -87,4 +102,19 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .new-connection-settings :deep(.runtime-host-backdrop.embedded-host-page.embedded-host-page) { padding: 0; }
 .new-connection-settings :deep(.embedded-host-page.embedded-host-page .runtime-hosts) { padding: 0; border: 0; border-radius: 0; background: transparent; }
 .new-connection-settings :deep(.runtime-hosts h2) { font-size: 14px; }
+.settings-backdrop.desktop-settings { display: flex; align-items: stretch; justify-content: flex-start; padding: 0; height: 100%; min-height: 0; overflow: hidden; }
+.desktop-settings .settings-content { flex: 1; min-width: 0; overflow-y: auto; padding: 28px 32px; }
+.desktop-settings .settings-panel { max-width: 880px; margin: 0; padding: 0; }
+.desktop-settings header { margin-bottom: 24px; }
+.desktop-settings header h2 { font-size: 24px; }
+.desktop-settings .connection-transfer-settings { margin: 0; padding: 0; border: 0; }
+.desktop-settings .connection-transfer-settings > :is(.settings-eyebrow,h2) { display: none; }
+.desktop-settings .settings-note { text-align: left; }
+.desktop-settings .theme-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.desktop-settings :deep(.screen-settings) { margin: 0; padding: 0; border: 0; }
+.desktop-settings :deep(.screen-settings > :is(.settings-eyebrow,h2)) { display: none; }
+.desktop-settings :deep(.runtime-hosts) { max-width: none; margin: 0; }
+.desktop-settings .new-connection-settings :deep(.embedded-host-page.embedded-host-page .runtime-hosts) { max-width: none; margin: 0; padding: 0; }
+.desktop-settings :deep(input) { font-size: 14px; }
+@media (max-width: 800px) { .desktop-settings .settings-content { padding: 20px; } .desktop-settings .theme-options { grid-template-columns: 1fr; } }
 </style>

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import DesktopHistoryReader from '../src/components/DesktopHistoryReader.vue'
 import type { HostHistoryPage, HostHistoryRequest, HostHistoryReply } from '../src/terminal/native'
+import { HostHistoryWindow } from '../src/terminal/native'
 import { deferred, FakeTerm } from './fake'
 
 const wrappers: ReturnType<typeof mount>[] = []
@@ -29,14 +30,60 @@ async function flush() {
 }
 beforeEach(() => {
   vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => { cb(0); return 1 })
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
+  vi.spyOn(HTMLElement.prototype, 'offsetTop', 'get').mockImplementation(function (this: HTMLElement) {
+    if (!this.classList.contains('history-line')) return 0
+    return 4 + (Number(this.dataset.lineId) - Number((this.parentElement!.firstElementChild as HTMLElement).dataset.lineId)) * 17
+  })
+  vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) { return this.classList.contains('history-line') ? 17 : 0 })
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) { return this.classList.contains('history-viewport') ? 400 : 0 })
 })
 afterEach(async () => {
   wrappers.splice(0).forEach(w => w.unmount())
   await flush()
   vi.useRealTimers()
+  vi.restoreAllMocks()
 })
 
 describe('Windows Host history reader', () => {
+  it('discards cached old epochs and never lets look-ahead change the held display or ACK', async () => {
+    let epoch = 1
+    const request = vi.fn(async (r: HostHistoryRequest): Promise<HostHistoryReply> => {
+      if (r.op === 'viewport') return page(1776, 1800, epoch)
+      if (r.op === 'older') return page(Math.max(0, r.before - r.limit), r.before, r.epoch)
+      return { kind: 'ack', instance, epoch, op: r.op }
+    })
+    const history = new HostHistoryWindow(request)
+    await history.refresh(); await history.displayed(history.sourceEpoch)
+    await history.prefetchOlder(() => true)
+    expect(history.page?.start).toBe(1776); expect(history.held).toBe(false)
+    expect(request.mock.calls.filter(([r]) => r.op === 'ack')).toHaveLength(1)
+    vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 1000); epoch = 2
+    await history.refresh(); await history.displayed(history.sourceEpoch)
+    await history.prefetchOlder(() => true)
+    await history.viewport({ readerId: 'test', kind: 'viewport', sourceEpoch: history.sourceEpoch, nearTop: true })
+    expect(history.page?.epoch).toBe(2); expect(history.page?.start).toBe(1520)
+    expect(request.mock.calls.filter(([r]) => r.op === 'older' && r.epoch === 2 && r.before === 1776)).toHaveLength(1)
+    await history.close()
+  })
+
+  it('stops look-ahead after hiding or closing even when an older reply was already pending', async () => {
+    const pending = deferred<HostHistoryReply>(); let visible = true
+    const request = vi.fn(async (r: HostHistoryRequest): Promise<HostHistoryReply> => {
+      if (r.op === 'viewport') return page(1776, 1800)
+      if (r.op === 'older') return pending.promise
+      return { kind: 'ack', instance, op: r.op }
+    })
+    const history = new HostHistoryWindow(request)
+    await history.refresh()
+    const prefetch = history.prefetchOlder(() => visible)
+    await flushPromises(); visible = false
+    pending.resolve(page(1520, 1776)); await prefetch
+    expect(request.mock.calls.filter(([r]) => r.op === 'older')).toHaveLength(1)
+    expect(history.page?.start).toBe(1776)
+    await history.close(); await history.prefetchOlder(() => true)
+    expect(request.mock.calls.at(-1)?.[0]).toEqual({ op: 'close' })
+  })
   it('does not ACK the offered snapshot until its rows are committed and painted', async () => {
     let paint!: FrameRequestCallback
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { paint = callback; return 1 })
@@ -46,16 +93,17 @@ describe('Windows Host history reader', () => {
     paint(0); await flushPromises()
     expect(f.request.mock.calls.find(([r]) => r.op === 'ack')?.[0]).toMatchObject({ epoch: 1 })
   })
-  it('loads the viewport only, ACKs committed DOM, and reads older rows on demand', async () => {
+  it('prefetches three bounded pages without moving the viewport and consumes cache on upward scroll', async () => {
     const f = fixture()
     await flush()
     expect(f.wrapper.text()).toContain('ROW-1800')
-    expect(f.request.mock.calls.some(([r]) => r.op === 'older')).toBe(false)
+    expect(f.request.mock.calls.filter(([r]) => r.op === 'older')).toHaveLength(3)
+    expect(f.wrapper.findAll('.history-line')).toHaveLength(24)
     expect(f.request.mock.calls.find(([r]) => r.op === 'ack')?.[0]).toMatchObject({ epoch: 1 })
     const viewport = f.wrapper.get('.history-viewport').element as HTMLElement
     viewport.scrollTop = 8
     await f.wrapper.get('.history-viewport').trigger('wheel', { deltaY: -120 }); await flush()
-    expect(f.request.mock.calls.find(([r]) => r.op === 'older')?.[0]).toEqual({ op: 'older', instance, epoch: 1, before: 1776, limit: 256 })
+    expect(f.request.mock.calls.filter(([r]) => r.op === 'older' && r.before === 1776)).toHaveLength(1)
     expect(f.wrapper.findAll('.history-line')).toHaveLength(280)
     expect(viewport.scrollTop).toBe(256 * 17 + 8)
     expect(f.wrapper.find('button').exists()).toBe(false)
@@ -100,6 +148,19 @@ describe('Windows Host history reader', () => {
     expect(f.wrapper.text()).toContain('ROW-1800')
     expect(f.wrapper.text()).not.toContain('ROW-2000')
     expect(f.request.mock.calls.some(([r]) => r.op === 'ack' && r.epoch === 2)).toBe(false)
+  })
+
+  it('honors the first upward wheel that arrives during a pending refresh', async () => {
+    vi.useFakeTimers()
+    const f = fixture(); await flush()
+    const pending = deferred<HostHistoryReply>()
+    f.request.mockImplementationOnce(() => pending.promise)
+    await vi.advanceTimersByTimeAsync(500)
+    await f.wrapper.get('.history-viewport').trigger('wheel', { deltaY: -120 })
+    pending.resolve(page(1976, 2000, 2, 2000)); await flush()
+    expect(f.wrapper.findAll('.history-line')).toHaveLength(280)
+    expect(f.wrapper.text()).toContain('ROW-1521')
+    expect(f.wrapper.text()).not.toContain('ROW-2000')
   })
 
   it('does not request hidden history, stops hidden refreshes, and closes only its reader', async () => {

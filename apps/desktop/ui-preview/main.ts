@@ -1,6 +1,8 @@
 import { createApp } from 'vue'
 import Preview from './Preview.vue'
 import Phone from './Phone.vue'
+import Desktop from './Desktop.vue'
 import '../src/style.css'
 
-createApp(new URLSearchParams(location.search).has('phone') ? Phone : Preview).mount('#app')
+const params = new URLSearchParams(location.search)
+createApp(params.has('desktop') ? Desktop : params.has('phone') ? Phone : Preview).mount('#app')

@@ -451,15 +451,25 @@ body,
 .windows-app .workspace-header nav { display: flex; gap: 6px; }.windows-app .workspace-header nav button { padding: 9px 15px; border: 0; border-radius: 7px; color: var(--text-dim); background: transparent; cursor: pointer; font: inherit; }
 .windows-app .workspace-header nav button[aria-current=page] { background: var(--bg-raised); color: var(--accent); }
 .windows-app .workspace-body { position: relative; flex: 1; min-height: 0; overflow: hidden; }
-.windows-app .desktop-main-page,.windows-app .desktop-settings-page,.windows-app .desktop-home-page { height: 100%; overflow: auto; padding: 26px 32px; }
+.windows-app .desktop-main-page { height: 100%; overflow: auto; padding: 26px 32px; }
+.windows-app .desktop-settings-page,.windows-app .desktop-home-page { height: 100%; min-height: 0; overflow: hidden; padding: 0; }
+.windows-app .desktop-home-page { display: flex; }
+.desktop-section-nav { display: flex; flex-direction: column; gap: 6px; flex: 0 0 200px; min-width: 0; padding: 24px 12px; border-right: 1px solid var(--border); background: var(--bg-panel); overflow-y: auto; }
+.desktop-section-nav > :first-child { margin: 0 12px 18px; }
+.desktop-section-nav button { display: flex; flex-direction: column; gap: 6px; width: 100%; min-height: 48px; padding: 12px; text-align: left; border: 1px solid transparent; border-radius: 8px; color: var(--text-dim); background: transparent; font: inherit; cursor: pointer; }
+.desktop-section-nav button strong { font-size: 13px; font-weight: 550; }
+.desktop-section-nav button small { font-size: 10px; color: var(--text-dim); }
+.desktop-section-nav button:hover { background: var(--bg-hover); }
+.desktop-section-nav button[aria-current=page] { background: var(--bg-raised); color: var(--accent); border-color: var(--border); }
+.desktop-section-content { flex: 1; min-width: 0; overflow-y: auto; padding: 28px 32px; }
 .windows-app .desktop-main-page { max-width: 1180px; margin: 0 auto; }
 .windows-app .desktop-page-heading { display: flex; justify-content: space-between; align-items: center; gap: 24px; margin-bottom: 24px; }.windows-app h1 { margin: 8px 0; font-size: 25px; letter-spacing: -.04em; }.windows-app .desktop-page-heading p { color: var(--text-dim); }.windows-app .desktop-eyebrow { color: var(--accent); font-size: 10px; letter-spacing: .16em; }
 .windows-app .dashboard { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 18px; align-items: start; }.windows-app .dashboard .screens { grid-column: 1/-1; }.windows-app .desktop-add { margin-top: 18px; }
 .windows-app .desktop-connect-page { display: flex; flex-direction: column; height: 100%; position: relative; }.windows-app .desktop-session-content { display: flex; flex: 1; min-height: 0; }.windows-app .term-area { flex: 1; min-width: 0; }.windows-app .desktop-preview { width: 340px; min-width: 260px; padding: 12px; overflow: auto; border-left: 1px solid var(--border); background: var(--bg-panel); }
-.windows-app .desktop-settings-actions { max-width: 800px; margin: 0 auto 16px; }.windows-app .desktop-settings-page .embedded-settings-page .settings-panel { max-width: 800px; }.windows-app .desktop-home-page .app-homepage { max-width: 800px; }
+.windows-app .desktop-home-page .app-homepage { max-width: 880px; padding: 0; margin: 0; }
 .windows-app .screen-picker-backdrop { position: fixed; }.windows-app .statusbar { flex: none; }.windows-app .toolbar { flex-wrap: wrap; }
 .windows-app button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-@media (max-width: 760px) { .windows-app .workspace-header { gap: 8px; padding: 8px; }.windows-app .workspace-header nav button { padding: 8px; }.windows-app .desktop-main-page,.windows-app .desktop-settings-page,.windows-app .desktop-home-page { padding: 18px; }.windows-app .dashboard { grid-template-columns: 1fr; }.windows-app .desktop-preview { width: 260px; min-width: 200px; } }
+@media (max-width: 760px) { .windows-app .workspace-header { gap: 8px; padding: 8px; }.desktop-section-nav { flex-basis: 160px; padding-inline: 8px; }.desktop-section-content { padding: 20px; } }
 .windows-app .workspace-header nav button { position: relative; border-radius: 0; }
 .windows-app .workspace-header nav button[aria-current=page] { background: transparent; }
 .windows-app .workspace-header nav button[aria-current=page]::after { content: ''; position: absolute; height: 2px; border-radius: 2px; bottom: 1px; left: 12px; right: 12px; background: var(--accent); }

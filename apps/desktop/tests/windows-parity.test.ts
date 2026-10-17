@@ -43,7 +43,9 @@ it('keeps terminal mounted and draining under full settings and homepage; restor
  await wrapper.get('[data-testid="desktop-settings"]').trigger('click');await flush()
  expect(wrapper.find('.desktop-settings-page').exists()).toBe(true);expect(terms).toHaveLength(1);expect(term.disposed).toBe(false)
  transport.feed(sid,{bytes:[72,105],exitCode:null});await flush();expect(term.text()).toBe('Hi');expect(term.focusCount).toBe(focus)
- expect(wrapper.find('[data-testid="desktop-manage-hosts"]').exists()).toBe(true)
+ expect(wrapper.find('[data-testid="desktop-manage-hosts"]').exists()).toBe(false)
+ expect(wrapper.find('[data-testid="screen-settings"]').exists()).toBe(false)
+ await wrapper.get('[data-testid="settings-screens"]').trigger('click');await flush()
  expect(wrapper.find('[data-testid="screen-settings"]').exists()).toBe(true)
  await wrapper.get('[aria-label="軟體首頁"]').trigger('click');await flush();expect(wrapper.get('.version-value').text()).toContain('Windows');expect(wrapper.get('.version-value').text()).not.toContain('Android')
  await wrapper.get('[data-testid="desktop-workspace"]').trigger('click');await flush();expect(transport.closeCalls).toEqual([])
@@ -89,6 +91,7 @@ it('closes only the finished Shell and leaves genuine transport failures as reco
 })
 it('does not steal form keyboard shortcuts or detach healthy sessions when document hides',async()=>{
  const {wrapper,controller,transport,terms,attach}=await setup();await attach();await wrapper.get('[data-testid="desktop-settings"]').trigger('click');await flush()
+ await wrapper.get('[data-testid="settings-screens"]').trigger('click');await flush()
  const before=controller.activeKey.value;const input=wrapper.get('[data-testid="screen-name"]');await input.trigger('keydown',{code:'PageDown',ctrlKey:true});expect(controller.activeKey.value).toBe(before)
  const descriptor=Object.getOwnPropertyDescriptor(document,'hidden');Object.defineProperty(document,'hidden',{configurable:true,value:true});document.dispatchEvent(new Event('visibilitychange'));await flush();expect(transport.closeCalls).toEqual([]);expect(terms[0].disposed).toBe(false)
  Object.defineProperty(document,'hidden',{configurable:true,value:false});document.dispatchEvent(new Event('visibilitychange'));await flush();if(descriptor)Object.defineProperty(document,'hidden',descriptor)
@@ -101,20 +104,21 @@ it('does not leave settings when the background session status or recovery chang
  expect(wrapper.get('.desktop-workspace').isVisible()).toBe(false)
 })
 
-it('mounts only one host editor when management covers settings and clears the hidden draft', async () => {
+it('uses inline shared connection settings and clears secret drafts when switching categories', async () => {
  const { wrapper } = await setup()
  await wrapper.get('[data-testid="desktop-settings"]').trigger('click'); await flush()
+ await wrapper.get('[data-testid="settings-connections"]').trigger('click'); await flush()
  await wrapper.get('[data-testid="name"]').setValue('Unsaved draft')
  await wrapper.get('[data-testid="credential"]').setValue('fixture-draft-secret')
- await wrapper.get('[data-testid="desktop-manage-hosts"]').trigger('click'); await flush()
- expect(wrapper.find('.embedded-settings-page').exists()).toBe(false)
- const add = wrapper.findAll('button').find(button => button.text() === '新增 openab-pty 連線')!
- await add.trigger('click'); await flush()
+ expect(wrapper.find('[data-testid="desktop-manage-hosts"]').exists()).toBe(false)
+ expect(wrapper.find('.runtime-host-backdrop:not(.embedded-host-page)').exists()).toBe(false)
+ expect(wrapper.find('[data-host-id="host"]').exists()).toBe(true)
  expect(document.querySelectorAll('[data-testid="name"]')).toHaveLength(1)
  expect(document.querySelectorAll('[data-testid="credential"]')).toHaveLength(1)
  expect(document.querySelectorAll('#runtime-host-heading')).toHaveLength(1)
- const close = wrapper.findAll('button').find(button => button.text() === '關閉')!
- await close.trigger('click'); await flush()
+ await wrapper.get('[data-testid="settings-appearance"]').trigger('click'); await flush()
+ expect(wrapper.find('[data-testid="credential"]').exists()).toBe(false)
+ await wrapper.get('[data-testid="settings-connections"]').trigger('click'); await flush()
  expect(wrapper.find('.embedded-settings-page').exists()).toBe(true)
  expect(document.querySelectorAll('[data-testid="name"]')).toHaveLength(1)
  expect(document.querySelectorAll('[data-testid="credential"]')).toHaveLength(1)
@@ -163,13 +167,13 @@ it('restores an explicit new Screen selection after leaving Connect while select
  expect(tab.previewVisible).toBe(true); expect(tab.instanceDesktop?.id).toBe('screen-B'); expect(tab.shot).not.toBeNull()
 })
 
-it.each([true, false])('keeps a native import picker mounted during visibility changes (management=%s)', async management => {
+it('keeps a native import picker mounted and blocks navigation until it returns', async () => {
  const { wrapper, transport } = await setup()
  const pending = deferred<Awaited<ReturnType<typeof transport.transferPickImport>>>()
  transport.transferPickImport = vi.fn(() => pending.promise)
  transport.transferCancel = vi.fn(async () => ({ status: 'cancelled' as const }))
  await wrapper.get('[data-testid="desktop-settings"]').trigger('click'); await flush()
- if (management) await wrapper.get('[data-testid="desktop-manage-hosts"]').trigger('click')
+ await wrapper.get('[data-testid="settings-connections"]').trigger('click')
  await flush()
  const button = wrapper.findAll('button').find(node => node.text() === '匯入連線')!
  await button.trigger('click'); await flush()
@@ -187,15 +191,21 @@ it.each([true, false])('keeps a native import picker mounted during visibility c
   pending.resolve({ status: 'cancelled', token: null, entries: [] }); await flush()
   if (descriptor) Object.defineProperty(document, 'hidden', descriptor)
  }
- if (management) {
-  const close = wrapper.findAll('.runtime-hosts > header button').find(node => node.text() === '關閉')!
-  await close.trigger('click'); await flush()
-  await wrapper.get('[data-testid="desktop-manage-hosts"]').trigger('click'); await flush()
-  Object.defineProperty(document, 'hidden', { configurable: true, value: true })
-  document.dispatchEvent(new Event('visibilitychange')); await flush()
-  expect(wrapper.find('.runtime-host-backdrop:not(.embedded-host-page)').exists()).toBe(false)
-  Object.defineProperty(document, 'hidden', { configurable: true, value: false })
-  document.dispatchEvent(new Event('visibilitychange')); await flush()
-  if (descriptor) Object.defineProperty(document, 'hidden', descriptor)
- }
+})
+
+it('closes the Screen picker immediately and shows loading while CLI remains active', async () => {
+ const { wrapper, transport, terms, attach } = await setup(); await attach()
+ const pending = deferred<Awaited<ReturnType<typeof transport.instanceSelect>>>()
+ transport.instanceSelect.mockImplementationOnce(() => pending.promise)
+ await wrapper.get('[data-testid="desktop-toggle"]').trigger('click'); await flush()
+ await wrapper.get('[data-testid="choose-screen-screen-A"]').trigger('click'); await flush()
+ expect(wrapper.find('[data-testid="screen-picker"]').exists()).toBe(false)
+ expect(wrapper.get('.preview-loading').text()).toContain('正在載入桌面')
+ expect(wrapper.get('.desktop-connect-page .pane').isVisible()).toBe(true)
+ expect(terms[0].focusCount).toBeGreaterThan(1)
+ transport.shot = { ...transport.shot, desktopId: screen.id, desktopRevision: screen.revision }
+ pending.resolve({ desktop: screen, toolReady: false }); await flush()
+ expect(wrapper.find('.preview-loading').exists()).toBe(false)
+ expect(wrapper.get('[data-testid="desktop-toggle"]').text()).toBe('')
+ expect(wrapper.get('.preview .p-title').text()).toBe('Screen A')
 })

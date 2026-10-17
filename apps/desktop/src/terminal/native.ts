@@ -64,10 +64,39 @@ export class HostHistoryWindow {
   private shown = ''
   private windows = new Map<string, HostHistoryPage>()
   private queue: Promise<unknown> = Promise.resolve()
+  private prefetched = new Map<string, Promise<HostHistoryReply>>()
   constructor(private request: HostHistoryRequestFn, private notice: (text: string) => void = () => {}) {}
   static key(page: Pick<HostHistoryPage, 'instance' | 'epoch'>): string { return `${page.instance}:${page.epoch}` }
   get sourceEpoch(): string | undefined { return this.page ? HostHistoryWindow.key(this.page) : undefined }
   get visiblePage(): HostHistoryPage | null { return this.fallback ? null : this.page }
+  private olderKey(p: HostHistoryPage, before: number): string { return `${HostHistoryWindow.key(p)}:${before}` }
+  /** Optional desktop look-ahead. Cached pages never change the displayed epoch or hold state. */
+  async prefetchOlder(allowed: () => boolean): Promise<void> {
+    const p = this.page
+    if (!p || this.closed || !allowed()) return
+    const epoch = HostHistoryWindow.key(p)
+    const prefix = `${epoch}:`
+    for (const key of this.prefetched.keys()) {
+      const before = Number(key.slice(prefix.length))
+      if (!key.startsWith(prefix) || before > p.start || before < p.start - 512) this.prefetched.delete(key)
+    }
+    let before = p.start
+    for (let i = 0; i < 3 && before > 0; i++) {
+      if (this.closed || !allowed() || this.sourceEpoch !== epoch || this.page?.start !== p.start) return
+      const key = this.olderKey(p, before)
+      let pending = this.prefetched.get(key)
+      if (!pending) {
+        if (this.prefetched.size >= 3) return
+        pending = this.call({ op: 'older', instance: p.instance, epoch: p.epoch, before, limit: 256 }).catch(() => ({ kind: 'error', error: 'unavailable' } as HostHistoryReply))
+        this.prefetched.set(key, pending)
+      }
+      const reply = await pending
+      if (reply.kind !== 'page' || HostHistoryWindow.key(reply) !== epoch || reply.rowCount !== p.rowCount || reply.end !== before || reply.start >= before) {
+        this.prefetched.delete(key); return
+      }
+      before = reply.start
+    }
+  }
   private call(request: HostHistoryRequest): Promise<HostHistoryReply> {
     const next = this.queue.catch(() => {}).then(() => this.closed && request.op !== 'close'
       ? { kind: 'unsupported' } as HostHistoryReply : this.request(request))
@@ -152,7 +181,10 @@ export class HostHistoryWindow {
     const before = older ? p.start : Math.min(p.rowCount, p.end + 256)
     const limit = older ? 256 : before - p.end
     try {
-      const reply = await this.call({ op: 'older', instance: p.instance, epoch: p.epoch, before, limit })
+      const key = this.olderKey(p, before)
+      const pending = older ? this.prefetched.get(key) : undefined
+      if (older) this.prefetched.delete(key)
+      const reply = await (pending ?? this.call({ op: 'older', instance: p.instance, epoch: p.epoch, before, limit }))
       if (this.closed || this.sourceEpoch !== HostHistoryWindow.key(p)) return
       if (reply.kind !== 'page') {
         this.error(reply)
@@ -169,6 +201,7 @@ export class HostHistoryWindow {
   async close(): Promise<void> {
     if (this.closed) return
     this.closed = true
+    this.prefetched.clear()
     await this.call({ op: 'close' }).catch(() => {})
   }
 }

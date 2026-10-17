@@ -184,12 +184,13 @@ class App:
         return self.invoke('gui_runtime_hosts')
 
     def manage(self):
-        self.settings()
-        self.node('desktop-manage-hosts').click()
-        self.node('runtime-create')
+        self.node('desktop-settings').click()
+        self.node('settings-connections').click()
+        self.node('runtime-host-form')
 
     def settings(self):
         self.node('desktop-settings').click()
+        self.node('settings-screens').click()
         self.node('screen-settings')
 
     def main_page(self):

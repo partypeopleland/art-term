@@ -5,6 +5,7 @@ import App from '../src/App.vue'
 import { createTauriTransport } from '../src/transport/tauri'
 import type { RuntimeHostDto, RuntimeHostInput, RuntimeHostTestDto, Transport } from '../src/transport/types'
 import { FakeTerm, FakeTransport, deferred } from './fake'
+vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn().mockResolvedValue(undefined) }))
 vi.mock('@tauri-apps/api/core', () => ({ invoke }))
@@ -68,14 +69,14 @@ describe('runtime Host settings', () => {
     hosts.mockClear()
     await wrapper.get('[data-testid="desktop-settings"]').trigger('click')
     await flushPromises()
-    await wrapper.get('[data-testid="desktop-manage-hosts"]').trigger('click')
+    await wrapper.get('[data-testid="settings-connections"]').trigger('click')
     await flushPromises()
-    expect(wrapper.get('[role="dialog"]').text()).toContain('新增 openab-pty 連線')
+    expect(wrapper.get('.new-connection-settings').text()).toContain('新增 openab-pty 連線')
     await fields(wrapper)
     await wrapper.get('form').trigger('submit')
     await flushPromises()
     expect(hosts).toHaveBeenCalled()
-    await button(wrapper, '關閉')
+    await wrapper.get('[data-testid="desktop-workspace"]').trigger('click')
     expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
   })
 

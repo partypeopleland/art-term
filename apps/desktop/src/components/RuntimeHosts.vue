@@ -227,9 +227,9 @@ onBeforeUnmount(() => {
         <p v-if="error" role="alert" id="runtime-host-error">{{ error }}</p>
         <p v-if="notice" role="status">{{ notice }}</p>
         <p v-if="testPrefillApplied" role="status">私人測試預填：尚未儲存，請手動儲存後再測試。</p>
-        <div v-if="view === 'list'" data-testid="runtime-host-list">
-        <div class="transfer-actions"><button type="button" :disabled="busy" data-testid="runtime-import" @click="reset(); transferMode = 'import'">匯入連線</button><button type="button" :disabled="busy || !visibleHosts.length" data-testid="runtime-export" @click="reset(); transferMode = 'export'">匯出連線</button></div>
-        <button type="button" data-testid="runtime-create" :disabled="busy" @click="create">新增 openab-pty 連線</button>
+        <div v-if="view === 'list' || embedded" data-testid="runtime-host-list">
+        <div v-if="!embedded" class="transfer-actions"><button type="button" :disabled="busy" data-testid="runtime-import" @click="reset(); transferMode = 'import'">匯入連線</button><button type="button" :disabled="busy || !visibleHosts.length" data-testid="runtime-export" @click="reset(); transferMode = 'export'">匯出連線</button></div>
+        <button v-if="!embedded" type="button" data-testid="runtime-create" :disabled="busy" @click="create">新增 openab-pty 連線</button>
         <p v-if="busy" role="status">處理中…</p>
         <p v-else-if="!visibleHosts.length">尚未儲存連線。選擇新增連線開始設定。</p>
         <ul>
@@ -238,7 +238,7 @@ onBeforeUnmount(() => {
             <span>{{ host.credentialPresent ? '管理憑證已儲存' : '缺少管理憑證' }}</span>
             <button type="button" :disabled="busy" @click="edit(host)">編輯</button>
             <button type="button" :disabled="busy" @click="test(host)">測試</button>
-            <button v-if="transport.runtimeSessions && transport.runtimeCreateSession" type="button" :disabled="busy" @click="clearCredential(); sessionHost = host">Shell</button>
+            <button v-if="!embedded && transport.runtimeSessions && transport.runtimeCreateSession" type="button" :disabled="busy" @click="clearCredential(); sessionHost = host">Shell</button>
             <button type="button" :disabled="busy" @click="reset(); deleting = host">刪除</button>
             <p v-if="result?.id === host.id" role="status">
               已通過管理認證；{{ result.value.sessionCount }} 個 Shell；
@@ -254,7 +254,7 @@ onBeforeUnmount(() => {
           <button type="button" @click="reset">取消</button>
         </div>
         </div>
-        <form v-else data-testid="runtime-host-form" @submit.prevent="save" :aria-describedby="error ? 'runtime-host-error' : undefined">
+        <form v-if="view === 'form' && !deleting" data-testid="runtime-host-form" @submit.prevent="save" :aria-describedby="error ? 'runtime-host-error' : undefined">
 
           <label>分類<select v-model="category" data-testid="runtime-host-category" :disabled="busy" @change="formTouched = true"><option value="host">Host</option><option value="agent">Agent</option></select></label>
           <label>名稱<input v-model="name" @input="formTouched = true" data-testid="name" :disabled="busy" maxlength="128" autocomplete="off" /></label>
@@ -293,4 +293,10 @@ button:hover:not(:disabled) { background: var(--bg-hover, #2e3038); }
 .embedded-host-page.embedded-host-page .runtime-hosts { width: 100%; max-width: 600px; max-height: none; margin: 0 auto; padding: 16px; overflow: visible; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 12px; }
 .embedded-host-page input, .embedded-host-page select { background: var(--bg); border-color: var(--border); }
 .embedded-host-page button { border-color: var(--border); }
+.embedded-host-page ul { list-style: none; padding: 0; margin: 14px 0; }
+.embedded-host-page li { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding: 12px 0; border-bottom: 1px solid var(--border); font-size: 11px; }
+.embedded-host-page li > strong { flex-basis: 100%; font-size: 13px; }
+.embedded-host-page li > span { color: var(--text-dim); overflow-wrap: anywhere; }
+.embedded-host-page li > button { min-height: 32px; padding: 4px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-raised); color: var(--text); }
+.embedded-host-page li > p { flex-basis: 100%; }
 </style>
