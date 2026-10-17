@@ -20,13 +20,14 @@ import {
   type TerminalFactory,
   type TerminalHandle
 } from '../terminal/handle'
-import type { HostDto, RuntimeHostDto, TargetDto, Transport } from '../transport/types'
+import type { InstanceDesktop, HostDto, RuntimeHostDto, TargetDto, Transport } from '../transport/types'
 import { createRuntimeEntry, runtimeConnectedIds } from '../state/runtime-entry'
 import TabBar from '../components/TabBar.vue'
 import TerminalPane from '../components/TerminalPane.vue'
 import PreviewPanel from '../components/PreviewPanel.vue'
 import ConnectionDashboard from './ConnectionDashboard.vue'
 import ThemeSettings from './ThemeSettings.vue'
+import ScreenPicker from './ScreenPicker.vue'
 import AppHomepage from './AppHomepage.vue'
 import { selectedTheme, terminalTheme } from './theme'
 import './themes.css'
@@ -72,6 +73,7 @@ watch(selectedTheme, theme => {
 
 const rootEl = ref<HTMLElement | null>(null)
 const settingsOpen = ref(false)
+const screenPickerOpen = ref(false)
 const aboutOpen = ref(false)
 function showHomepage(): void {
   runtimeEntry.cancel()
@@ -84,7 +86,7 @@ const voiceLightboxOpen = ref(false)
 const composerOpen = ref(false)
 const composerText = ref('')
 const phase = ref<Workspace>('list')
-const pager = useWorkspacePager(rootEl, phase, activateWorkspace, () => !aboutOpen.value && !settingsOpen.value && !runtimeHostsOpen.value && !runtimeDialogProfile.value && !composerOpen.value)
+const pager = useWorkspacePager(rootEl, phase, activateWorkspace, () => !screenPickerOpen.value && !aboutOpen.value && !settingsOpen.value && !runtimeHostsOpen.value && !runtimeDialogProfile.value && !composerOpen.value)
 const { dragging: swipeDragging, animating: swipeAnimating, nativeDragging: nativeSwipeActive, visible: swipeVisible, indicatorStyle: workspaceIndicatorStyle, transform: pageTransform, begin: beginSwipe, move: moveSwipe, end: finishSwipe, guardClick: guardSwipeClick } = pager
 provide(NativeSwipeKey, pager.native)
 function activateWorkspace(page: Workspace): void {
@@ -264,6 +266,20 @@ function pickTarget(host: HostUiState, target: TargetDto, withDesktop: boolean):
   phase.value = 'session'
 }
 
+function screensChanged(): void { void controller.loadInstanceDesktops(); void controller.loadCatalog() }
+function openScreenPicker(): void { screenPickerOpen.value = true; void controller.loadInstanceDesktops() }
+async function selectScreen(desktop: InstanceDesktop): Promise<void> {
+  const tab = activeTab.value
+  if (!tab) return
+  await controller.selectInstance(tab, desktop)
+  if (tab.instanceDesktop?.id === desktop.id) screenPickerOpen.value = false
+}
+async function clearScreen(): Promise<void> {
+  if (activeTab.value) await controller.clearInstance(activeTab.value)
+  screenPickerOpen.value = false
+}
+watch(() => activeTab.value?.key, () => { screenPickerOpen.value = false })
+
 async function toggleDesktop(tab: TabState): Promise<void> {
   const enabling = !tab.desktopEnabled
   await controller.setDesktop(tab, enabling)
@@ -284,6 +300,8 @@ function switchWorkspace(workspace: Workspace, focus = false): void {
 
 function backToList(): void {
   phase.value = 'list'
+  screenPickerOpen.value = false
+  void controller.loadInstanceDesktops()
   void controller.loadCatalog()
 }
 
@@ -319,6 +337,7 @@ function onVisibility(): void {
     runtimeDialogProfile.value = null
     runtimeDialogSeed.value = null
     input.setSuspended(true)
+    screenPickerOpen.value = false
     voice.cancel('background')
   }
   // Keep runtime sessions during App switches; hidden preview capture
@@ -347,6 +366,7 @@ onMounted(() => {
   window.addEventListener('resize', onViewport)
   // Home is the runtime connection list itself — load it directly.
   void controller.loadCatalog()
+  void controller.loadInstanceDesktops()
 })
 
 onBeforeUnmount(() => {
@@ -392,17 +412,9 @@ onBeforeUnmount(() => {
 
         <span class="flex" />
 
-        <button v-if="!settingsOpen && !aboutOpen && phase === 'session' && activeTab?.codingCli" class="mbtn slim" data-testid="launch-coding-cli"
+        <button v-if="!settingsOpen && !aboutOpen && phase === 'session' && activeTab && activeTab.codingCli" class="mbtn slim" data-testid="launch-coding-cli"
           :disabled="activeTab.status !== 'live'" @click="controller.launchCodingCli(activeTab)">{{ activeTab.codingCli.name }}</button>
-        <button
-          v-if="!settingsOpen && !aboutOpen && phase === 'session' && activeTab && activeTab.status === 'live' && activeTab.desktopAvailable"
-          class="mbtn slim"
-          data-testid="desktop-toggle"
-          :disabled="activeTab.desktopBusy"
-          :aria-pressed="activeTab.desktopEnabled"
-          :aria-label="activeTab.desktopEnabled ? '停用桌面預覽' : '啟用桌面預覽'"
-          @click="toggleDesktop(activeTab)"
-        >桌面</button>
+        <button v-if="!settingsOpen && !aboutOpen && phase === 'session' && activeTab?.status === 'live'" class="screen-trigger" data-testid="desktop-toggle" :disabled="activeTab.desktopBusy" :aria-pressed="!!activeTab.instanceDesktop" aria-label="選擇 Screen" title="選擇 Screen" @click="openScreenPicker"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2" /><path d="M8 21h8M12 18v3" /></svg></button>
 
 
 
@@ -412,8 +424,9 @@ onBeforeUnmount(() => {
         </button>
       </header>
     <div class="workspace-viewport">
+      <ScreenPicker v-if="screenPickerOpen && activeTab" :items="controller.instanceDesktops.value" :selected-id="activeTab.instanceDesktop?.id" :busy="activeTab.desktopBusy" :error="activeTab.desktopError || controller.instanceDesktopsError.value" @select="selectScreen" @clear="clearScreen" @close="screenPickerOpen = false" @settings="screenPickerOpen = false; settingsOpen = true; aboutOpen = false" />
       <div v-if="aboutOpen" class="software-home-page" role="region" aria-label="軟體資訊首頁"><AppHomepage /></div>
-      <div v-if="settingsOpen" class="global-settings-page" role="region" aria-label="全域設定"><ThemeSettings embedded :transport="transport" :hosts="controller.runtimeProfiles.value" @changed="controller.loadCatalog()" @picker="transferPicker = $event" /></div>
+      <div v-if="settingsOpen" class="global-settings-page" role="region" aria-label="全域設定"><ThemeSettings embedded :transport="transport" :hosts="controller.runtimeProfiles.value" @changed="screensChanged" @picker="transferPicker = $event" /></div>
     <div v-show="!settingsOpen && !aboutOpen && (phase === 'list' || swipeVisible)" class="home-surface" :style="{ transform: pageTransform('list') }">
 
 
@@ -423,6 +436,8 @@ onBeforeUnmount(() => {
           {{ controller.uiNotice.value }}
         </div>
         <ConnectionDashboard
+          :screens="controller.instanceDesktops.value"
+          :screens-error="controller.instanceDesktopsError.value"
           :transport="transport"
           :active="!settingsOpen && !aboutOpen && phase === 'list'"
           :catalog-loading="controller.catalogLoading.value"
@@ -460,7 +475,7 @@ onBeforeUnmount(() => {
           :tab="tab"
           :active="tab.key === controller.activeKey.value"
           :controller="controller"
-          :reader-visible="phase === 'session' && (!swipeVisible || nativeSwipeActive) && !voiceLightboxOpen && !composerOpen && !runtimeHostsOpen && !runtimeDialogProfile && !settingsOpen && !aboutOpen"
+          :reader-visible="phase === 'session' && (!swipeVisible || nativeSwipeActive) && !screenPickerOpen && !voiceLightboxOpen && !composerOpen && !runtimeHostsOpen && !runtimeDialogProfile && !settingsOpen && !aboutOpen"
         />
         <div v-if="!controller.tabs.length" class="cover" data-testid="no-tabs">
           <div class="done">
@@ -1144,4 +1159,9 @@ onBeforeUnmount(() => {
 .fixed-brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 5px; }
 .fixed-brand.active .m-title { color: var(--accent); }
 .software-home-page { position: absolute; inset: 0; overflow-y: auto; background: var(--bg); }
+.screen-trigger { width: 30px; height: 30px; padding: 6px; border: 0; border-radius: 5px; background: transparent; color: var(--text-dim); flex: none; cursor: pointer; }
+.screen-trigger[aria-pressed=true] { color: var(--accent); }
+.screen-trigger svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.5; }
+.screen-trigger:focus-visible { outline: 2px solid var(--accent); }
+@media (max-width: 360px) { .workspace-header:has(.screen-trigger) .m-brand { display: none; } }
 </style>

@@ -2,6 +2,8 @@
 
 Windows 與 Android 共用連線匯出／匯入流程；Android 入口位於全站齒輪設定頁的「連線設定」，Windows 保留「管理 openab-pty 連線」入口。檔案由使用者自行搬移；App 不提供帳號、雲端備份或自動同步。正常公開建置也能還原，不需要私人 bootstrap、來源裝置的 DPAPI／Keystore 金鑰或特殊 APK。
 
+目前匯出／匯入僅包含受控端 Host／Agent 連線，不含獨立 Screens、其 URL／token 或本機分頁的桌面選擇。介面明示此範圍；Host 匯入原子套用時保留本機完整 Screen 集合，不能退回只寫 Host 的 schema 5 而遺失桌面。Screen 備份及降版方式見[連線設定](connections.md#舊設定與版本升級)。
+
 0.1.18 不再讀取 0.1.17 的使用者目錄 Host JSON。升級前先用舊版完成匯出，再開啟新版匯入；舊資料與平台金鑰保留。不要以複製 DPAPI／Keystore 密文取代跨裝置匯出。
 
 ## 憑證如何跨過裝置邊界
@@ -28,7 +30,7 @@ settings + credential -> password-encrypted JSON -> unlock -> preview / select
 
 Windows 使用原生檔案視窗，Android 使用系統文件選擇器。新裝置仍須自行準備可達 Runtime 的網路／Tailnet 與可信 HTTPS。不含憑證的匯入項目要明確勾選並補入管理憑證；更新已有 origin 時可保留本機憑證。
 
-匯入不啟動 coding CLI，也不恢復來源裝置的 Shell 分頁或接管 session。CLI 名稱、命令及參數會隨能力設定保存，使用者仍須在已連線的 Shell 明確按下啟動按鈕。未在來源設定桌面／CLI 的連線不會因匯入而新增這些能力。
+匯入不啟動 coding CLI，也不恢復來源裝置的 Shell 分頁或接管 session。CLI 名稱、命令及參數會隨能力設定保存，使用者仍須在已連線的 Shell 明確按下啟動按鈕。匯入不產生獨立 Screen 或桌面選擇，CLI 能力仍以明確設定為準。
 
 取消勾選「包含管理憑證」會產生一般 JSON，名稱、網址和能力均為明文。新裝置匯入這種檔案時，須先勾選項目並逐筆填入管理憑證；相同網址明確更新時，保留該裝置既有憑證。沒有管理憑證的手寫 TOML 連線只能做不含憑證的匯出；選擇含憑證會拒絕。這不是完整的憑證備份。
 

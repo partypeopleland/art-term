@@ -4,6 +4,8 @@
 
 給 AI 的工作範圍應包含要修改的功能與預期行為。AI 先讀本頁，從下方功能對照找既有保護，再決定需要增加哪個案例；不要以增加測試數量代替驗證具體行為。
 
+目前 Windows 功能開發／驗收暫停。下列桌面 framing／專用截圖 Shell 案例屬於舊版相容流程，不能代表新版直接 MCP／Screens 已通過；新門檻見[測試矩陣](../refarch/test-matrix.md#直接-mcp-與獨立-screens-的驗收門檻)。
+
 ## 各層測到什麼
 
 跨平台操作案例及哪些項目仍需實機，統一見[功能測試矩陣](../refarch/test-matrix.md)。Android 真 APK 與 Linux 真官方 Runtime 分別依 [APK E2E](android-regression.md)、[Linux 驗收](linux-regression.md)執行；本頁保留 Windows／unit 操作細節。

@@ -1,4 +1,4 @@
-import { ConnectionError, type RuntimeHostDto, type TargetDto, type Transport } from '../src/transport/types'
+import { ConnectionError, type InstanceDesktop, type RuntimeHostDto, type TargetDto, type Transport } from '../src/transport/types'
 
 export type Scenario = 'populated' | 'empty' | 'error'
 const bytes = (text: string) => [...new TextEncoder().encode(text)]
@@ -10,6 +10,10 @@ export function createPreviewTransport(scenario: Scenario = 'populated'): Transp
     { id: 'demo-host', revision: 1, name: '開發主機（示範）', baseUrl: 'https://dev.example.test', credentialPresent: true, category: 'host' },
     { id: 'demo-agent', revision: 1, name: '工作助理（示範）', baseUrl: 'https://agent.example.test', credentialPresent: true, category: 'agent' }
   ]
+  let screens: InstanceDesktop[] = scenario === 'empty' ? [] : [
+    { id: 'demo-screen', revision: 1, name: '開發桌面（示範）', mcpUrl: 'https://screen.example.test/mcp', tokenPresent: true }
+  ]
+  const selected = new Map<string, InstanceDesktop>()
   const shells = new Map<string, TargetDto[]>()
   const connections = new Map<string, { queue: number[] }>()
   const target = (hostId: string, name: string): TargetDto => ({
@@ -30,6 +34,25 @@ export function createPreviewTransport(scenario: Scenario = 'populated'): Transp
   }
 
   return {
+    async instanceDesktops() { return structuredClone(screens) },
+    async instanceSave(input) {
+      const previous = screens.find(item => item.id === input.id)
+      if (input.id && (!previous || previous.revision !== input.expectedRevision)) throw new Error('示範設定已變更')
+      const saved = { id: previous?.id ?? `screen-${++counter}`, revision: (previous?.revision ?? 0) + 1, name: input.name, mcpUrl: input.mcpUrl, tokenPresent: Boolean(input.token) || Boolean(previous?.tokenPresent) }
+      screens = [...screens.filter(item => item.id !== saved.id), saved]
+      return structuredClone(saved)
+    },
+    async instanceDelete(id, revision) { screens = screens.filter(item => !(item.id === id && item.revision === revision)) },
+    async instanceTest() {},
+    async instanceSelect(id, desktopId, revision) {
+      connection(id)
+      const desktop = screens.find(item => item.id === desktopId && item.revision === revision)
+      if (!desktop) throw new Error('示範設定已變更')
+      selected.set(id, desktop)
+      return { desktop: structuredClone(desktop), toolReady: false }
+    },
+    async instanceClear(id) { selected.delete(id) },
+    async instanceLaunch(id) { const desktop = selected.get(id); if (!desktop) throw new Error('請先選擇 Screen'); return { desktop: structuredClone(desktop), toolReady: true } },
     async runtimeHosts() {
       if (scenario === 'error') throw new ConnectionError('storage', '示範：無法讀取連線設定，請切換情境後重試。')
       return structuredClone(hosts)
@@ -97,8 +120,8 @@ export function createPreviewTransport(scenario: Scenario = 'populated'): Transp
     async close(id) { connections.delete(id) },
     async runtimeAck() {},
     async runtimeRecover(id) { connection(id) },
-    async desktop() { return { enabled: false, message: '瀏覽器預覽不提供遠端桌面。' } },
-    async screenshot() { throw new Error('瀏覽器預覽不提供遠端截圖。') },
+    async desktop(id, enabled) { return { enabled: enabled && selected.has(id), message: selected.has(id) ? '示範畫面；不連線真實服務' : '請先選擇 Screen' } },
+    async screenshot(id) { const desktop = selected.get(id); if (!desktop) throw new Error('請先選擇 Screen'); return { mime: 'image/png', base64: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', source: desktop.name + ' · 示範', capturedAt: Date.now(), desktopId: desktop.id, desktopRevision: desktop.revision } },
     async transferExport() { return { status: 'cancelled' } },
     async transferPickImport() { return { status: 'cancelled', token: null, entries: [] } },
     async transferUnlock() { return { status: 'cancelled', token: null, entries: [] } },

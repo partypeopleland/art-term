@@ -13,7 +13,7 @@ Windows PC                                      Remote Host
 +--------------------------+
 ```
 
-`connections.toml` 是這台裝置的唯一連線設定來源；Windows DPAPI 保護其中的管理憑證。終端資料透過 HTTPS／WSS 傳到 Runtime，桌面預覽透過同一 Runtime 的專用 Shell 呼叫 helper，再由 WSS 回傳圖片，能力取決於 Host 是否已準備桌面服務。搬移整個交付資料夾可保留程式與設定，但不能把另一個 Windows 帳號的 DPAPI 密文直接當成可用憑證；跨裝置請使用 [連線匯出／匯入](../refarch/connection-transfer.md)。
+`connections.toml` 是這台裝置的唯一連線設定來源；Windows DPAPI 保護其中的管理憑證。終端資料透過 HTTPS／WSS 傳到 Runtime，新版共用桌面路徑改為原生層直接連獨立 Screen 的 instance-mcp，後端仍為未選 Screen 的 Windows 舊分頁保留 Runtime 專用截圖 Shell 相容流程；Windows 功能驗收暫停，不將 Android 改版當成 Windows 已驗收。搬移整個交付資料夾可保留程式與設定，但不能把另一個 Windows 帳號的 DPAPI 密文直接當成可用憑證；跨裝置 Host 請使用[連線匯出／匯入](../refarch/connection-transfer.md)，目前不含獨立 Screens。
 
 執行環境需要 Windows x64、Windows 10 1809 以上、WebView2 Runtime 與可達 Runtime 的網路；原生連線不需要 OpenSSH。EXE 尚無產品 Authenticode 簽章或自動更新，交付時應一起搬移資料夾並核對版本與 hash。
 

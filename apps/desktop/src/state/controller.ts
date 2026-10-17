@@ -4,6 +4,7 @@ import { asConnectionError } from '../transport/types'
 import { hostErrorText } from '../transport/host-error'
 import type {
   CodingCli,
+  InstanceDesktop,
   HostDto,
   OutputDto,
   RuntimeHostDto,
@@ -67,6 +68,8 @@ export interface TabState {
    */
   runtimeAgent: boolean
   exitCode: number | null
+  instanceDesktop?: InstanceDesktop | null
+  instanceToolReady?: boolean
   desktopAvailable: boolean
   desktopEnabled: boolean
   desktopBusy: boolean
@@ -110,6 +113,11 @@ export interface AppController {
   runtimeProfiles: Ref<RuntimeHostDto[]>
   /** Safe fixed-mapping text for a failed local profile read; '' when ok. */
   runtimeProfilesError: Ref<string>
+  instanceDesktops: Ref<InstanceDesktop[]>
+  instanceDesktopsError: Ref<string>
+  loadInstanceDesktops(): Promise<void>
+  selectInstance(tab: TabState, desktop: InstanceDesktop): Promise<void>
+  clearInstance(tab: TabState): Promise<void>
   tabs: TabState[]
   activeKey: Ref<string | null>
   activeTab: ComputedRef<TabState | null>
@@ -224,6 +232,10 @@ export function createAppController(
   const catalogLoading = ref(true)
   const runtimeProfiles = ref<RuntimeHostDto[]>([])
   const runtimeProfilesError = ref('')
+  const instanceDesktops = ref<InstanceDesktop[]>([])
+  const instanceDesktopsError = ref('')
+  let instanceCatalogGen = 0
+  const instanceOperations = new Map<string, number>()
   const tabs = reactive<TabState[]>([])
   const activeKey = ref<string | null>(null)
   const uiNotice = ref('')
@@ -231,6 +243,24 @@ export function createAppController(
   let disposed = false
   let hidden = false
   const activeTab = computed(() => tabs.find((t) => t.key === activeKey.value) ?? null)
+
+  async function loadInstanceDesktops(): Promise<void> {
+    const generation = ++instanceCatalogGen
+    try {
+      const list = await transport.instanceDesktops?.() ?? []
+      if (disposed || generation !== instanceCatalogGen) return
+      instanceDesktops.value = list.slice(0, 64)
+      instanceDesktopsError.value = ''
+      for (const tab of tabs) {
+        const selected = tab.instanceDesktop
+        if (selected && !list.some(item => item.id === selected.id && item.revision === selected.revision)) void clearInstance(tab)
+      }
+    } catch {
+      if (disposed || generation !== instanceCatalogGen) return
+      instanceDesktops.value = []
+      instanceDesktopsError.value = '無法讀取 Screen 設定'
+    }
+  }
 
   // The connection list is the saved runtime Host metadata
   // (transport.runtimeHosts) — local metadata only (no credential
@@ -302,6 +332,8 @@ export function createAppController(
       ),
       exitCode: null,
       desktopAvailable: target.desktopAvailable || host.dto.desktopAvailable,
+      instanceDesktop: null,
+      instanceToolReady: false,
       desktopEnabled: false,
       desktopBusy: false,
       desktopMsg: '',
@@ -412,6 +444,12 @@ export function createAppController(
     await refreshing
   }
 
+  function closeFinishedShell(tab: TabState, kind: string): boolean {
+    if (!options.closeFinishedTabs || !['exited', 'missing', 'operatorKilled'].includes(kind)) return false
+    void closeTab(tab)
+    return true
+  }
+
   function reopenTab(tab: TabState, withDesktop: boolean): void {
     if (tab.closed || !tab.term || hidden || disposed || tab.status === 'live' || tab.status === 'connecting') return
     tab.writeBuf = []
@@ -420,6 +458,8 @@ export function createAppController(
     if (runtimeRecovery.has(tab.key)) { void recoverRuntime(tab, true); return }
     tab.term.reset()
     tab.desktopEnabled = false
+    tab.instanceDesktop = null
+    tab.instanceToolReady = false
     tab.desktopMsg = ''
     tab.desktopError = ''
     tab.shot = null
@@ -442,6 +482,7 @@ export function createAppController(
             void retireRuntimeAgentTab(tab)
             return
           }
+          if (conn && closeFinishedShell(tab, conn.kind)) return
           tab.status = 'error'
           tab.errorMsg = errText(e)
           tab.sessionId = null
@@ -486,6 +527,7 @@ export function createAppController(
               void retireRuntimeAgentTab(tab)
               return
             }
+            if (conn && closeFinishedShell(tab, conn.kind)) return
             tab.status = 'error'
             tab.errorMsg = connErrText(e)
             tab.writeBuf = []
@@ -507,10 +549,7 @@ export function createAppController(
             void retireRuntimeAgentTab(tab)
             return
           }
-          if (reason === 'exited' && options.closeFinishedTabs) {
-            void closeTab(tab)
-            return
-          }
+          if (closeFinishedShell(tab, reason)) return
           tab.status = 'error'
           tab.errorMsg = KIND_FALLBACK[reason] ?? '遠端 Shell 連線已結束'
           if (['transport', 'timeout', 'slowConsumer'].includes(reason) && (runtimeRecoveryAttempts.get(tab.key) ?? 0) < 3) {
@@ -691,6 +730,7 @@ export function createAppController(
     runtimeRecoveryAttempts.delete(tab.key)
     runtimeRecoveryHealthySince.delete(tab.key)
     if (tab.closed) return
+    instanceOperations.delete(tab.key)
     tab.closed = true
     tab.connectionGen++
     tab.writeBuf = []
@@ -785,6 +825,8 @@ export function createAppController(
         if (tab.runtimeAgent && conn && RUNTIME_TERMINAL_KINDS.has(conn.kind)) {
           // Renewal hit a permanently ended binding — retire, no rebind.
           void retireRuntimeAgentTab(tab)
+        } else if (conn && closeFinishedShell(tab, conn.kind)) {
+          return
         } else {
           tab.status = 'error'
           tab.errorMsg = connErrText(e)
@@ -852,15 +894,51 @@ export function createAppController(
     if (capturePending === tab) capturePending = null
   }
 
+  function instanceOperation(tab: TabState): number {
+    const next = (instanceOperations.get(tab.key) ?? 0) + 1
+    instanceOperations.set(tab.key, next)
+    invalidateCapture(tab)
+    tab.shot = null
+    tab.shotError = ''
+    return next
+  }
+  async function selectInstance(tab: TabState, desktop: InstanceDesktop): Promise<void> {
+    if (!transport.instanceSelect || hidden || disposed || tab.closed || tab.status !== 'live' || !tab.sessionId) return
+    const sid = tab.sessionId, operation = instanceOperation(tab)
+    tab.desktopBusy = true; tab.desktopError = ''; tab.desktopEnabled = false
+    tab.instanceDesktop = null; tab.instanceToolReady = false
+    try {
+      const result = await transport.instanceSelect(sid, desktop.id, desktop.revision)
+      if (disposed || hidden || tab.closed || tab.sessionId !== sid || instanceOperations.get(tab.key) !== operation) return
+      if (result.desktop.id !== desktop.id || result.desktop.revision !== desktop.revision) throw new Error('Screen 設定已變更，請重新選擇')
+      tab.instanceDesktop = { ...result.desktop }; tab.instanceToolReady = result.toolReady
+      tab.desktopBusy = false
+      await setDesktop(tab, true)
+      if (instanceOperations.get(tab.key) === operation) tab.desktopMsg = ''
+    } catch {
+      if (!tab.closed && tab.sessionId === sid && instanceOperations.get(tab.key) === operation) tab.desktopError = 'Screen 選擇失敗，請確認設定與連線後重試'
+    } finally {
+      if (instanceOperations.get(tab.key) === operation) tab.desktopBusy = false
+    }
+  }
+  async function clearInstance(tab: TabState): Promise<void> {
+    const sid = tab.sessionId, operation = instanceOperation(tab)
+    tab.instanceDesktop = null; tab.instanceToolReady = false; tab.desktopEnabled = false
+    tab.desktopMsg = ''; tab.desktopError = ''; tab.desktopBusy = true
+    try { if (sid) await transport.instanceClear?.(sid) }
+    catch { if (!tab.closed && tab.sessionId === sid && instanceOperations.get(tab.key) === operation) tab.desktopError = '預覽已停止；遠端工具取消尚未確認，請重試或結束 CLI' }
+    finally { if (instanceOperations.get(tab.key) === operation) tab.desktopBusy = false }
+  }
+
   /** Serialized toggles; a response landing on a closed/replaced tab is dropped. */
   async function setDesktop(tab: TabState, enabled: boolean): Promise<void> {
     if (hidden || tab.desktopBusy || tab.closed || tab.status !== 'live' || !tab.sessionId) return
     tab.desktopBusy = true
     tab.desktopError = ''
-    const sid = tab.sessionId
+    const sid = tab.sessionId, captureVersion = tab.captureGen, operation = instanceOperations.get(tab.key)
     try {
       const st = await transport.desktop(sid, enabled)
-      if (tab.closed || tab.sessionId !== sid) return
+      if (hidden || tab.closed || tab.sessionId !== sid || tab.captureGen !== captureVersion) return
       tab.desktopEnabled = st.enabled
       tab.desktopMsg = st.message
       if (st.enabled) {
@@ -875,7 +953,7 @@ export function createAppController(
     } catch (e) {
       if (!tab.closed && tab.sessionId === sid) tab.desktopError = errText(e)
     } finally {
-      tab.desktopBusy = false
+      if (instanceOperations.get(tab.key) === operation) tab.desktopBusy = false
     }
   }
 
@@ -913,6 +991,7 @@ export function createAppController(
         tab.desktopEnabled &&
         tab.previewVisible &&
         tab === activeTab.value &&
+        (!tab.instanceDesktop || (s.desktopId === tab.instanceDesktop.id && s.desktopRevision === tab.instanceDesktop.revision)) &&
         SAFE_IMAGE_MIME.test(s.mime)
       ) {
         tab.shot = { src: `data:${s.mime};base64,${s.base64}`, source: s.source, capturedAt: s.capturedAt }
@@ -947,6 +1026,8 @@ export function createAppController(
   function dispose(): void {
     disposed = true
     catalogGen++
+    instanceCatalogGen++
+    instanceOperations.clear()
     catalogLoading.value = false
     clearInterval(captureTimer)
     capturePending = null
@@ -978,6 +1059,7 @@ export function createAppController(
   }
   return {
     historyRequest,
+    instanceDesktops, instanceDesktopsError, loadInstanceDesktops, selectInstance, clearInstance,
     catalogLoading,
     runtimeProfiles,
     runtimeProfilesError,

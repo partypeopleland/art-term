@@ -25,6 +25,13 @@ use std::{
 use tauri::State;
 use tokio::sync::watch;
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InstanceSelection {
+    pub desktop: art_term_core::instance_mcp::DesktopProfile,
+    pub tool_ready: bool,
+}
+
 /// Native Runtime preview bridge. Production operations enforce live binding,
 /// origin, identity, revision and generation fences before and after HTTPS I/O.
 /// Test doubles may override native methods for lifecycle verification.
@@ -140,6 +147,8 @@ pub struct Connection {
     /// runtime's own `runtime-mcp` admin API; never both).
     desktop_route: Option<DesktopRoute>,
     desktop_enabled: AtomicBool,
+    selected_desktop: Mutex<Option<art_term_core::instance_mcp::DesktopProfile>>,
+    instance_touched: AtomicBool,
     preview_cancel: watch::Sender<u64>,
     preview_operation: Arc<tokio::sync::Mutex<()>>,
     owned_shells: Arc<Mutex<HashMap<String, HashSet<String>>>>,
@@ -400,7 +409,7 @@ impl RuntimeSessions {
             let version = history::HistoryVersion::from_name(&history_binding.name).ok_or(SessionError::Protocol)?;
             // Only a target minted by the explicit new-history action can
             // reach this once. Relist/recovery never repeats shell input.
-            handle.write(format!("exec python3 \"$HOME/.local/share/art-term/openab-pty/{}\" {key}\n", version.wrapper_script()).as_bytes())?;
+            handle.write(version.bootstrap_command(&key)?.as_bytes())?;
         }
         let (cancel, _) = watch::channel(false);
         let id = self.id("session");
@@ -418,6 +427,8 @@ impl RuntimeSessions {
                     // change can never retarget this session's preview.
                     desktop_route: target.desktop.as_ref().and_then(|m| m.route.clone()),
                     desktop_enabled: AtomicBool::new(false),
+                    selected_desktop: Mutex::new(None),
+                    instance_touched: AtomicBool::new(false),
                     preview_cancel: watch::channel(0).0,
                     preview_operation: self.preview_operation.clone(),
                     owned_shells: self.owned_shells.clone(),
@@ -592,6 +603,18 @@ impl RuntimeSessions {
         }
         let _operation = conn.desktop_operation.lock().await;
         anyhow::ensure!(!conn.closed.load(Ordering::SeqCst), "session closed");
+        let has_direct_selection = conn.selected_desktop.lock().map_err(|_| anyhow::anyhow!("桌面狀態不可用"))?.is_some();
+        if has_direct_selection {
+            if enabled {
+                let epoch = *conn.preview_cancel.borrow();
+                let snapshot = Self::direct_snapshot(hosts, &conn)?;
+                let selected = snapshot.profile.clone();
+                art_term_core::instance_mcp::screenshot(snapshot).await?;
+                anyhow::ensure!(!conn.closed.load(Ordering::SeqCst) && *conn.preview_cancel.borrow() == epoch && Self::direct_snapshot(hosts, &conn)?.profile == selected, "桌面已切換");
+            }
+            conn.desktop_enabled.store(enabled, Ordering::SeqCst);
+            return Ok(DesktopStateDto { enabled, message: if enabled { "App 直接預覽已啟用" } else { "預覽已停止；桌面工具保留" }.into() });
+        }
         let route = conn
             .desktop_route
             .clone()
@@ -634,6 +657,10 @@ impl RuntimeSessions {
             .try_lock()
             .map_err(|_| anyhow::anyhow!("screenshot already in progress"))?;
         anyhow::ensure!(!conn.closed.load(Ordering::SeqCst), "session closed");
+        let has_direct_selection = conn.selected_desktop.lock().map_err(|_| anyhow::anyhow!("桌面狀態不可用"))?.is_some();
+        if has_direct_selection {
+            return Self::instance_screenshot(hosts, &conn).await;
+        }
         let shot = match conn
             .desktop_route
             .clone()
@@ -779,6 +806,8 @@ impl RuntimeSessions {
         let shot = screenshot::decode_screenshot(json).await?;
         Self::native_still_current(hosts, conn, &binding)?;
         Ok(ScreenshotDto {
+            desktop_id: None,
+            desktop_revision: None,
             mime: shot.mime,
             base64: shot.image_base64,
             source: format!("{} / shared runtime desktop", binding.profile.name),
@@ -856,6 +885,169 @@ impl RuntimeSessions {
             Err(SessionError::UpgradeRequired) => Ok(HistoryReply::Error { error: "unsupported".into() }),
             other => other.map_err(Into::into),
         }
+    }
+    async fn configure_tools(
+        hosts: &RuntimeHosts,
+        conn: &Arc<Connection>,
+        payload: zeroize::Zeroizing<String>,
+    ) -> anyhow::Result<serde_json::Value> {
+        let _guard = conn.preview_operation.lock().await;
+        let (binding, snapshot) = Self::native_binding(hosts, conn)?;
+        let ownership = Arc::new(OwnedShells {
+            shells: conn.owned_shells.clone(),
+            profile_id: ownership_key(&binding.profile),
+        });
+        let result = screenshot::configure(
+            hosts
+                .admin()
+                .map_err(|_| anyhow::anyhow!("Runtime 不可用"))?,
+            snapshot,
+            &binding.name,
+            payload,
+            ownership,
+            conn.preview_cancel.subscribe(),
+            |binding, token, since, generation| {
+                hosts.attach_token(binding, token, since, generation)
+            },
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("受控端工具設定未確認成功；請確認通用工具入口已安裝"))?;
+        Self::native_still_current(hosts, conn, &binding)?;
+        anyhow::ensure!(result["ok"] == true, "受控端工具設定失敗");
+        Ok(result)
+    }
+    fn direct_snapshot(
+        hosts: &RuntimeHosts,
+        conn: &Connection,
+    ) -> anyhow::Result<art_term_core::instance_mcp::DesktopSnapshot> {
+        let selected = conn
+            .selected_desktop
+            .lock()
+            .map_err(|_| anyhow::anyhow!("桌面狀態不可用"))?
+            .clone()
+            .context("請先選擇 instance-mcp 桌面")?;
+        let snapshot = hosts
+            .store()
+            .map_err(|_| anyhow::anyhow!("設定不可用"))?
+            .desktop(&selected.id)
+            .map_err(|_| anyhow::anyhow!("桌面設定已變更，請重新選擇"))?;
+        anyhow::ensure!(snapshot.profile == selected, "桌面設定已變更，請重新選擇");
+        Ok(snapshot)
+    }
+
+    async fn instance_screenshot(hosts: &RuntimeHosts, conn: &Arc<Connection>) -> anyhow::Result<ScreenshotDto> {
+        let epoch = *conn.preview_cancel.borrow();
+        let mut cancel = conn.preview_cancel.subscribe();
+        let snapshot = Self::direct_snapshot(hosts, conn)?;
+        let selected = snapshot.profile.clone();
+        let shot = tokio::select! {
+            _ = cancel.changed() => anyhow::bail!("桌面預覽已取消"),
+            result = art_term_core::instance_mcp::screenshot(snapshot) => result?,
+        };
+        anyhow::ensure!(!conn.closed.load(Ordering::SeqCst) && conn.desktop_enabled.load(Ordering::SeqCst)
+            && *conn.preview_cancel.borrow() == epoch && Self::direct_snapshot(hosts, conn)?.profile == selected,
+            "桌面或連線已變更");
+        Ok(ScreenshotDto { mime: shot.mime, base64: shot.image_base64, source: selected.name,
+            desktop_id: Some(selected.id), desktop_revision: Some(selected.revision),
+            captured_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis() as u64 })
+    }
+    fn tools_confirmed(result: &serde_json::Value, profile: &art_term_core::instance_mcp::DesktopProfile) -> bool {
+        let Some(count) = result["adapters"].as_u64().filter(|n| *n > 0) else { return false; };
+        result["ok"] == true && result["targets"].as_array().is_some_and(|targets| targets.len() as u64 == count
+            && targets.iter().all(|target| target["id"] == profile.id && target["revision"] == profile.revision
+                && target["generation"].as_u64().is_some_and(|n| n > 0)))
+    }
+    async fn configure_selected(hosts: &RuntimeHosts, conn: &Arc<Connection>, profile: &art_term_core::instance_mcp::DesktopProfile) -> anyhow::Result<bool> {
+        let snapshot = hosts.store().map_err(|_| anyhow::anyhow!("設定不可用"))?.desktop(&profile.id)
+            .map_err(|_| anyhow::anyhow!("桌面已變更"))?;
+        anyhow::ensure!(snapshot.profile == *profile, "桌面已變更");
+        let payload = zeroize::Zeroizing::new(serde_json::json!({"op":"configure","id":profile.id,"revision":profile.revision,"name":profile.name,"url":profile.mcp_url,"token":snapshot.token.expose()}).to_string());
+        // Preview is independent of an installed/running adapter. No false tool-ready claim.
+        Ok(Self::configure_tools(hosts, conn, payload).await.map(|result| Self::tools_confirmed(&result, profile)).unwrap_or(false))
+    }
+    pub async fn select_instance(&self, hosts: &RuntimeHosts, id: &str, desktop_id: &str, revision: u64) -> anyhow::Result<InstanceSelection> {
+        let conn = self.connection(id).map_err(|_| anyhow::anyhow!("連線已結束"))?;
+        conn.desktop_enabled.store(false, Ordering::SeqCst);
+        conn.preview_cancel.send_modify(|n| *n = n.wrapping_add(1));
+        let epoch = *conn.preview_cancel.borrow();
+        conn.instance_touched.store(true, Ordering::SeqCst);
+        let _guard = conn.desktop_operation.lock().await;
+        anyhow::ensure!(!conn.closed.load(Ordering::SeqCst) && *conn.preview_cancel.borrow() == epoch, "桌面選擇已取消");
+        // A live binding, rather than a saved Host capability, authorizes this per-tab selection.
+        Self::native_binding(hosts, &conn)?;
+        let previous = conn.selected_desktop.lock().map_err(|_| anyhow::anyhow!("桌面狀態不可用"))?.take();
+        if previous.is_some() {
+            let _ = Self::configure_tools(hosts, &conn, zeroize::Zeroizing::new("{\"op\":\"clear\"}".into())).await;
+        }
+        let snapshot = hosts.store().map_err(|_| anyhow::anyhow!("設定不可用"))?.desktop(desktop_id).map_err(|_| anyhow::anyhow!("桌面已變更"))?;
+        anyhow::ensure!(snapshot.profile.revision == revision, "桌面已變更");
+        let profile = snapshot.profile.clone();
+        let mut cancel = conn.preview_cancel.subscribe();
+        tokio::select! {
+            _ = cancel.changed() => anyhow::bail!("桌面選擇已取消"),
+            result = art_term_core::instance_mcp::screenshot(snapshot) => { result?; }
+        }
+        anyhow::ensure!(*conn.preview_cancel.borrow() == epoch, "桌面選擇已取消");
+        let tool_ready = Self::configure_selected(hosts, &conn, &profile).await?;
+        anyhow::ensure!(!conn.closed.load(Ordering::SeqCst) && *conn.preview_cancel.borrow() == epoch
+            && hosts.store().map_err(|_| anyhow::anyhow!("設定不可用"))?.desktop(desktop_id).map_err(|_| anyhow::anyhow!("桌面已變更"))?.profile == profile,
+            "桌面或連線已變更");
+        *conn.selected_desktop.lock().map_err(|_| anyhow::anyhow!("桌面狀態不可用"))? = Some(profile.clone());
+        conn.desktop_enabled.store(true, Ordering::SeqCst);
+        Ok(InstanceSelection { desktop: profile, tool_ready })
+    }
+    pub async fn clear_instance(&self, hosts: &RuntimeHosts, id: &str) -> anyhow::Result<()> {
+        let conn = self.connection(id).map_err(|_| anyhow::anyhow!("連線已結束"))?;
+        conn.desktop_enabled.store(false, Ordering::SeqCst);
+        conn.preview_cancel.send_modify(|n| *n = n.wrapping_add(1));
+        let _guard = conn.desktop_operation.lock().await;
+        *conn.selected_desktop.lock().map_err(|_| anyhow::anyhow!("桌面狀態不可用"))? = None;
+        Self::configure_tools(hosts, &conn, zeroize::Zeroizing::new("{\"op\":\"clear\"}".into())).await?;
+        Ok(())
+    }
+    pub async fn launch_instance(&self, hosts: &RuntimeHosts, id: &str) -> anyhow::Result<InstanceSelection> {
+        let conn = self.connection(id).map_err(|_| anyhow::anyhow!("連線已結束"))?;
+        let _guard = conn.desktop_operation.try_lock().map_err(|_| anyhow::anyhow!("桌面操作進行中"))?;
+        let profile = Self::direct_snapshot(hosts, &conn)?.profile;
+        let epoch = *conn.preview_cancel.borrow();
+        if Self::configure_selected(hosts, &conn, &profile).await? {
+            return Ok(InstanceSelection { desktop: profile, tool_ready: true });
+        }
+        let (binding, _) = Self::native_binding(hosts, &conn)?;
+        let cli = binding.profile.metadata.as_ref().and_then(|m| m.coding_cli.clone())
+            .unwrap_or(art_term_core::connections::CodingCli { id:"codex".into(), name:"Codex".into(), command:"codex".into(), args:vec![] });
+        anyhow::ensure!(std::path::Path::new(&cli.command).file_name().and_then(|name| name.to_str()) == Some("codex"), "此 CLI 尚未支援桌面工具入口；本輪支援 Codex");
+        let quote = |word: &str| format!("'{}'", word.replace('\'', "'\\''"));
+        let words = std::iter::once(cli.command.as_str()).chain(cli.args.iter().map(String::as_str)).map(quote).collect::<Vec<_>>().join(" ");
+        let command = format!("python3 \"$HOME/.local/share/art-term/tools/instance_bridge.py\" launch --binding {} -- {}\r", binding.name, words);
+        anyhow::ensure!(*conn.preview_cancel.borrow() == epoch && Self::direct_snapshot(hosts, &conn)?.profile == profile, "桌面已切換");
+        self.write(id, command.as_bytes()).map_err(|_| anyhow::anyhow!("無法啟動 CLI"))?;
+        // Exactly one explicit launch. Only configuration is retried while Codex starts stdio.
+        for _ in 0..10 {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            anyhow::ensure!(!conn.closed.load(Ordering::SeqCst) && *conn.preview_cancel.borrow() == epoch && Self::direct_snapshot(hosts, &conn)?.profile == profile, "桌面已切換");
+            if Self::configure_selected(hosts, &conn, &profile).await? { return Ok(InstanceSelection { desktop: profile, tool_ready: true }); }
+        }
+        anyhow::bail!("Codex 工具入口尚未確認啟動；請查看終端，桌面預覽仍可使用")
+    }
+
+    pub async fn close_with_tools(&self, hosts: &RuntimeHosts, id: &str) -> Reply<()> {
+        let touched = self.connection(id).ok().is_some_and(|conn| conn.instance_touched.load(Ordering::SeqCst));
+        if touched {
+            // A bounded best-effort clear; offline target cleanup cannot be guaranteed.
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(3), self.clear_instance(hosts, id)).await;
+        }
+        self.close(id).await
+    }
+    pub async fn shutdown_with_tools(self: &Arc<Self>, hosts: Arc<RuntimeHosts>) {
+        let ids: Vec<_> = self.sessions.lock().map(|sessions| sessions.keys().cloned().collect()).unwrap_or_default();
+        let mut tasks = tokio::task::JoinSet::new();
+        for id in ids {
+            let sessions = self.clone(); let hosts = hosts.clone();
+            tasks.spawn(async move { let _ = sessions.close_with_tools(&hosts, &id).await; });
+        }
+        while tasks.join_next().await.is_some() {}
+        self.shutdown().await;
     }
     pub async fn close(&self, id: &str) -> Reply<()> {
         let connection = self
@@ -1213,6 +1405,8 @@ mod tests {
             let endpoint = endpoint.to_owned();
             Box::pin(async move {
                 Ok(ScreenshotDto {
+                    desktop_id: None,
+                    desktop_revision: None,
                     mime: "image/png".into(),
                     base64: String::new(),
                     source: endpoint,
@@ -1234,6 +1428,8 @@ mod tests {
                 next_generation: AtomicU64::new(2),
                 desktop_route: route,
                 desktop_enabled: AtomicBool::new(false),
+                selected_desktop: Mutex::new(None),
+                    instance_touched: AtomicBool::new(false),
                 preview_cancel: watch::channel(0).0,
                 preview_operation: Arc::default(),
                 owned_shells: Arc::default(),

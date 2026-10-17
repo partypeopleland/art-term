@@ -183,6 +183,139 @@ where
     result
 }
 
+/// Sensitive configure exchange on an exec-only, App-owned temporary Shell.
+/// No secret is sent before the receiver has disabled PTY echo/canonical mode.
+pub async fn configure<F, Fut>(
+    api: &AdminClient,
+    host: HostSnapshot,
+    binding: &str,
+    payload: zeroize::Zeroizing<String>,
+    ownership: Arc<dyn ShellOwnership>,
+    mut cancel: watch::Receiver<u64>,
+    attach: F,
+) -> Result<serde_json::Value, SessionError>
+where
+    F: FnOnce(SessionBinding, Secret, u64, u64) -> Fut,
+    Fut: std::future::Future<Output = Result<SessionHandle, SessionError>>,
+{
+    use base64::Engine;
+    validate_binding(binding)?;
+    let name = new_shell_name();
+    ownership.mark(&name)?;
+    let mut cleanup = Cleanup {
+        api: api.clone(),
+        host: Some(host),
+        name,
+        ownership,
+        done: false,
+    };
+    let operation = async {
+        let host = cleanup.host.as_ref().ok_or(SessionError::Internal)?;
+        let grant = match api.create(host, &cleanup.name).await {
+            Ok(g) => g,
+            Err(super::api::ApiError::StateChanged) => {
+                cleanup.ownership.unmark(&cleanup.name);
+                cleanup.done = true;
+                return Err(SessionError::StateChanged);
+            }
+            Err(e) => return Err(e.into()),
+        };
+        let handle = attach(
+            SessionBinding::from_grant(host.profile.clone(), &grant)?,
+            grant.token,
+            0,
+            1,
+        )
+        .await?;
+        handle.preview_flow();
+        let exchange = async {
+            let nonce = new_nonce();
+            let command = format!("exec python3 \"$HOME/.local/share/art-term/tools/instance_bridge.py\" control --binding {binding} --nonce {nonce}\n");
+            handle.write(command.as_bytes())?;
+            let ready = format!("ARTTERM_TOOLS_READY:{nonce}");
+            let result = format!("ARTTERM_TOOLS_RESULT:{nonce}:");
+            let encoded = zeroize::Zeroizing::new(
+                base64::engine::general_purpose::STANDARD.encode(payload.as_bytes()),
+            );
+            if encoded.len() > 16384 {
+                return Err(SessionError::Capacity);
+            }
+            let mut buffer = Vec::new();
+            let mut offset = 0;
+            let mut sent = false;
+            loop {
+                let poll = handle.poll()?;
+                let mut answer = None;
+                for event in poll.events {
+                    match event {
+                        OutputEvent::Bytes {
+                            bytes, start, end, ..
+                        } => {
+                            if start != offset || end != start + bytes.len() as u64 {
+                                return Err(SessionError::Protocol);
+                            }
+                            offset = end;
+                            buffer.extend_from_slice(&bytes);
+                            if buffer.len() > 65536 {
+                                return Err(SessionError::Capacity);
+                            }
+                            while let Some(n) = buffer.iter().position(|b| *b == b'\n') {
+                                let line: Vec<_> = buffer.drain(..=n).collect();
+                                let line = std::str::from_utf8(&line)
+                                    .map_err(|_| SessionError::Protocol)?
+                                    .trim_end_matches(['\r', '\n']);
+                                if line == ready && !sent {
+                                    let mut frame = zeroize::Zeroizing::new(Vec::with_capacity(
+                                        encoded.len() + 4,
+                                    ));
+                                    frame.extend_from_slice(&(encoded.len() as u32).to_be_bytes());
+                                    frame.extend_from_slice(encoded.as_bytes());
+                                    handle.write(&frame)?;
+                                    sent = true;
+                                } else if let Some(json) = line.strip_prefix(&result) {
+                                    if !sent {
+                                        return Err(SessionError::Protocol);
+                                    }
+                                    answer = Some(
+                                        serde_json::from_str(json)
+                                            .map_err(|_| SessionError::Protocol)?,
+                                    );
+                                }
+                            }
+                        }
+                        OutputEvent::Gap { .. } => return Err(SessionError::Protocol),
+                        _ => {}
+                    }
+                }
+                if poll.batch_id != 0 {
+                    handle.ack(poll.batch_id, 1)?;
+                }
+                if let Some(answer) = answer {
+                    return Ok(answer);
+                }
+                if let Some(ended) = poll.ended {
+                    return Err(ended);
+                }
+                handle.wait_output().await;
+            }
+        };
+        let result = tokio::time::timeout(Duration::from_secs(10), exchange)
+            .await
+            .map_err(|_| SessionError::Timeout)?;
+        handle.shutdown().await;
+        result
+    };
+    let result = tokio::select! {
+        _ = cancel.changed() => Err(SessionError::Cancelled),
+        r = tokio::time::timeout(OPERATION_DEADLINE, operation) => r.map_err(|_| SessionError::Timeout).and_then(|r| r),
+    };
+    let _ = cleanup.delete_once().await;
+    result
+}
+fn validate_binding(binding: &str) -> Result<(), SessionError> {
+    super::api::validate_session_name(binding).map_err(Into::into)
+}
+
 /// Read bounded framed output until the END marker; any gap, offset jump,
 /// stream end, or cancellation before END discards the whole result.
 async fn collect(handle: &SessionHandle, mode: Mode) -> Result<serde_json::Value, SessionError> {

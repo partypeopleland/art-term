@@ -4,6 +4,7 @@ import { useModalFocus } from '../components/modal-focus'
 import { themes, selectedTheme, selectTheme } from './theme'
 import RuntimeTransfer from '../components/RuntimeTransfer.vue'
 import RuntimeHosts from '../components/RuntimeHosts.vue'
+import ScreenSettings from './ScreenSettings.vue'
 import type { RuntimeHostDto, Transport } from '../transport/types'
 const props = withDefaults(defineProps<{ embedded?: boolean; transport?: Transport; hosts?: RuntimeHostDto[] }>(), { hosts: () => [] })
 const emit = defineEmits<{ close: []; changed: []; picker: [active: boolean] }>()
@@ -36,6 +37,7 @@ if (!props.embedded) useModalFocus(dialog, () => emit('close'))
           <RuntimeHosts embedded :transport="transport" initial-view="create" @changed="emit('changed')" />
         </div>
       </section>
+      <ScreenSettings v-if="transport?.instanceDesktops" :transport="transport" @changed="emit('changed')" />
     </section>
   </div>
 </template>

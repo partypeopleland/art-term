@@ -5,22 +5,19 @@
 ## 網路與服務的位置
 
 ```text
-Windows / Android                     Linux Host (same Tailnet)
-+--------------------+                +--------------------------------+
-| art-term             | HTTPS / WSS     | Tailscale Serve :8443          |
-| URL + credential   | --------------> |             |                  |
-+--------------------+                |             v                  |
-                                      | openab-pty 127.0.0.1:18090      |
-                                      |   user service -> user Shell   |
-                                      |             | optional         |
-                                      |             v                  |
-                                      | instance-mcp -> desktop/tools  |
-                                      +--------------------------------+
+Windows / Android                    Linux Host (same Tailnet)
+art-term -- HTTPS/WSS --> Serve :8443 -> openab-pty -> user Shell
+    |                                                   |
+    |                                              Codex stdio adapter
+    |                                                   |
+    +-- direct MCP screenshot --> instance-mcp <--- MCP tools
+                                      |
+                                  shared desktop
 ```
 
 Tailnet 是 Tailscale 管理的私人網路，讓手機與 Host 互相可達；Serve 在 Host 的 `8443` 提供 HTTPS，再轉送到只監聽 loopback 的 Runtime。網路政策決定誰能到達入口，Runtime 的 admin credential（管理憑證）則決定誰能操作 Shell，兩者各自生效。Shell 以安裝者帳號執行，可存取該帳號的檔案；這個部署沒有容器沙箱。
 
-桌面預覽是選配：Runtime 需要另外連到已準備好的 instance-mcp 桌面工具服務。兩個服務各自驗證自己的憑證；App 只持有 Runtime 管理憑證，初始化腳本也不會代裝桌面環境。命令範例本身不授權變更既有系統服務、Tailnet 或認證；實際可操作的主機、帳號及服務以維護者已取得的授權為準。
+桌面是選配：App 原生層直接連已準備的 instance-mcp，AI 工具另由工作 Shell 的記憶體 stdio adapter 連同一上游。Runtime 與 MCP 各自驗證自己的憑證；App 以平台金鑰獨立保護 Screen token，初始化腳本不代裝桌面環境。命令範例本身不授權變更既有系統服務、Tailnet 或認證；實際可操作的主機、帳號及服務以維護者已取得的授權為準。
 
 ## 確認主機與帳號
 
@@ -265,9 +262,9 @@ systemctl --user is-active oab-instance-mcp.service oab-seat.service oab-pw-mcp.
 systemctl --user is-enabled oab-instance-mcp.service oab-seat.service oab-pw-mcp.service
 ```
 
-這三個名稱不是通用部署契約，不可直接當成安裝命令。instance-mcp 與桌面環境由管理者依所採用的部署方式先準備；本專案不代裝。可沿用既有且從 Runtime 可達的 instance-mcp：向管理者取得 MCP URL 與必要 token，依 Runtime 桌面支援指南建立 owner-only JSON，再啟用 Runtime 桌面。沒有可用 MCP 時先完成純終端安裝，不能只靠本節的服務狀態查詢宣稱桌面可用。終端使用原生 HTTPS／WSS；桌面預覽由 App 建立獨立短命 Shell，呼叫主機 helper，圖片經 WSS 回傳。舊 Endpoint 桌面關聯仍使用原 origin 的 Native 路徑；細節見 [桌面預覽](../refarch/desktop.md)。
+這三個名稱不是通用部署契約，不可直接當成安裝命令。instance-mcp 與桌面環境由管理者依既有部署準備；本專案不代裝。App 可達的 MCP URL／token 在設定頁新增為獨立 Screen，截圖直接回 App，不經 Runtime PTY。需要 AI 工具時，受控端同帳號也須可達相同上游，再安裝[記憶體 stdio adapter](../refarch/runtime-desktop.md)，不保存上游設定。
 
-官方 format 4 的桌面啟用只更新受保護設定，launcher 在每次擷取時載入，不需重建或重啟 Runtime。啟用交易被中斷時一般操作會拒絕，在原帳號用 `bash scripts/init-host.sh --recover-desktop` 依交易狀態復原；此 flag 與 `--rollback-desktop` 同為獨立旗標，不能與其他旗標或參數合用。舊 format 3 先完成官方 Runtime 遷移，才使用新入口。設定與操作見 [Runtime 桌面支援](../refarch/runtime-desktop.md)。
+純終端不需要 Screen，也不需重啟 Runtime 啟用桌面。舊 `--enable-desktop`／`--recover-desktop`／`--rollback-desktop` 只用於相符的舊安裝交易；新版不要求這條轉送路徑。已有交易先查紀錄及用途，不刪 journal 繞過檢查，不刪共用 instance-mcp 或其他 AI 工具配置。新版選擇、停止預覽與取消工具的差異見[桌面預覽](../refarch/desktop.md)。
 
 ## 附錄：實作與參考
 

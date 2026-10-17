@@ -90,6 +90,18 @@ impl HistoryVersion {
             Self::Paged => "tmux-v2/tmux-shell.py",
         }
     }
+    /// Only fresh work Shells use the persistent tools overlay.
+    pub fn bootstrap_command(self, key: &str) -> Result<String, SessionError> {
+        if !hex(key, 24) {
+            return Err(SessionError::Protocol);
+        }
+        let fallback = format!("exec python3 \"$HOME/.local/share/art-term/openab-pty/{}\" {key}", self.wrapper_script());
+        Ok(if self == Self::Paged {
+            format!("if [ -f \"$HOME/.local/share/art-term/tools/tmux-shell.py\" ]; then exec python3 \"$HOME/.local/share/art-term/tools/tmux-shell.py\" {key}; else {fallback}; fi\n")
+        } else {
+            format!("{fallback}\n")
+        })
+    }
     fn history_script(self) -> &'static str {
         match self {
             Self::Legacy => "tmux-history.cjs",

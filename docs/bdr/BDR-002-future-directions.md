@@ -1,25 +1,20 @@
 # BDR-002：未來方向與保護條件
 
-- 狀態：提案／未排程，未啟動實作、部署或效能改版。
+- 狀態：其餘候選未排程；獨立桌面入口已由 Owner 決定採用直接 MCP 設計，實際驗收依當次交付結果。
 - 來源：整併原 roadmap 與 future-work 的候選需求；語音完整決策保留在 [BDR-001](BDR-001-android-voice-input.md)。
 
 ## App 獨立桌面觀看入口
 
-2026-10-09 記錄的需求是讓 Agent 繼續使用 Host instance-mcp 操作瀏覽器，而 App 直接觀看同一 Host 桌面，避免經 Agent Pod 轉送圖片。這與目前已提供的 [Native Runtime 共享截圖](../refarch/desktop.md) 不同；現行能力仍經明確 Runtime origin 的管理 API，獨立觀看入口尚未實作。
-
-提案希望把觀看與 Agent 操作分成兩條路徑，兩者指向同一桌面：
+2026-10-09 提出的獨立觀看需求，於 2026-10-15 由 Owner 決定採用直接 instance-mcp，取代先前「App 不持有 MCP 操作憑證」的提案限制。App 原生層保存平台加密 Screen token 並直接取得截圖；受控端 AI 經記憶體 stdio adapter 操作相同上游。Host 與 Screen 各自獨立，純終端不需要桌面。
 
 ```text
-Proposed: independent viewing (not implemented)
-
-App   -- viewing authorization --> Host desktop service --+
-                                                          +--> Same desktop
-Agent -- operation authorization --> Host instance-mcp ---+
+App native -- screenshot ------------------> instance-mcp -> same desktop
+AI CLI ---- stdio memory-only adapter -----> instance-mcp -> desktop/tools
 ```
 
-這樣觀看者可以取得畫面，而不必持有 Agent 操作桌面的權限。這張圖表達產品期望的分工，尚未決定實際觀看協定或網址；目前 App 仍透過 Runtime 取得截圖。
+Screen 選擇限定本機分頁，多個 Shell 可共用上游，不實施獨占或重設桌面。WebView 不讀回 token；明確接入工具才配置 adapter，不自動中斷既有 AI。預覽成功不代表工具接入。完整 MCP 結果保留，避免 PTY 傳圖與工具內容過濾是兩件事。
 
-後續需先確認可信 Tailnet HTTPS、觀看與 Agent 操作的獨立授權、精確 Host／桌面綁定、合理的新增連線預填，避免手機手打長 token。預填不得自動儲存或連線；Agent PTY 入口不能推定為桌面 MCP 入口，操作 credential 不能交給觀看介面。公開例子用虛構值，私人資料透過既有受控設定或匯入方式提供，不恢復私有 bootstrap。endpoint／port／授權格式需在實作階段查核，目前不新增服務、路由或部署。
+目前主題以[桌面](../refarch/desktop.md)、[工具 bridge](../refarch/runtime-desktop.md)及[連線設定](../refarch/connections.md)為準。沒有私人預填或 bootstrap；現場部署、真 Codex 使用與手機驗收必須各自有實際結果，不能沿用舊 helper 的驗收或以固定 client 冒稱真 AI 已測。
 
 ## 其他候選
 

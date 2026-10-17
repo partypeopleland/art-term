@@ -25,7 +25,7 @@ Windows / Android App                         Runtime Host
                    (Windows DPAPI / Android Keystore)
 ```
 
-Vue 管理分類、Shell 選擇、分頁與終端呈現。WebView 透過受存取控制清單（ACL）限制的程序間呼叫（IPC）取得安全資料物件；Runtime 管理憑證與 session token 留在 native 層。WebView 沒有 Runtime 外連、憑證讀回或任意遠端命令 API，因此畫面狀態不能直接指定另一個遠端工作。
+Vue 管理分類、Shell 選擇、分頁與終端呈現。WebView 透過受存取控制清單（ACL）限制的程序間呼叫（IPC）取得安全資料物件；Runtime 管理憑證、session token 與已保存的 MCP token 留在 native 層；明確配置 AI 工具時，MCP token 經受保護握手送到受控端 adapter 行程記憶體。WebView 沒有 Runtime 外連、憑證讀回或任意遠端命令 API，因此畫面狀態不能直接指定另一個遠端工作。
 
 native GUI adapter 驗證 Host 操作並發出 target。target 是後端核發的連線目標，凍結 Host id／revision、Runtime 入口、Shell 名稱、官方 generation 與能力。revision 辨識設定版本，generation 辨識工作世代；session binding 是實際連線與這些資料的綁定。官方協定不提供跨服務重啟的原子工作身分比對，App 以原 attach token 恢復短暫斷線，驗證失敗就停止並請使用者重新選擇。
 
@@ -39,11 +39,11 @@ Rust 核心讀取唯一 `connections.toml`，透過官方 HTTPS API 列出、建
 MobileApp (fixed brand / Main / Connect / global gear)
   |
   +-- AppHomepage -------- version + bundled release notes
-  +-- ThemeSettings ------ theme + connection import/export + add form
+  +-- ThemeSettings ------ theme + Host import/export + Host/Screen forms
   +-- workspace pager ---- shared page position + indicator progress
          |
-         +-- Main: ConnectionDashboard -> HostConnections -> issued target
-         +-- Connect: tabs / terminal / voice / quick keys
+         +-- Main: ConnectionDashboard -> HostConnections / saved Screens
+         +-- Connect: tabs / terminal / Screen picker / voice / quick keys
                             |
                     NativeTerminalReader (Android native view)
                             |
@@ -76,7 +76,25 @@ Runtime output -> WSS binding -> bounded queue -> xterm parse
 
 有界佇列限制等待處理的 bytes 與事件數，避免終端或背景分頁無限累積資料。xterm 完成一批輸出的解析後，控制器才經 IPC 確認 exact batch，由 native SessionHandle 更新本機已呈現游標。這個 ACK（已處理確認）不是每批送給 Runtime 的遠端 frame；恢復連線時才以已呈現游標作為 since，向 Runtime 請求後續輸出。不能因收到資料就提前確認。若 Runtime 告知 Gap（輸出已缺段），App 清理待送輸入並重置顯示，再處理可補送的輸出。短暫斷線只恢復原 binding，不重建 Shell，也不重播結果不確定的輸入。完整生命週期見 [連線與工作](sessions.md)。
 
-核心同時提供共用尺寸／大小界限及 PNG／JPEG 驗證。桌面使用同一 Runtime 中由 App 建立的暫時 Shell 呼叫 Host helper，JSON 與圖片經該 Shell 的 WSS 回傳；Runtime 只傳送終端資料，不提供自訂桌面 API。這是共享畫面，並非每個 Shell 的獨立桌面；其責任與準備方式見 [桌面](desktop.md)及 [桌面 helper](runtime-desktop.md)。
+核心同時提供尺寸／大小界限及 PNG／JPEG 驗證。Screen 與 Host 是同一 TOML 中兩個獨立集合；原生層直接連 Screen 的 instance-mcp 擷取圖片，不經 PTY，不建立截圖 Shell。Screen 由每個 live Shell 分頁明確選取，與舊 Host 桌面能力欄位無關。原生後端另外保留未選 Screen 的 Windows 舊分頁 Runtime 截圖相容路徑；Android 新選擇始終直接 MCP，不退回該路徑。
+
+```text
+connections.toml: Host profiles + independent encrypted Screen profiles
+
+App native -- direct MCP screenshot --------------------> instance-mcp -> desktop
+                                                              ^
+Runtime work Shell -> tmux pane -> Shell-owned broker -- MCP --+
+                                      |       ^
+                                 owned PTY    | owner-only socket
+                                      |       |
+                                    bash -> Shell client / CLI stdio proxy
+                                              |
+App -- temporary raw/no-echo configure Shell -> broker memory target
+```
+
+
+
+本次設計由新 tmux 工作 Shell 先啟動 supervisor broker，再以自有 PTY 啟動 Bash，保留 job control／resize 並以 pipe-death guard 清理自有子行程；App 透過短命管理 Shell 配置目前選擇。Shell client 與 coding CLI 的 scoped stdio proxy 使用同一 broker；其他 MCP client 可登記非秘密 `stdio --current-shell` 通用入口，以受限同 UID 祖先核對解析當前活 broker，不掃描 Host 或寫固定 binding／認證，不需要 App 專用 Codex 入口，不使用 Host 共用選擇，也不接入 Discord Agent。管理通道只傳有界配置 frame、回非秘密結果，不轉送圖片。broker 回傳完整上游 MCP 工具結果；固定 `current_target`／`list_target_tools`／`call_target_tool` 以來源版本避免切換時串線。預覽成功與工具就緒分別核對，不能以其中之一替代另一個。CLI EOF 不清除 Shell 選擇，clear／Shell 結束停止工具；既有 Shell 不注入啟動定義，安裝 helper 後需建立新連線。設計與待驗收邊界見[桌面](desktop.md)及[工具 bridge](runtime-desktop.md)。
 
 ## tmux 保存工作與按需讀頁
 
