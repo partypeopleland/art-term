@@ -25,6 +25,7 @@ import { createRuntimeEntry, runtimeConnectedIds } from '../state/runtime-entry'
 import TabBar from '../components/TabBar.vue'
 import TerminalPane from '../components/TerminalPane.vue'
 import PreviewPanel from '../components/PreviewPanel.vue'
+import PreviewZoom from '../components/PreviewZoom.vue'
 import ConnectionDashboard from './ConnectionDashboard.vue'
 import ThemeSettings from './ThemeSettings.vue'
 import ScreenPicker from './ScreenPicker.vue'
@@ -74,6 +75,7 @@ watch(selectedTheme, theme => {
 const rootEl = ref<HTMLElement | null>(null)
 const settingsOpen = ref(false)
 const screenPickerOpen = ref(false)
+const zoomOpen = ref(false)
 const aboutOpen = ref(false)
 function showHomepage(): void {
   runtimeEntry.cancel()
@@ -475,7 +477,7 @@ onBeforeUnmount(() => {
           :tab="tab"
           :active="tab.key === controller.activeKey.value"
           :controller="controller"
-          :reader-visible="phase === 'session' && (!swipeVisible || nativeSwipeActive) && !screenPickerOpen && !voiceLightboxOpen && !composerOpen && !runtimeHostsOpen && !runtimeDialogProfile && !settingsOpen && !aboutOpen"
+          :reader-visible="phase === 'session' && (!swipeVisible || nativeSwipeActive) && !screenPickerOpen && !zoomOpen && !voiceLightboxOpen && !composerOpen && !runtimeHostsOpen && !runtimeDialogProfile && !settingsOpen && !aboutOpen"
         />
         <div v-if="!controller.tabs.length" class="cover" data-testid="no-tabs">
           <div class="done">
@@ -489,8 +491,8 @@ onBeforeUnmount(() => {
       <!-- Mount during enablement and on failure too, so loading and errors
            stay visible even when the desktop has not become enabled yet.
            The corner toggle gates image capture only. -->
-      <div v-if="activeTab && (activeTab.desktopEnabled || activeTab.desktopBusy || activeTab.desktopError)" class="sheet-host" data-testid="preview-sheet">
-        <PreviewPanel :tab="activeTab" :controller="controller" />
+      <div v-if="activeTab && (activeTab.desktopEnabled || activeTab.desktopBusy || activeTab.desktopError || activeTab.shot)" class="sheet-host" data-testid="preview-sheet">
+        <PreviewPanel :tab="activeTab" :controller="controller" @enlarge="zoomOpen = true" />
       </div>
 
       <div class="keybar" data-testid="keybar">
@@ -548,6 +550,7 @@ onBeforeUnmount(() => {
     </div>
 
     </div>
+    <PreviewZoom v-if="zoomOpen && phase === 'session' && activeTab && activeTab.previewVisible && (activeTab.desktopEnabled || activeTab.shot)" :tab="activeTab" :screen-key="`${activeTab.key}:${activeTab.instanceDesktop?.id || 'legacy'}`" mode="android" @close="zoomOpen = false" />
   </div>
 </template>
 

@@ -1024,8 +1024,7 @@ export function createAppController(
       }
     } catch (e) {
       if (!tab.closed && tab.sessionId === sid && tab.captureGen === gen) {
-        // Never leave a stale frame displayed as if it were current.
-        tab.shot = null
+        // Keep this Screen's last successful frame, but mark it stale.
         tab.shotError = errText(e)
       }
     } finally {
