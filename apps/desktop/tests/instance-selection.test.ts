@@ -50,6 +50,24 @@ describe('direct Screen selection', () => {
       expect(t.instanceClear).toHaveBeenCalledOnce()
     } finally { c.dispose() }
   })
+  it('retains the selected Screen last frame when capture fails and clears the error on recovery', async () => {
+    const { controller: c, transport: t, tab } = setup()
+    try {
+      await flush(); await c.selectInstance(tab, A); await flush()
+      const oldFrame = tab.shot?.src
+      expect(oldFrame).toBeTruthy()
+      t.screenshot = vi.fn(async () => { throw new Error('capture failed') })
+      c.manualCapture(); await flush()
+      expect(tab.shot?.src).toBe(oldFrame)
+      expect(tab.shotError).toContain('capture failed')
+      t.screenshot = vi.fn(async () => ({ ...t.shot, base64: 'bmV3' }))
+      c.manualCapture(); await flush()
+      expect(tab.shotError).toBe('')
+      expect(tab.shot?.src).not.toBe(oldFrame)
+      await c.selectInstance(tab, B)
+      expect(tab.instanceDesktop?.id).toBe(B.id)
+    } finally { c.dispose() }
+  })
   it('keeps the newer selection busy until its own enable finishes', async () => {
     const { controller: c, transport: t, tab } = setup()
     const a = deferred<void>(), b = deferred<void>(); let count = 0

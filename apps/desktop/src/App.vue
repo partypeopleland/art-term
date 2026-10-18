@@ -13,6 +13,7 @@ import './mobile/themes.css'
 import TabBar from './components/TabBar.vue'
 import TerminalPane from './components/TerminalPane.vue'
 import PreviewPanel from './components/PreviewPanel.vue'
+import PreviewZoom from './components/PreviewZoom.vue'
 import { useWorkspaceSize } from './components/workspace-size'
 
 const props = defineProps<{ transport: Transport; terminalFactory?: TerminalFactory; controllerOptions?: ControllerOptions }>()
@@ -28,6 +29,7 @@ watch(selectedTheme, theme => { for (const tab of controller.tabs) tab.term?.set
 const activeTab = controller.activeTab
 const page = ref<'workspace' | 'settings' | 'home'>('workspace')
 const screenPickerOpen = ref(false), transferPicker = ref(false)
+const zoomOpen = ref(false)
 const settingsSection = ref<'appearance' | 'connections' | 'screens'>('appearance')
 const workspace = ref<HTMLElement | null>(null)
 const sizing = useWorkspaceSize(workspace)
@@ -115,7 +117,7 @@ const statusText = computed(() => !activeTab.value ? '未連線' : activeTab.val
       </section>
       <div class="workspace-divider horizontal" role="separator" tabindex="0" aria-label="調整桌面預覽高度" aria-orientation="horizontal" :aria-valuenow="previewHeight" :aria-valuemin="100" :aria-valuemax="maxHeight" data-testid="preview-divider" @pointerdown="sizing.start($event, 'height')" @pointermove="sizing.move" @pointerup="sizing.release" @pointercancel="sizing.release" @lostpointercapture="sizing.end" @keydown="sizing.key($event, 'height')" />
       <section class="desktop-preview" aria-label="桌面預覽" :style="{ height: `${previewHeight}px` }">
-        <PreviewPanel v-if="activeTab && (activeTab.desktopEnabled || activeTab.desktopBusy || activeTab.desktopError)" :tab="activeTab" :controller="controller" />
+        <PreviewPanel v-if="activeTab && (activeTab.desktopEnabled || activeTab.desktopBusy || activeTab.desktopError || activeTab.shot)" :tab="activeTab" :controller="controller" @enlarge="zoomOpen = true" />
         <div v-else class="preview-empty"><strong>桌面預覽</strong><p>{{ activeTab ? '選擇 Screen 以顯示目前工作的桌面。' : '開啟連線後，可在這裡查看桌面。' }}</p><button v-if="activeTab?.status === 'live'" class="btn" @click="openScreens">選擇 Screen</button></div>
       </section>
       </aside>
@@ -140,11 +142,13 @@ const statusText = computed(() => !activeTab.value ? '未連線' : activeTab.val
       <section v-if="page === 'home'" class="desktop-home-page" aria-label="軟體資訊首頁"><nav class="desktop-section-nav" aria-label="軟體資訊"><span class="desktop-eyebrow">ART-TERM</span><button aria-current="page">軟體資訊與更新</button><button @click="showPage('workspace')">返回工作區</button></nav><div class="desktop-section-content"><AppHomepage platform="windows" /></div></section>
     </div>
     <footer class="statusbar"><span class="s-item" :class="activeTab?.status">{{ statusText }}</span><span v-if="activeTab?.remoteSession" class="s-item">{{ activeTab.remoteSession }}</span><span v-if="activeTab?.notice" class="s-item warn">{{ activeTab.notice }}</span><span v-if="controller.uiNotice.value" class="s-item warn">{{ controller.uiNotice.value }}</span><span class="spacer" /><span class="s-item muted">{{ controller.tabs.length }} / 32 分頁</span></footer>
+    <PreviewZoom v-if="zoomOpen && page === 'workspace' && activeTab && activeTab.previewVisible && (activeTab.desktopEnabled || activeTab.shot)" :tab="activeTab" :screen-key="`${activeTab.key}:${activeTab.instanceDesktop?.id || 'legacy'}`" mode="windows" @close="zoomOpen = false" />
     <ScreenPicker v-if="screenPickerOpen && activeTab" :items="controller.instanceDesktops.value" :selected-id="activeTab.instanceDesktop?.id" :busy="activeTab.desktopBusy" :error="activeTab.desktopError || controller.instanceDesktopsError.value" @select="selectScreen" @clear="clearScreen" @close="screenPickerOpen = false" @settings="showSettings('screens')" />
   </div>
 </template>
 
 <style scoped>
+.windows-app { position: relative; overflow: hidden; }
 .desktop-workspace { display: flex; height: 100%; min-height: 0; }
 .desktop-sidebar { flex: none; min-width: 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; background: var(--bg-panel); }
 .desktop-sidebar .desktop-main-page { flex: 1; min-height: 0; height: auto; padding: 12px 8px; margin: 0; overflow-x: hidden; overflow-y: auto; }

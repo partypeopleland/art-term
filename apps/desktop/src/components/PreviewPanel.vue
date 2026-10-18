@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import type { AppController, TabState } from '../state/controller'
 
+const emit = defineEmits<{ enlarge: [] }>()
+
 const props = defineProps<{
   tab: TabState
   controller: AppController
@@ -26,11 +28,11 @@ const props = defineProps<{
     </div>
     <div v-if="tab.desktopBusy || (tab.desktopEnabled && tab.previewVisible && !tab.shot && !tab.shotError && !tab.desktopError)" class="preview-loading" role="status" aria-live="polite"><span class="loading-spinner" aria-hidden="true" /><span>正在載入桌面，請稍候…</span></div>
     <template v-if="tab.previewVisible">
-      <div v-if="tab.shot" class="shot-wrap">
+      <button v-if="tab.shot" class="shot-wrap shot-open" type="button" aria-label="放大桌面預覽" data-testid="preview-enlarge" @click="emit('enlarge')">
         <img class="shot" :src="tab.shot.src" alt="遠端桌面截圖" />
-      </div>
+      </button>
       <div v-else-if="!tab.desktopEnabled && !tab.desktopBusy && !tab.desktopError" class="hint small">尚無截圖</div>
-      <div v-if="tab.shotError" class="error small">截圖失敗：{{ tab.shotError }}</div>
+      <div v-if="tab.shotError || (tab.shot && tab.status !== 'live')" class="error small" role="status">更新失敗{{ tab.shotError ? `：${tab.shotError}` : '（連線中斷）' }}</div>
     </template>
     <div v-else-if="!tab.desktopBusy" class="hint small">已隱藏（停止截圖，遠端工作不受影響）</div>
     <div v-if="!tab.instanceDesktop && tab.desktopMsg" class="meta">{{ tab.desktopMsg }}</div>
@@ -43,4 +45,9 @@ const props = defineProps<{
 .loading-spinner { flex: none; width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: preview-spin .8s linear infinite; }
 @keyframes preview-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .loading-spinner { animation: none; } }
+</style>
+
+<style scoped>
+.shot-open { display: block; width: 100%; border: 0; background: transparent; cursor: zoom-in; }
+.shot-open:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 </style>
