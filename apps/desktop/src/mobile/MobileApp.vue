@@ -88,7 +88,11 @@ const voiceLightboxOpen = ref(false)
 const composerOpen = ref(false)
 const composerText = ref('')
 const phase = ref<Workspace>('list')
-const pager = useWorkspacePager(rootEl, phase, activateWorkspace, () => !screenPickerOpen.value && !aboutOpen.value && !settingsOpen.value && !runtimeHostsOpen.value && !runtimeDialogProfile.value && !composerOpen.value)
+const zoomVisible = computed(() => {
+  const tab = controller.activeTab.value
+  return zoomOpen.value && phase.value === 'session' && !!tab && tab.previewVisible && (tab.desktopEnabled || !!tab.shot)
+})
+const pager = useWorkspacePager(rootEl, phase, activateWorkspace, () => !zoomVisible.value && !screenPickerOpen.value && !aboutOpen.value && !settingsOpen.value && !runtimeHostsOpen.value && !runtimeDialogProfile.value && !composerOpen.value)
 const { dragging: swipeDragging, animating: swipeAnimating, nativeDragging: nativeSwipeActive, visible: swipeVisible, indicatorStyle: workspaceIndicatorStyle, transform: pageTransform, begin: beginSwipe, move: moveSwipe, end: finishSwipe, guardClick: guardSwipeClick } = pager
 provide(NativeSwipeKey, pager.native)
 function activateWorkspace(page: Workspace): void {
@@ -477,7 +481,7 @@ onBeforeUnmount(() => {
           :tab="tab"
           :active="tab.key === controller.activeKey.value"
           :controller="controller"
-          :reader-visible="phase === 'session' && (!swipeVisible || nativeSwipeActive) && !screenPickerOpen && !zoomOpen && !voiceLightboxOpen && !composerOpen && !runtimeHostsOpen && !runtimeDialogProfile && !settingsOpen && !aboutOpen"
+          :reader-visible="phase === 'session' && (!swipeVisible || nativeSwipeActive) && !screenPickerOpen && !zoomVisible && !voiceLightboxOpen && !composerOpen && !runtimeHostsOpen && !runtimeDialogProfile && !settingsOpen && !aboutOpen"
         />
         <div v-if="!controller.tabs.length" class="cover" data-testid="no-tabs">
           <div class="done">
@@ -550,7 +554,7 @@ onBeforeUnmount(() => {
     </div>
 
     </div>
-    <PreviewZoom v-if="zoomOpen && phase === 'session' && activeTab && activeTab.previewVisible && (activeTab.desktopEnabled || activeTab.shot)" :tab="activeTab" :screen-key="`${activeTab.key}:${activeTab.instanceDesktop?.id || 'legacy'}`" mode="android" @close="zoomOpen = false" />
+    <PreviewZoom v-if="zoomVisible && activeTab" :tab="activeTab" :screen-key="`${activeTab.key}:${activeTab.instanceDesktop?.id || 'legacy'}`" mode="android" @close="zoomOpen = false" />
   </div>
 </template>
 

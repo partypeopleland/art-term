@@ -415,6 +415,48 @@ describe('mobile App runtime connection list (no Tauri)', () => {
     m.wrapper.unmount()
   })
 
+  it('keeps enlarged desktop drags in the image, then restores workspace swipes after close', async () => {
+    const m = mountMobile(runtime())
+    try {
+      await flush(); await tapTarget(m, 'nuc'); await chooseMobileScreen(m)
+      await m.wrapper.get('[data-testid="preview-enlarge"]').trigger('click')
+      await flush()
+      expect(m.wrapper.find('[data-testid="mobile-preview-zoom"]').exists()).toBe(true)
+      const viewport = m.wrapper.get('[data-testid="zoom-viewport"]').element as HTMLElement
+      viewport.setPointerCapture = vi.fn()
+      const image = viewport.querySelector('img')!
+      Object.defineProperties(image, { naturalWidth: { value: 1600 }, naturalHeight: { value: 900 } })
+      image.dispatchEvent(new Event('load'))
+      const pointer = (target: Element, type: string, id: number, x: number, primary = true) => {
+        const event = new Event(type, { bubbles: true, cancelable: true })
+        Object.assign(event, { pointerId: id, clientX: x, clientY: 200, button: 0, pointerType: 'touch', isPrimary: primary })
+        target.dispatchEvent(event)
+      }
+      pointer(viewport, 'pointerdown', 1, 100)
+      pointer(viewport, 'pointerdown', 2, 200, false)
+      pointer(viewport, 'pointermove', 2, 280, false)
+      await nextTick()
+      expect(image.getAttribute('style')).toContain('scale(1.8)')
+      pointer(viewport, 'pointerup', 2, 280, false)
+      pointer(viewport, 'pointermove', 1, 300)
+      pointer(viewport, 'pointerup', 1, 300)
+      await flush()
+      expect(m.wrapper.find('[data-testid="mobile-preview-zoom"]').exists()).toBe(true)
+      expect(m.wrapper.get('[data-testid="terminal-to-list"]').attributes('aria-current')).toBeUndefined()
+      await m.wrapper.get('[aria-label="關閉放大檢視"]').trigger('click')
+      await flush()
+      expect(m.wrapper.find('[data-testid="mobile-preview-zoom"]').exists()).toBe(false)
+      vi.useFakeTimers()
+      const root = m.wrapper.get('.m-app').element
+      pointer(root, 'pointerdown', 3, 100)
+      pointer(root, 'pointermove', 3, 300)
+      pointer(root, 'pointerup', 3, 300)
+      await vi.advanceTimersByTimeAsync(200)
+      await flush()
+      expect(m.wrapper.get('[data-testid="terminal-to-list"]').attributes('aria-current')).toBe('page')
+    } finally { m.wrapper.unmount(); vi.useRealTimers() }
+  })
+
   it('a stale screenshot never lands on a backgrounded tab (generation guard)', async () => {
     const t = runtime()
     const m = mountMobile(t)
