@@ -120,6 +120,19 @@ class Fixture:
             await s['ws'].send_bytes(data[pos:pos + 32768])
             await asyncio.sleep(0)
 
+    async def native_redraw(self, work):
+        records = work.get('nativeRows', [])
+        rows = work['resizes'][-1][0] if work['resizes'] else 24
+        end = max(rows, len(records) - work.get('nativeOffset', 0))
+        selected = records[max(0, end - rows):end]
+        body = '\x1b[?1049h\x1b[?1000l\x1b[?1002l\x1b[?1006l'
+        body += '\x1b[H\x1b[2J' + ''.join(f'\x1b[{i+1};1H\x1b[38;2;86;180;233m{text}\x1b[0m' for i, text in enumerate(selected))
+        await self.output(work, (body + f'\x1b[{rows};1H').encode())
+
+    async def ordinary_input(self, work, data):
+        work['input'] += data
+        await self.output(work, b''.join(b'\b \b' if value in (8, 127) else b'\r\n' if value == 13 else bytes([value]) for value in data))
+
     async def history_request(self, s):
         while b'\n' in s['previewInput']:
             raw, s['previewInput'] = s['previewInput'].split(b'\n', 1)
@@ -130,14 +143,40 @@ class Fixture:
             reply = {'v': 1, 'nonce': s['historyNonce'], 'requestId': request['requestId'],
                      'instance': s['historyInstance'], 'op': op}
             event = {'method': 'history', 'name': s['historyWork'], 'action': op}
-            if op in ('viewport', 'older'):
+            if op in ('scroll', 'follow'):
+                work = self.sessions.get(s['historyWork'])
+                if work is None:
+                    reply.update(type='error', kind='unavailable')
+                elif work.get('nativeOwner') not in (None, s['historyInstance']):
+                    reply.update(type='error', kind='busy')
+                else:
+                    work['nativeOwner'] = s['historyInstance']
+                    work['nativeViewport'] = True
+                    rows = work['resizes'][-1][0] if work['resizes'] else 24
+                    records = work.get('nativeRows', [])
+                    if op == 'scroll':
+                        lines = request['lines']
+                        if type(lines) is not int or not -256 <= lines <= 256:
+                            raise ValueError('invalid native viewport lines')
+                        work['nativeOffset'] = max(0, min(max(0, len(records)-rows), work.get('nativeOffset',0)-lines))
+                    else:
+                        work['nativeOffset'] = 0
+                    await self.native_redraw(work)
+                    if op == 'follow' and 'input' in request:
+                        raw = base64.b64decode(request['input'], validate=True)
+                        if len(raw)>4096 or base64.b64encode(raw).decode()!=request['input']:
+                            raise ValueError('invalid follow input')
+                        await self.ordinary_input(work,raw)
+                    reply.update(type='view', held=work['nativeOffset']>0, offset=work['nativeOffset'], available=True)
+                    event.update(lines=request.get('lines'), inputBytes=len(raw) if op=='follow' and 'input' in request else 0)
+            elif op in ('viewport', 'older'):
                 if op == 'viewport':
                     work = self.sessions.get(s['historyWork'])
                     if work is None:
                         reply.update(type='error', kind='unavailable')
                         await self.output(s, (json.dumps(reply) + '\n').encode())
                         continue
-                    records = work['history'].decode('utf-8').splitlines()[-5000:] or ['']
+                    records = work.get('nativeRows') or work['history'].decode('utf-8').splitlines()[-5000:] or ['']
                     s['historyEpoch'] += 1
                     epoch = s['historyEpoch']
                     rows = work['resizes'][-1][0] if work['resizes'] else 24
@@ -157,6 +196,11 @@ class Fixture:
                              records=[{'id': i + 1, 'text': records[i], 'styles': [[0, len(records[i].encode('utf-16-le')) // 2, 0x569cd6, -1, 0]] if records[i] else []} for i in range(start, end)])
                 event.update(epoch=epoch, before=end, limit=limit)
             elif op in ('ack', 'keep', 'close'):
+                if op == 'close':
+                    work=self.sessions.get(s['historyWork'])
+                    if work and work.get('nativeOwner')==s['historyInstance']:
+                        work['nativeOwner']=None; work['nativeOffset']=0
+                        await self.native_redraw(work)
                 reply['type'] = 'ack'
                 if op not in ('close',):
                     reply['epoch'] = request['epoch']
@@ -203,7 +247,7 @@ class Fixture:
                                              historyWork='th2-' + history[1].decode(), historyEpoch=0, historySnapshots={})
                                     s['previewInput'] = b''
                                     await self.output(s, (json.dumps({'v': 1, 'type': 'ready', 'requestId': 0,
-                                        'key': history[1].decode(), 'nonce': s['historyNonce'], 'instance': s['historyInstance']}) + '\n').encode())
+                                        'key': history[1].decode(), 'nonce': s['historyNonce'], 'instance': s['historyInstance'], 'nativeViewport': True}) + '\n').encode())
                         elif len(s['previewInput']) >= 4:
                             size = struct.unpack('!I', s['previewInput'][:4])[0]
                             if size > 16384:
@@ -229,8 +273,8 @@ class Fixture:
                             self.events.append({'method': 'bootstrap', 'name': name})
                             await self.output(s, b'Fixed PTY fixture ready (no commands executed)\r\n')
                     else:
-                        s['input'] += message.data
-                        await self.output(s, b''.join(b'\b \b' if value in (8, 127) else b'\r\n' if value == 13 else bytes([value]) for value in message.data))
+                        if not (s.get('nativeOffset',0) and message.data.startswith(b'\x1b')):
+                            await self.ordinary_input(s, message.data)
                 elif message.type == WSMsgType.TEXT:
                     control = json.loads(message.data)
                     if control.get('v') != 1:
@@ -280,7 +324,13 @@ class Fixture:
 
     def append_lines(self, name, start, count, wide=False):
         async def append():
-            await self.output(self.sessions[name], ''.join(f'ROW-{i:04d}' + (' 繁體中文 English 自動換行' * 24 if wide and i % 7 == 0 else '') + '\r\n' for i in range(start, start + count)).encode())
+            work=self.sessions[name]
+            lines=[f'ROW-{i:04d}' + (' 繁體中文 English 自動換行' * 24 if wide and i%7==0 else '') for i in range(start,start+count)]
+            work.setdefault('nativeRows',[]).extend(lines)
+            if work.get('nativeViewport'):
+                if work.get('nativeOffset',0): work['nativeOffset']+=count
+                else: await self.native_redraw(work)
+            else: await self.output(work, ('\r\n'.join(lines)+'\r\n').encode())
         self.call(append())
 
     def close(self):

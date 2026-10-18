@@ -70,7 +70,7 @@ export function createTauriTransport(): Transport {
     runtimeTestHost: (id, expectedRevision) => call<RuntimeHostTestDto>('gui_runtime_test_host', { id, expectedRevision }),
     open: (targetId, rows, cols) => call<SessionDto>('gui_open', { targetId, rows, cols }),
     poll: (sessionId) => call<OutputDto>('gui_poll', { sessionId }),
-    write: (sessionId, bytes) => call<void>('gui_write', { sessionId, bytes }),
+    write: (sessionId, bytes, terminalReply) => call<void>('gui_write', { sessionId, bytes, ...(terminalReply ? { terminalReply: true } : {}) }),
     resize: (sessionId, rows, cols) => call<void>('gui_resize', { sessionId, rows, cols }),
     close: (sessionId) => call<void>('gui_close', { sessionId }),
     desktop: (sessionId, enabled) => call<DesktopStateDto>('gui_desktop', { sessionId, enabled }),

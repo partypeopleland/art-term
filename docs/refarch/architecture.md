@@ -33,9 +33,11 @@ Rust 核心讀取唯一 `connections.toml`，透過官方 HTTPS API 列出、建
 
 ## 受控端提供固定介面
 
-受控端是獨立的受控點，內部實作由它負責。外部 App 遵循同一套介面；平台差異限於呈現與操作事件，不因某個平台的畫面需求增加受控端專用協定或安裝要求。
+受控端是獨立的受控點，內部實作由它負責。外部 App 遵循同一套介面；平台差異限於呈現與操作事件，不因某個平台建立專用協定或獨立安裝項。共同介面可透過能力宣告向後相容升級，升級同一個通用 helper。
 
-歷史閱讀統一使用既有 `viewport / older / ack / keep / close` 快照協定。共用 Rust 層管理工作身分、通道與回覆驗證，`HostHistoryWindow` 管理快照、分頁、顯示確認、保活及 1024 行窗口。Android 原生 View 與 Windows DOM 閱讀元件只將操作交給這個模型，再呈現模型提供的資料。tmux、socket、擷取及清理由受控端 helper 處理，平台閱讀元件不操作它們。未來介面變更須維持共同契約與相容性，不能由單一平台另開一條控制路徑。
+歷史介面由同一個受控端 helper 提供。原生 viewport 的 `scroll / follow` 控制原工作畫面的閱讀位置，畫面沿既有 PTY 回傳；快照的 `viewport / older / ack / keep / close` 維持原有語意與相容性。共用 Rust 層管理工作身分、能力、通道、輸入排序及回覆驗證；App 只提出中立操作，不自行組合 tmux 指令或操作 socket。
+
+Windows 的 `HostTerminalViewport` 管理捲動事件、保活與生命週期，使用原本的 xterm 呈現所有畫面。Android 的 `HostHistoryWindow` 管理快照、分頁、顯示確認及 1024 行窗口，由原生 View 呈現。共同介面以能力宣告向後相容演進，受控端內部實作保持集中，不另設平台專用 helper 或安裝流程。
 
 ## Android 畫面與原生閱讀器
 
@@ -68,18 +70,22 @@ Android 終端閱讀器是覆蓋在 WebView 終端位置的原生 View，水平�
 
 Windows App 接入同一套分類 Dashboard、全頁 settings、homepage、四主題及 Screen picker，保留 Host 管理、硬體鍵盤與 xterm。設定／首頁遮蓋時終端元件保持掛載並處理輸出，返回後 fit／focus，表單正常輸入不被終端快捷鍵攔截。語音與 Android 原生閱讀／手勢 plugin 不移植。
 
-Windows 即時輸入輸出由 xterm 處理；上捲歷史使用受控端既有快照介面及共用 `HostHistoryWindow`。桌面閱讀元件負責滑鼠、DOM、選取與呈現，Android 原生閱讀器負責觸控與原生 View；兩者共用歷史取得、分頁、確認及保活規則。Windows 閱讀期間固定快照位置，回到底部返回即時終端，無須受控端新增滑鼠控制能力。
+Windows 的即時畫面與歷史都使用原本的 xterm 實例。上捲呼叫共同歷史通道的原生 viewport 操作，tmux 沿原 PTY 回傳較早畫面；下捲到底自然接續即時輸出。字型、主題、游標與文字選取維持原終端，沒有另外的閱讀覆蓋層。一般 normal buffer 仍使用 xterm 本機 scrollback；受控工作才使用共同端點的原生閱讀能力。
 
 ```text
-Windows keyboard / IME -> xterm -> Runtime PTY -> tmux / CLI
-                             ^                        |
-                             +------- raw PTY --------+
-Windows wheel / Android touch
-          |
-     HostHistoryWindow -> viewport / older / ack / keep / close
-          |                         |
-   platform renderer          controlled Host helper
+Windows wheel -> HostTerminalViewport -> shared history channel
+                                              | scroll / follow
+                                              v
+                                         Host helper -> tmux work pane
+                                                            |
+Windows xterm <--------------- original PTY -----------------+
+
+Android touch -> HostHistoryWindow -> same history channel
+                                              | snapshot operations
+Android native View <------------ bounded rows/epoch --------+
 ```
+
+共用原生連線層將使用者輸入與 viewport 操作排序，閱讀時先恢復即時位置，再交付輸入；終端自動查詢回覆則直接沿原 PTY 回傳，不改變閱讀位置。控制租期只清理自有閱讀狀態，關閉或程序死亡不終止工作 Shell。
 
 Windows EXE／WebView2 與 Android 原生 View 的操作仍須分別驗證；平台呈現測試不能取代受控端契約測試。
 
@@ -137,7 +143,7 @@ App --create--> Runtime work Shell --wrapper--> private tmux work pane
  Android native reader: viewport first, upward gesture -> older page
 ```
 
-每個工作使用自己的 socket，tmux 與系統版本並存。輔助程序最多維持兩份 tmux 原生閱讀快照；兩平台的快照首次只讀當前畫面，上捲才最多取得 256 行，閱讀窗口最多 1024 行。歷史版面與軟換行由 tmux 提供，輔助程序不先擷取完整歷史再切頁。畫面確認已顯示後才釋放舊快照，前插舊頁與新輸出均保留閱讀位置。生命週期、限制與主機準備見[終端歷史](terminal-history.md)。
+每個工作使用自己的 socket，tmux 與系統版本並存。快照讀取最多維持兩份 tmux 原生閱讀快照；Android 首次只讀當前畫面，上捲才最多取得 256 行，閱讀窗口最多 1024 行。Windows 原生閱讀直接由 tmux 管理有限的 backing history，不在 App 重新轉譯歷史。歷史版面與軟換行由 tmux 提供，輔助程序不先擷取完整歷史再切頁。畫面確認已顯示後才釋放舊快照，前插舊頁與新輸出均保留閱讀位置。生命週期、限制與主機準備見[終端歷史](terminal-history.md)。
 
 ## 平台層負責什麼
 

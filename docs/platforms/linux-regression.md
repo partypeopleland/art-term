@@ -49,6 +49,19 @@ python3 scripts/linux-regression/run.py --host-fixtures
 
 新 Runtime 動態選空閒 port，不停止既有 listener。既有安裝測試預設 port 為 18090；整合 runner 給它空閒的 `--port`。這只是 target 內白名單 installer 測試副本的 port 置換，正式 `init-host.sh` 的預設與功能不變；來源模板不符時拒絕置換。測試 HOME／TMPDIR 均在專案 target 內。
 
+## 原終端 viewport 與舊快照相容
+
+原視窗捲動另外以真官方 Runtime、私有 tmux 3.6a 及候選共用 helper 驗證。先依[終端歷史](../refarch/terminal-history.md)準備 Node 22／tmux，再從 repository 根目錄建置候選並執行：
+
+```bash
+node scripts/openab-runtime/build-tmux-history.mjs --paged target/inline-history/helper
+python3 scripts/linux-regression/terminal_viewport.py --helper target/inline-history/helper/tmux-history.cjs
+```
+
+此測試將工具複製到隔離工作目錄，不安裝候選到正式受控端。至少核對原 PTY 的較早內容、1000 行以上多次上捲、持續輸出閱讀保持、下捲追尾、閱讀中輸入只送一次、其他 reader／namespace 隔離，以及原 `viewport / older / ack / keep / close` 的邊界。SIGKILL 與正式 Runtime 刪除自有 helper 的案例需確認管線 guard 清理相符的 native mode，不能只測正常 `finally`。
+
+這些結果證明共同端點及真 PTY 行為，仍須 Windows EXE／WebView2 驗證同一 xterm 實際可見行與操作；不能以收到舊 bytes 或 mode 數字取代畫面驗收。測試輸出與清理狀態依當次 `target/inline-history/runtime-*/result.json` 判定。
+
 ## 判定與限制
 
 2026-10-11 在 Linux x86_64 完成真 Runtime、真 helper 大圖及一次既有 MCP 擷取；Host 四套共 53 tests 通過。首次安裝 fixture 誤用固定 readiness port，修正為隔離 port 後，定向重跑該套 16 tests 通過；這是兩輪結果的合併驗收，沒有將首次失敗改記成功。正式 installer 與 openab-pty 均未修改。

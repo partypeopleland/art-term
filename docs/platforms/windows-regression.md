@@ -4,7 +4,7 @@
 
 給 AI 的工作範圍應包含要修改的功能與預期行為。AI 先讀本頁，從下方功能對照找既有保護，再決定需要增加哪個案例；不要以增加測試數量代替驗證具體行為。
 
-Windows 專屬修改須在 Windows 電腦執行。本輪修正上捲歷史並統一使用既有快照介面，語音與 Android plugin 不在範圍；前端／Rust／真 tmux 的部分歷史結果不能代表最新 Windows GUI、真 Codex 或 OS 中文候選選字已驗收。各次測試需核對實際 source／binary，舊 DesktopHistoryReader 的通過紀錄不能沿用。
+Windows 專屬修改須在 Windows 電腦執行。本輪修正原 CLI 視窗直接上捲與下捲自然追尾，透過共同受控端的原生 viewport 操作，語音與 Android plugin 不在範圍；前端／Rust／真 tmux 的部分歷史結果不能代表最新 Windows GUI、真 Codex 或 OS 中文候選選字已驗收。各次測試需核對實際 source／binary，舊 DesktopHistoryReader 的通過紀錄不能沿用。
 
 ## 各層測到什麼
 
@@ -40,7 +40,7 @@ Vue/controller + test transport     real DPAPI / local TLS-WSS fixtures
 target/windows-regression/venv/Scripts/python.exe scripts/windows-regression/headless-layout.py --driver target/gui-tools/edge/msedgedriver.exe --output target/windows-regression/layout-check
 ```
 
-此檢查使用 Edge headless、隱藏 driver console，以及獨立 `/?desktop` 預覽入口與虛構資料；涵蓋固定200px、分隔線拖曳、live xterm／首個小幅上捲／共用快照分頁／回到底部、非阻塞桌面載入、分類設定與草稿清除，並保存截圖及結果。它不執行原生 App、IPC、DPAPI 或系統選檔器，不能代替下面的原生 E2E。完成後關閉自己啟動的預覽 server；正式打包不包含此入口。
+此檢查使用 Edge headless、隱藏 driver console，以及獨立 `/?desktop` 預覽入口與虛構資料；涵蓋固定200px、分隔線拖曳、原 xterm／首個小幅上捲／實際可見較早行／下捲到底自然追尾、非阻塞桌面載入、分類設定與草稿清除，並保存截圖及結果。它不執行原生 App、IPC、DPAPI 或系統選檔器，不能代替下面的原生 E2E。完成後關閉自己啟動的預覽 server；正式打包不包含此入口。
 
 以下指令均在 Windows 的專案根目錄執行。需要已安裝 Rust MSVC、C++ Build Tools、Node/npm、PowerShell 與 Python；正常使用 App 的人不需要這些開發工具。首次安裝相關工具依其官方文件，由 AI 先檢查現有版本並沿用。
 
@@ -96,7 +96,7 @@ Microsoft Edge WebDriver 必須匹配 App 使用的 **WebView2 Runtime**，不�
 | 輸入／ACK／Gap／恢復 | core `openab/tests.rs`：`native_wss_historical_gap_ack_and_live_input_are_byte_exact`、`native_same_retained_token_resumes_from_ack_without_admin_renew`；前端 `runtime-stream.test.ts` | 真 xterm、分頁隔離、同 token 恢復、無輸入重播；ACK 是本機 parse 完成確認，不是遠端 frame。 |
 | 舊截圖相容通道 | core `openab/screenshot.rs`：`decode_screenshot_validates_envelope_and_preserves_wire_bytes`、`decode_status_accepts_only_an_explicit_boolean` 與 framing tests；`openab/tests.rs`：`preview_cancel_during_attach_deletes_only_created_owned_shell`、`preview_burst_larger_than_terminal_queue_is_acknowledged_without_slow_consumer` | 有效圖片與 envelope 錯誤、原生大圖與工作 Shell 隔離；只測 burst bytes 不代表圖片解碼通過。 |
 | 新版 Windows 畫面／Screens | 前端 `app.test.ts`、controller 的 Screen 選擇與生命週期案例；native `instance_desktops.rs`／`runtime_sessions.rs` 與 Windows runner | Dashboard、四主題、設定、版本首頁、Host 管理、每分頁 Screen／來源／clear；真 EXE／DPAPI 與晚到結果原生核對。 |
-| Windows 共用歷史快照 | 前端 `desktop-history.test.ts`、`windows-parity.test.ts`；Rust history 協定測試及既有 helper 實測 | 首次小幅上捲、延遲回覆、viewport／older／ACK／keep／close、1024行與anchor、閱讀保持、回live、hidden／close及舊helper相容；Windows只做平台呈現，無專用受控端控制。 |
+| 原終端歷史與共同介面 | 前端 `host-terminal-viewport.test.ts`、`terminal-wheel.test.ts`、`windows-parity.test.ts`；Rust history 協定及真 Runtime／helper | 同一 xterm 實例／可見舊行／字型主題、首個小幅上捲、持續輸出保持、下捲追尾、閱讀中輸入、protocol reply、busy／close／晚到回覆、能力不足及 inner alternate 恢復；Android 原五操作另作相容保護。 |
 | 終端滾動／手機輸入與背景 | 前端 `terminal-wheel.test.ts`、`mobile-input.test.ts`、`mobile-runtime-ipc.test.ts`、`runtime-stream.test.ts` | 保留 IME、背景取消、原 binding 恢復；Windows 的手機尺寸／模擬事件不等於 Android 實機。 |
 
 ## 本次 Windows 同步的接續驗收
@@ -113,7 +113,7 @@ Microsoft Edge WebDriver 必須匹配 App 使用的 **WebView2 Runtime**，不�
 
 先以 normal buffer 驗證原生 scrollback，再用專用工作驗證完整 Windows xterm→官方 Runtime→私有 tmux alternate 路徑。記錄單次小幅wheel前後的原生位置，不以捲條出現或批量文字最後存在作為位移／延遲證據。真tmux直接SGR mouse測試不包含Windows繪製，Windows echo fixture也不包含真tmux，兩者不能合稱整條路徑已過。
 
-控制lease驗證 READY capability、舊helper不送未知操作、enable pending後close、兩owner交接、child mouse轉送及mouse／copy-mode／WheelUpPane精確還原；60秒保活不能夾帶viewport輪詢。Android snapshot另作相容回歸。真Codex使用任務自己的新會話，OS中文候選選字與Backspace實測不足就留NOT_RUN，不宣稱Owner問題已解決。
+共同 viewport 控制需驗證 READY capability、舊 helper 不送未知操作、pending 後 close、兩 owner 隔離、原生 down／follow、使用者輸入只送一次、終端 protocol reply 不退出閱讀，以及 helper／guard 死亡後精確清理。30 秒狀態保活不能夾帶快照輪詢，不改 mouse 或 WheelUpPane 設定。Android 原五操作另作相容回歸。真Codex使用任務自己的新會話，OS中文候選選字與Backspace實測不足就留NOT_RUN，不宣稱Owner問題已解決。
 
 本輪AI完成基本驗收與必要審查後可commit／push開發分支，Owner使用回饋不阻止這個提交步驟；仍禁止main／tag／release。
 

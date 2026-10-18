@@ -23,6 +23,7 @@ serde.workspace = true
 sha2.workspace = true
 anyhow.workspace = true
 base64 = "0.22"
+url = "=2.5.8"
 zeroize = "1.8"
 uuid = { version = "1", features = ["v4"] }
 tauri-plugin-clipboard-manager = "=2.4.1"

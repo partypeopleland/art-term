@@ -14,6 +14,7 @@ use art_term_core::{
     session_io::{DesktopStateDto, HostDto, ScreenshotDto, SessionDto, TargetDto},
 };
 use serde::Serialize;
+use base64::{engine::general_purpose::STANDARD, Engine};
 use std::{
     collections::{HashMap, HashSet},
     pin::Pin,
@@ -156,6 +157,11 @@ pub struct Connection {
     desktop_operation: tokio::sync::Mutex<()>,
     history_binding: Option<SessionBinding>,
     history: tokio::sync::Mutex<Option<HistorySlot>>,
+    history_cancel: watch::Sender<u64>,
+    native_interaction: tokio::sync::Mutex<()>,
+    native_enabled: AtomicBool,
+    native_held: AtomicBool,
+    native_uncertain: AtomicBool,
 }
 #[derive(Default)]
 pub struct RuntimeSessions {
@@ -436,6 +442,11 @@ impl RuntimeSessions {
                     desktop_operation: tokio::sync::Mutex::new(()),
                     history_binding: Some(history_binding),
                     history: tokio::sync::Mutex::new(None),
+                    history_cancel: watch::channel(0).0,
+                    native_interaction: tokio::sync::Mutex::new(()),
+                    native_enabled: AtomicBool::new(false),
+                    native_held: AtomicBool::new(false),
+                    native_uncertain: AtomicBool::new(false),
                 }),
             );
         Ok(SessionDto {
@@ -477,17 +488,53 @@ impl RuntimeSessions {
             .ack(batch, generation)
             .map_err(Into::into)
     }
-    pub fn write(&self, id: &str, bytes: &[u8]) -> Reply<()> {
+    fn direct_write(connection: &Connection, bytes: &[u8]) -> Reply<()> {
+        if connection.closed.load(Ordering::SeqCst) { return Err(SessionError::Cancelled.into()); }
+        let guard = connection.handle.lock().map_err(|_| SessionError::Internal)?;
+        guard.as_ref().ok_or(SessionError::Busy)?.write(bytes).map_err(Into::into)
+    }
+    pub async fn write(&self, id: &str, bytes: &[u8], terminal_reply: bool) -> Reply<()> {
         let connection = self.connection(id)?;
-        let guard = connection
-            .handle
-            .lock()
-            .map_err(|_| SessionError::Internal)?;
-        guard
-            .as_ref()
-            .ok_or(SessionError::Busy)?
-            .write(bytes)
-            .map_err(Into::into)
+        // Replies belong to the outer tmux client, never the inner Shell or follow operation.
+        // Android never enables native control and retains this original fast path.
+        if terminal_reply || !connection.native_enabled.load(Ordering::SeqCst) {
+            return Self::direct_write(&connection, bytes);
+        }
+        let history_generation = *connection.history_cancel.borrow();
+        let _interaction = connection.native_interaction.lock().await;
+        if *connection.history_cancel.borrow() != history_generation { return Err(SessionError::Cancelled.into()); }
+        if connection.closed.load(Ordering::SeqCst) { return Err(SessionError::Cancelled.into()); }
+        if connection.native_uncertain.load(Ordering::SeqCst) { return Err(SessionError::InputUncertain.into()); }
+        if !connection.native_held.load(Ordering::SeqCst) { return Self::direct_write(&connection, bytes); }
+        if bytes.len() > 1024 * 1024 { return Err(SessionError::Capacity.into()); }
+        let mut slot = connection.history.lock().await;
+        if connection.closed.load(Ordering::SeqCst) || *connection.history_cancel.borrow() != history_generation { return Err(SessionError::Cancelled.into()); }
+        let channel = &mut slot.as_mut().ok_or(SessionError::StateChanged)?.channel;
+        let mut cancel = connection.cancel.subscribe();
+        let mut history_cancel = connection.history_cancel.subscribe();
+        let length = bytes.len().min(4096);
+        connection.native_uncertain.store(true, Ordering::SeqCst);
+        let result = tokio::select! { biased;
+            _ = cancel.changed() => Err(SessionError::Cancelled),
+            _ = history_cancel.changed() => Err(SessionError::Cancelled),
+            result = channel.request(HistoryRequest::Follow { input: Some(STANDARD.encode(&bytes[..length])) }) => result,
+        };
+        match result {
+            Ok(HistoryReply::View { held: false, offset: 0, available: true, .. }) => {
+                connection.native_held.store(false, Ordering::SeqCst);
+                connection.native_uncertain.store(false, Ordering::SeqCst);
+                // Long CLI commands still remain one ordered interaction; no second sender.
+                if length < bytes.len() { Self::direct_write(&connection, &bytes[length..])?; }
+                Ok(())
+            }
+            _ => {
+                if let Some(mut owned) = slot.take() {
+                    if owned.channel.close().await { connection.native_held.store(false, Ordering::SeqCst); connection.native_uncertain.store(false, Ordering::SeqCst); }
+                }
+                // Atomic remote send may already have happened. No retry or original-PTY fallback.
+                Err(SessionError::InputUncertain.into())
+            }
+        }
     }
     pub fn resize(&self, id: &str, rows: u16, cols: u16) -> Reply<()> {
         let connection = self.connection(id)?;
@@ -507,6 +554,11 @@ impl RuntimeSessions {
     /// list so the user can re-select; minting requires explicit open.
     pub async fn recover(&self, hosts: &RuntimeHosts, id: &str) -> Reply<()> {
         let connection = self.connection(id)?;
+        connection.history_cancel.send_modify(|n| *n = n.wrapping_add(1));
+        let _interaction = connection.native_interaction.lock().await;
+        if let Some(mut owned) = connection.history.lock().await.take() {
+            if owned.channel.close().await { connection.native_held.store(false, Ordering::SeqCst); connection.native_uncertain.store(false, Ordering::SeqCst); }
+        }
         let mut old = connection
             .handle
             .lock()
@@ -822,13 +874,28 @@ impl RuntimeSessions {
         let Some(binding) = conn.history_binding.as_ref() else { return Ok(HistoryReply::Unsupported) };
         let Some(key) = history::key_from_name(&binding.name) else { return Ok(HistoryReply::Unsupported) };
         let version = history::HistoryVersion::from_name(&binding.name).ok_or(SessionError::Protocol)?;
-        let mut slot = conn.history.try_lock().map_err(|_| SessionError::Busy)?;
-        if matches!(request, HistoryRequest::Close) {
-            if let Some(mut owned) = slot.take() { owned.channel.close().await; }
+        if matches!(request, HistoryRequest::Follow { input: Some(_) }) { return Err(SessionError::Protocol.into()); }
+        let native = matches!(request, HistoryRequest::Scroll { .. } | HistoryRequest::Follow { .. });
+        let closing_history = matches!(request, HistoryRequest::Close);
+        let was_uncertain = conn.native_uncertain.load(Ordering::SeqCst);
+        if native {
+            // Prewarm must fence input too: another retained helper may already own copy-mode.
+            conn.native_uncertain.store(true, Ordering::SeqCst);
+            conn.native_enabled.store(true, Ordering::SeqCst);
+        }
+        if closing_history { conn.history_cancel.send_modify(|n| *n = n.wrapping_add(1)); }
+        let history_generation = *conn.history_cancel.borrow();
+        let _interaction = if native || closing_history || conn.native_enabled.load(Ordering::SeqCst) { Some(conn.native_interaction.lock().await) } else { None };
+        if *conn.history_cancel.borrow() != history_generation { return Err(SessionError::Cancelled.into()); }
+        let mut slot = if closing_history { conn.history.lock().await } else { conn.history.try_lock().map_err(|_| SessionError::Busy)? };
+        if closing_history {
+            if let Some(mut owned) = slot.take() {
+                if owned.channel.close().await { conn.native_held.store(false, Ordering::SeqCst); conn.native_uncertain.store(false, Ordering::SeqCst); }
+            }
             return Ok(HistoryReply::Unsupported);
         }
         if conn.closed.load(Ordering::SeqCst) { return Err(SessionError::Cancelled.into()) }
-        if slot.is_none() && !matches!(request, HistoryRequest::Viewport) {
+        if slot.is_none() && !matches!(request, HistoryRequest::Viewport | HistoryRequest::Scroll { .. } | HistoryRequest::Follow { .. }) {
             return Ok(HistoryReply::Error { error: "expired".into() });
         }
         // The frozen profile stays available while recovery temporarily takes
@@ -839,6 +906,8 @@ impl RuntimeSessions {
         let snapshot = store.snapshot(&binding.profile.id).map_err(SessionError::from)?;
         if snapshot.profile != binding.profile { return Err(SessionError::StateChanged.into()) }
         let mut cancel = conn.cancel.subscribe();
+        let mut history_cancel = conn.history_cancel.subscribe();
+        let generation = conn.next_generation.load(Ordering::SeqCst);
         let operation = async {
             if slot.is_none() {
                 let host_key = ownership_key(&binding.profile);
@@ -872,15 +941,23 @@ impl RuntimeSessions {
         };
         let result = tokio::select! { biased;
             _ = cancel.changed() => Err(SessionError::Cancelled),
+            _ = history_cancel.changed() => Err(SessionError::Cancelled),
             result = operation => result,
         };
-        let current = !conn.closed.load(Ordering::SeqCst) && store.is_current(&binding.profile).map_err(SessionError::from)?;
+        let current = !conn.closed.load(Ordering::SeqCst) && generation == conn.next_generation.load(Ordering::SeqCst) && *conn.history_cancel.borrow() == history_generation && store.is_current(&binding.profile).map_err(SessionError::from)?;
         if result.is_err() || !current {
-            if let Some(mut owned) = slot.take() { owned.channel.close().await; }
+            if let Some(mut owned) = slot.take() {
+                if owned.channel.close().await { conn.native_held.store(false, Ordering::SeqCst); conn.native_uncertain.store(false, Ordering::SeqCst); }
+            }
         }
         if !current { return Err(SessionError::StateChanged.into()) }
+        if let Ok(HistoryReply::View { held, .. }) = &result { conn.native_held.store(*held, Ordering::SeqCst); conn.native_uncertain.store(false, Ordering::SeqCst); }
         match result {
-            Ok(HistoryReply::Unsupported) => Ok(HistoryReply::Error { error: "unsupported".into() }),
+            Ok(HistoryReply::Unsupported) => {
+                // An old helper never entered native mode; retain any earlier ambiguous lease fence.
+                if native && !was_uncertain && slot.as_ref().is_some_and(|owned| !owned.channel.native_supported()) { conn.native_uncertain.store(false, Ordering::SeqCst); }
+                Ok(HistoryReply::Error { error: "unsupported".into() })
+            },
             Err(SessionError::Missing) => Ok(HistoryReply::Error { error: "unavailable".into() }),
             Err(SessionError::UpgradeRequired) => Ok(HistoryReply::Error { error: "unsupported".into() }),
             other => other.map_err(Into::into),
@@ -1021,7 +1098,7 @@ impl RuntimeSessions {
         let words = std::iter::once(cli.command.as_str()).chain(cli.args.iter().map(String::as_str)).map(quote).collect::<Vec<_>>().join(" ");
         let command = format!("python3 \"$HOME/.local/share/art-term/tools/instance_bridge.py\" launch --binding {} -- {}\r", binding.name, words);
         anyhow::ensure!(*conn.preview_cancel.borrow() == epoch && Self::direct_snapshot(hosts, &conn)?.profile == profile, "桌面已切換");
-        self.write(id, command.as_bytes()).map_err(|_| anyhow::anyhow!("無法啟動 CLI"))?;
+        self.write(id, command.as_bytes(), false).await.map_err(|_| anyhow::anyhow!("無法啟動 CLI"))?;
         // Exactly one explicit launch. Only configuration is retried while Codex starts stdio.
         for _ in 0..10 {
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
@@ -1064,6 +1141,8 @@ impl RuntimeSessions {
                 .preview_cancel
                 .send_modify(|n| *n = n.wrapping_add(1));
             connection.cancel.send_replace(true);
+            connection.history_cancel.send_modify(|n| *n = n.wrapping_add(1));
+            let _interaction = connection.native_interaction.lock().await;
             if let Some(mut history) = connection.history.lock().await.take() { history.channel.close().await; }
             let handle = connection
                 .handle
@@ -1097,6 +1176,8 @@ impl RuntimeSessions {
                 .preview_cancel
                 .send_modify(|n| *n = n.wrapping_add(1));
             connection.cancel.send_replace(true);
+            connection.history_cancel.send_modify(|n| *n = n.wrapping_add(1));
+            let _interaction = connection.native_interaction.lock().await;
             if let Some(mut history) = connection.history.lock().await.take() { history.channel.close().await; }
             let handle = connection.handle.lock().ok().and_then(|mut h| h.take());
             if let Some(handle) = handle {
@@ -1437,9 +1518,38 @@ mod tests {
                 desktop_operation: tokio::sync::Mutex::new(()),
                 history_binding: None,
                 history: tokio::sync::Mutex::new(None),
+                    history_cancel: watch::channel(0).0,
+                    native_interaction: tokio::sync::Mutex::new(()),
+                    native_enabled: AtomicBool::new(false),
+                    native_held: AtomicBool::new(false),
+                    native_uncertain: AtomicBool::new(false),
             }),
         );
         id
+    }
+    #[tokio::test]
+    async fn native_uncertain_without_helper_blocks_successive_user_input_but_not_protocol_route() {
+        let sessions=RuntimeSessions::default();
+        let id=fake_connection(&sessions,None);
+        let connection=sessions.connection(&id).unwrap();
+        connection.native_enabled.store(true,Ordering::SeqCst);
+        connection.native_uncertain.store(true,Ordering::SeqCst);
+        for _ in 0..2 {
+            let error=sessions.write(&id,b"echo must-not-send\n",false).await.unwrap_err();
+            assert_eq!(error.kind,SessionError::InputUncertain);
+        }
+        // With no handle, reaching the original protocol path yields Busy rather than uncertainty.
+        assert_eq!(sessions.write(&id,b"\x1b[1;1R",true).await.unwrap_err().kind,SessionError::Busy);
+    }
+    #[tokio::test]
+    async fn legacy_non_history_session_does_not_enable_native_input_fence() {
+        let sessions=RuntimeSessions::default();
+        let id=fake_connection(&sessions,None);
+        assert!(matches!(sessions.history_request(&fake_hosts(),&id,HistoryRequest::Scroll {lines:0}).await.unwrap(),HistoryReply::Unsupported));
+        let connection=sessions.connection(&id).unwrap();
+        assert!(!connection.native_enabled.load(Ordering::SeqCst));
+        assert!(!connection.native_uncertain.load(Ordering::SeqCst));
+        assert_eq!(sessions.write(&id,b"echo legacy\n",false).await.unwrap_err().kind,SessionError::Busy);
     }
     /// Failed-store stub: preview-seam tests never touch it, and a real
     /// native route on it fails closed through the store error.

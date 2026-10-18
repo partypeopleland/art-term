@@ -93,28 +93,27 @@ def label(name):
 def inline_scroll(app, fixture):
     app.main_page()
     name = create_shell(app, fixture, app.profiles()[0])
-    fixture.append_lines(name, 1, 96)
-    css = '.pane:not([style*="display: none"]) .xterm-rows'
+    fixture.append_lines(name, 1, 1100)
+    css = '.pane:not([style*="display: none"]) .xterm-screen'
     def text():
-        return app.driver.execute_script('return document.querySelector(arguments[0])?.textContent || "";', css)
-    def wait_inline(stage, predicate):
-        return app.wait(predicate)
-    wait_inline('initial-live-rows', lambda: 'ROW-0096' in text())
-    require(not any(e['method'] == 'history' and e['name'] == name and e['action'] in ('viewport', 'older') for e in fixture.snapshot()['events']), 'live terminal polls snapshots')
+        return app.driver.execute_script('const h=document.querySelector(arguments[0]),b=h?.getBoundingClientRect();return h?[...h.querySelectorAll(".xterm-rows>div")].filter(e=>{const r=e.getBoundingClientRect();return r.bottom>b.top&&r.top<b.bottom}).map(e=>e.innerText).join("\\n"):"";', css)
+    def wait_inline(stage, predicate): return app.wait(predicate)
+    wait_inline('initial-live-rows', lambda: 'ROW-1100' in text())
+    app.driver.execute_script('window.__inlineOriginal=document.querySelector(arguments[0]).closest(".xterm")', css)
     screen = app.wait(lambda: next((e for e in app.find('.pane .xterm-screen') if e.is_displayed()), None))
+    live = text()
     ActionChains(app.driver).scroll_from_origin(ScrollOrigin.from_element(screen), 0, -34).perform()
-    viewport = app.wait(lambda: next((e for e in app.find('.history-viewport') if e.is_displayed()), None))
-    history_text = lambda: viewport.text
-    wait_inline('first-wheel-older', lambda: 'ROW-0001' in history_text())
-    held = history_text()
-    fixture.append_lines(name, 97, 25)
-    app.driver.execute_async_script('const done=arguments[0];setTimeout(done,200);')
-    require(history_text() == held, 'new output pulled the held snapshot away from reading')
-    for _ in range(64):
-        if not viewport.is_displayed(): break
-        ActionChains(app.driver).scroll_from_origin(ScrollOrigin.from_element(viewport), 0, 120).perform()
-    wait_inline('return-live', lambda: not viewport.is_displayed())
-    wait_inline('latest-live-rows', lambda: 'ROW-0121' in text())
+    wait_inline('same-renderer-first-wheel', lambda: text()!=live)
+    require(not app.find('.desktop-history,.history-viewport,[data-testid=history-close]'), 'second renderer remains')
+    require(app.driver.execute_script('return window.__inlineOriginal===document.querySelector(arguments[0]).closest(".xterm")',css),'original xterm replaced')
+    for _ in range(6): ActionChains(app.driver).scroll_from_origin(ScrollOrigin.from_element(screen),0,-5000).perform()
+    wait_inline('thousand-original-rows', lambda:'ROW-0001' in text())
+    held=text()
+    fixture.append_lines(name,1101,25)
+    app.driver.execute_async_script('const done=arguments[0];setTimeout(done,200)')
+    require(text()==held,'new output moved held original viewport')
+    for _ in range(6): ActionChains(app.driver).scroll_from_origin(ScrollOrigin.from_element(screen),0,5000).perform()
+    wait_inline('latest-live-rows',lambda:'ROW-1125' in text())
     def probe(marker, expected, absent='', erase=False):
         app.driver.execute_script(r"""
 const p=window.__reg.latency={name:arguments[0],marker:arguments[1],expected:arguments[2],absent:arguments[3],erase:arguments[4]};
@@ -135,13 +134,13 @@ observer.observe(root,{subtree:true,childList:true,characterData:true});
     wait_inline('unicode-or-backspace-paint', lambda: app.driver.execute_script('return !!window.__reg.latency.painted;'))
     backspace_ms = app.driver.execute_script('return window.__reg.latency.painted-window.__reg.latency.received;')
     require(backspace_ms < 150, f'Backspace adds rendering delay ({backspace_ms:.1f}ms)')
-    app.driver.save_screenshot(str(app.run / 'workspace-shared-snapshot.png'))
-    events = [e for e in fixture.snapshot()['events'] if e['method'] == 'history' and e['name'] == name]
-    require(any(e['action'] == 'viewport' for e in events) and any(e['action'] == 'older' for e in events), 'shared snapshot paging absent')
-    require(any(e['action'] == 'ack' for e in events) and any(e['action'] == 'close' for e in events), 'snapshot display/release absent')
-    require(not any(e['action'] == 'terminalMouse' for e in events), 'platform-specific host operation remains')
-    return {'sharedSnapshotFirstWheel': True, 'heldDuringNewOutput': True, 'returnLiveXterm': True,
-            'unicodeCommitIpcToPaintMs': unicode_ms, 'backspaceIpcToPaintMs': backspace_ms, 'liveSnapshotPollingAbsent': True}
+    app.driver.save_screenshot(str(app.run / 'workspace-inline-original-xterm.png'))
+    events = [e for e in fixture.snapshot()['events'] if e['method']=='history' and e['name']==name]
+    require(any(e['action']=='scroll' and e.get('lines',0)<=-1 for e in events),'first34px earlier-row scroll absent')
+    require(not any(e['action'] in ('viewport','older','ack','keep','terminalMouse') for e in events),'snapshot or platform-only request remains')
+    require(app.driver.execute_script('return window.__inlineOriginal===document.querySelector(arguments[0]).closest(".xterm")',css),'xterm changed during full loop')
+    return {'sameOriginalXterm':True,'thousandRowsVisible':True,'heldContinuousOutput':True,'naturalDownFollow':True,
+            'unicodeCommitIpcToPaintMs':unicode_ms,'backspaceIpcToPaintMs':backspace_ms,'noSnapshotPolling':True}
 
 
 def create_shell(app, fixture, profile):

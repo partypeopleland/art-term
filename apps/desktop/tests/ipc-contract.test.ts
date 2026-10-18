@@ -61,3 +61,11 @@ describe('adapters agree with the registered and authorized native surface', () 
     }
   })
 })
+
+it.each([[createTauriTransport, 'gui_write'], [createMobileTauriTransport, 'mobile_write']] as const)('only adds the terminal reply source flag for protocol data', async (create, command) => {
+  invoke.mockClear()
+  await create().write('issued-session', [65])
+  expect(invoke.mock.calls[0]).toEqual([command, { sessionId: 'issued-session', bytes: [65] }])
+  await create().write('issued-session', [27, 91, 82], true)
+  expect(invoke.mock.calls[1]).toEqual([command, { sessionId: 'issued-session', bytes: [27, 91, 82], terminalReply: true }])
+})

@@ -1,6 +1,16 @@
 import type { IBufferRange, ILink, Terminal } from '@xterm/xterm'
 
-export type ClipboardWriter = (text: string) => Promise<void>
+export type LinkOpener = (url: string) => void | Promise<void>
+
+export function isTerminalWebUrl(url: string): boolean {
+  if (new TextEncoder().encode(url).length > 8192 || /[\s\u0000-\u001f\u007f-\u009f]/u.test(url) || !/^https?:\/\//i.test(url)) return false
+  try { const parsed = new URL(url); return ['http:', 'https:'].includes(parsed.protocol) && !!parsed.hostname } catch { return false }
+}
+
+/** Keep the browser gesture synchronous so preview popups are not blocked. */
+export const openPreviewWebUrl: LinkOpener = url => {
+  window.open(url, '_blank', 'noopener,noreferrer')
+}
 
 export function terminalTextLinks(text: string): { start: number; end: number; text: string }[] {
   const links: { start: number; end: number; text: string }[] = []
@@ -53,7 +63,7 @@ function linksForLine(term: Terminal, y: number, activate: ILink['activate']): I
 }
 
 /** Link taps are local actions, even when a remote TUI has mouse reporting enabled. */
-export function attachTerminalLinks(host: HTMLElement, term: Terminal, writeClipboard: ClipboardWriter) {
+export function attachTerminalLinks(host: HTMLElement, term: Terminal, openLink: LinkOpener) {
   const screen = host.querySelector<HTMLElement>('.xterm-screen')!
   const notice = document.createElement('div')
   notice.className = 'terminal-link-notice'
@@ -63,13 +73,17 @@ export function attachTerminalLinks(host: HTMLElement, term: Terminal, writeClip
   host.append(notice)
   let disposed = false, timer: ReturnType<typeof setTimeout> | undefined, generation = 0
   let hovered: { text: string; range: IBufferRange } | undefined
-  let press: { text: string; x: number; y: number; touch: boolean; moved: boolean } | undefined
+  let press: { text: string; x: number; y: number; touch: boolean; moved: boolean; started: number } | undefined
   const stop = (event: Event) => { event.preventDefault(); event.stopImmediatePropagation() }
   const activate: ILink['activate'] = (event, url) => {
     stop(event)
+    if (disposed || !isTerminalWebUrl(url)) return
     const current = ++generation
-    void Promise.resolve().then(() => writeClipboard(url))
-      .then(() => show('已複製連結', current), () => show('複製失敗，請再點一次連結', current))
+    clearTimeout(timer); notice.hidden = true
+    try {
+      const opening = openLink(url)
+      void Promise.resolve(opening).catch(() => show('開啟失敗，請再點一次連結', current))
+    } catch { show('開啟失敗，請再點一次連結', current) }
   }
   function show(message: string, current: number): void {
     if (disposed || current !== generation) return
@@ -95,21 +109,24 @@ export function attachTerminalLinks(host: HTMLElement, term: Terminal, writeClip
   function mouseDown(event: MouseEvent): void {
     if (event.button !== 0) return
     const text = at(event.clientX, event.clientY)
-    press = text ? { text, x: event.clientX, y: event.clientY, touch: false, moved: false } : undefined
+    press = text ? { text, x: event.clientX, y: event.clientY, touch: false, moved: false, started: performance.now() } : undefined
     if (press) stop(event)
+  }
+  function mouseMove(event: MouseEvent): void {
+    if (press && !press.touch && Math.hypot(event.clientX - press.x, event.clientY - press.y) >= 5) press.moved = true
   }
   function mouseUp(event: MouseEvent): void {
     if (!press || press.touch || event.button !== 0) return
     const pending = press
     press = undefined
     stop(event)
-    if (Math.hypot(event.clientX - pending.x, event.clientY - pending.y) <= 5 && at(event.clientX, event.clientY) === pending.text) activate(event, pending.text)
+    if (!pending.moved && performance.now() - pending.started < 500 && Math.hypot(event.clientX - pending.x, event.clientY - pending.y) <= 5 && at(event.clientX, event.clientY) === pending.text) activate(event, pending.text)
   }
   function touchStart(event: TouchEvent): void {
     press = undefined
     if (event.touches.length !== 1) return
     const finger = event.touches[0], text = at(finger.clientX, finger.clientY)
-    if (text) press = { text, x: finger.clientX, y: finger.clientY, touch: true, moved: false }
+    if (text) press = { text, x: finger.clientX, y: finger.clientY, touch: true, moved: false, started: performance.now() }
   }
   function touchMove(event: TouchEvent): void {
     if (!press?.touch) return
@@ -120,7 +137,7 @@ export function attachTerminalLinks(host: HTMLElement, term: Terminal, writeClip
     if (!press?.touch) return
     const pending = press, finger = event.changedTouches[0]
     press = undefined
-    if (pending.moved || event.touches.length || !finger || Math.hypot(finger.clientX - pending.x, finger.clientY - pending.y) >= 5 || at(finger.clientX, finger.clientY) !== pending.text) return
+    if (performance.now() - pending.started >= 500 || pending.moved || event.touches.length || !finger || Math.hypot(finger.clientX - pending.x, finger.clientY - pending.y) >= 5 || at(finger.clientX, finger.clientY) !== pending.text) return
     // Prevent the compatibility mouse events from reaching Codex's URL opener.
     activate(event as unknown as MouseEvent, pending.text)
   }
@@ -128,6 +145,7 @@ export function attachTerminalLinks(host: HTMLElement, term: Terminal, writeClip
   const click = (event: MouseEvent) => { if (at(event.clientX, event.clientY)) stop(event) }
   host.addEventListener('mousedown', mouseDown, true)
   host.addEventListener('mouseup', mouseUp, true)
+  host.addEventListener('mousemove', mouseMove, true)
   host.addEventListener('click', click, true)
   host.addEventListener('touchstart', touchStart, { capture: true, passive: true })
   host.addEventListener('touchmove', touchMove, { capture: true, passive: true })
@@ -144,6 +162,7 @@ export function attachTerminalLinks(host: HTMLElement, term: Terminal, writeClip
       subscriptions.forEach(subscription => subscription.dispose())
       host.removeEventListener('mousedown', mouseDown, true)
       host.removeEventListener('mouseup', mouseUp, true)
+      host.removeEventListener('mousemove', mouseMove, true)
       host.removeEventListener('click', click, true)
       host.removeEventListener('touchstart', touchStart, true)
       host.removeEventListener('touchmove', touchMove, true)

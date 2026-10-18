@@ -1,9 +1,10 @@
 ## Default Permission
 
-Local terminal text projection and native touch events. No network or credentials.
+Local terminal text projection, native touch events, and opening HTTP/S links in the system browser.
 
 #### This default permission set includes the following:
 
+- `allow-openUrl`
 - `allow-open`
 - `allow-update`
 - `allow-close`
@@ -96,6 +97,32 @@ Enables the open command without any pre-configured scope.
 <td>
 
 Denies the open command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`mobile-history:allow-openUrl`
+
+</td>
+<td>
+
+Enables the openUrl command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`mobile-history:deny-openUrl`
+
+</td>
+<td>
+
+Denies the openUrl command without any pre-configured scope.
 
 </td>
 </tr>

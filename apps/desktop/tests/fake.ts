@@ -133,7 +133,7 @@ export class FakeTransport implements Transport {
     else s.queue.push(out)
   }
 
-  async write(sessionId: string, bytes: number[]): Promise<void> {
+  async write(sessionId: string, bytes: number[], _terminalReply?: boolean): Promise<void> {
     this.must(sessionId).writes.push(bytes)
   }
 
@@ -175,7 +175,7 @@ export class FakeTerm implements TerminalHandle {
   resetCount = 0
   disposed = false
   private writeResolvers: (() => void)[] = []
-  private dataCb: ((text: string) => void) | null = null
+  private dataCb: ((text: string, terminalReply?: boolean) => void) | null = null
   keyInterceptor: ((e: KeyboardEvent) => boolean) | null = null
 
   write(data: Uint8Array): Promise<void> {
@@ -190,12 +190,12 @@ export class FakeTerm implements TerminalHandle {
     for (const r of this.writeResolvers.splice(0)) r()
   }
 
-  onData(cb: (text: string) => void): void {
+  onData(cb: (text: string, terminalReply?: boolean) => void): void {
     this.dataCb = cb
   }
 
-  emitData(text: string): void {
-    this.dataCb?.(text)
+  emitData(text: string, terminalReply?: boolean): void {
+    this.dataCb?.(text, terminalReply)
   }
 
   setKeyInterceptor(fn: (e: KeyboardEvent) => boolean): void {

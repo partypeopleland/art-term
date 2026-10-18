@@ -1,6 +1,6 @@
 # Android 客戶端
 
-Android 版讓手機操作與 Windows 相同的 Runtime Host 與 Shell，沿用 Rust 的原生 HTTPS／WSS 核心；平台層處理觸控、輸入法、背景生命週期與本機憑證保護。目前以 Android APK 開發及驗收為主，Windows 功能開發暫停。
+Android 版讓手機操作與 Windows 相同的 Runtime Host 與 Shell，沿用 Rust 的原生 HTTPS／WSS 核心；平台層處理觸控、輸入法、背景生命週期與本機憑證保護。目前以 Android APK 開發及驗收為主，Windows 接續同一開發分支，共用功能依相同契約實作。
 
 ```text
 Shared Vue UI + Rust core
@@ -15,7 +15,7 @@ Android APK -- HTTPS / WSS --> Runtime --> Shell / Desktop
 
 連線設定只保存在本機 `connections.toml`，管理憑證由 operator Keystore（此 App 在 Android 使用的金鑰儲存）保護。APK 不包含私人連線；新手機可在 App 新增或匯入。觸控與背景處理會影響使用者能否持續操作，所以桌面測試與 APK 建置成功都不能取代手機驗收。
 
-目前 package 為 `net.missart.artterm`，minSdk 24／targetSdk 36，release 為 ARM64、16KB page alignment；本版為 0.1.27／code 1050。更新必須使用原簽章，才能維持既有 App 與 Keystore 的連續性。
+目前 package 為 `net.missart.artterm`，minSdk 24／targetSdk 36，release 為 ARM64、16KB page alignment；本版為 0.1.28／code 1056。更新必須使用原簽章，才能維持既有 App 與 Keystore 的連續性。
 
 ## 操作與背景
 
@@ -29,7 +29,7 @@ Main 依序顯示 Computers（主機連線）、Agents（工作助理）與 Scre
 
 Connect 有分頁時才顯示分頁列，狀態由分頁前的小圓點呈現；尚未選擇連線時不顯示提示區。快速鍵依序為 Tab、Esc、`⇧←`、↑、↓、←、→、ENTER、CTRL+C、鍵盤，不另提供 Ctrl latch、Detach 或輸入編輯區。Shell 正常結束時自動清除該本機分頁；沒有其他分頁時回到「選擇連線」，未連線頁也可右滑回 Main。關閉分頁仍只中斷本機連線，不刪除遠端工作。
 
-終端單指上下滑動、放手慣性及細捲動軌道用於閱讀；Android 原生歷史閱讀器將水平頁面手勢交回共用滑動控制器，使 Connect 內也能右滑回 Main。互動程式依手勢開始位置接收有界滑鼠事件，未回報歷史範圍時不捏造絕對進度。點 HTTP(S) 網址複製至本機剪貼簿，滑動仍可捲動。
+終端單指上下滑動、放手慣性及細捲動軌道用於閱讀；Android 原生歷史閱讀器將水平頁面手勢交回共用滑動控制器，使 Connect 內也能右滑回 Main。互動程式依手勢開始位置接收有界滑鼠事件，未回報歷史範圍時不捏造絕對進度。點 HTTP(S) 網址會開啟系統預設瀏覽器；原生閱讀器與終端使用相同行為，滑動仍可捲動而不開啟網址。
 
 前景使用 `FLAG_KEEP_SCREEN_ON` 保持螢幕，`onPause` 清除，不取得 wake lock 或變更全域設定。切到其他 App 時，健康連線可以保留，但桌面截圖暫停，Host 表單憑證、未送 input／resize、IME 組字與待送輸入狀態會清除，避免回前景後送出舊操作。
 

@@ -13,5 +13,5 @@
       }]
     }
   },
-  "bundle": {"active": true, "targets": "all", "resources": [], "android": {"versionCode": 1054}}
+  "bundle": {"active": true, "targets": "all", "resources": [], "android": {"versionCode": 1056}}
 }

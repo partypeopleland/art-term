@@ -1,8 +1,31 @@
 # tmux 終端歷史與按需捲動
 
-新建 Shell 統一使用主機上的私有 tmux，保留有限主機歷史。Windows 與 Android 都遵循同一套歷史快照介面，先取當前畫面，向上才分批取較早紀錄。Windows 即時畫面使用 xterm，歷史以桌面元件呈現；Android 以原生 View 呈現。即時輸入輸出仍走官方 Runtime。
+新建 Shell 統一使用主機上的私有 tmux，保留有限主機歷史。受控端提供一套向後相容的歷史介面：原生終端可控制閱讀位置，原生 View 可按需取得快照。Windows 的即時畫面與歷史都由原本的 xterm 呈現；Android 保留原生 View 的快照閱讀。兩者的工作身分、通道、能力與清理由同一個共用端點處理，畫面及輸入輸出仍走官方 Runtime。
 
-## 閱讀與恢復
+## 原終端內捲動
+
+Windows 上捲時，`HostTerminalViewport` 將捲動量交給同一個歷史通道的 `scroll` 操作，由受控端操作原工作 pane 的 tmux 閱讀位置。tmux 沿原 PTY 回傳原始終端畫面，App 使用同一個 xterm 實例、字型、主題及連結／選取功能；沒有另外的 HTML 閱讀畫面或「返回即時」按鈕。閱讀期間，新輸出繼續留在工作中；向下捲到底，受控端退出閱讀狀態並立即呈現最新畫面。
+
+```text
+Windows wheel -> shared scroll request -> Host history endpoint
+                                              | native tmux viewport
+original xterm <-------- original work PTY ----+
+
+user input -> native session ordering -> follow + input -> original CLI
+terminal protocol reply -------------> original outer PTY
+```
+
+輸入由共用原生連線層排序。閱讀時開始打字、貼上、按快捷鍵或啟動 coding CLI，先恢復即時位置，再交付原始位元組；不讓按鍵落入歷史模式。含輸入的操作逾時時不重送，避免命令執行兩次。終端自動產生的查詢回覆另外標記，沿原外層 PTY 回傳，不觸發閱讀位置切換。
+
+同一 helper 的 ready 宣告原生 viewport 能力。缺少能力的舊 helper 明確回報不支援，不送出未知操作，也不改用第二個閱讀器。受控端只需升級既有通用 helper；無 Windows 專用 helper、滑鼠設定或背景服務。`scroll` 的零位移用於狀態查詢與保活，不擷取快照；全螢幕 alternate-screen 程式暫不提供新歷史捲動，退出後可再次使用。
+
+每個原生閱讀操作只持有自己的工作 pane，不能接管另一個讀者或操作前已存在的手動閱讀狀態。所有 App 輸入先透過共同介面釋放自己的閱讀狀態；若其他同帳號程序繞過介面，直接改動私有 tmux 內部的閱讀模式，無法保證識別其模式世代。隱藏、關頁及斷線時釋放自有狀態；helper 的父程序管線 guard 在程序死亡或租期到期後清理相符的 owner。這不會結束工作 Shell，也不改其他分頁或使用者的 tmux。
+
+## 終端網址
+
+Windows xterm 與 Android 原生閱讀器都可辨識 HTTP(S) 網址，短按後交給系統瀏覽器開啟。網址動作留在本機，不傳送按鍵或指令給遠端 CLI，也不把 App 頁面導向網站。拖曳選取、上下捲動與水平切頁不會開啟網址。只接受有效的 HTTP／HTTPS 網址；無瀏覽器或開啟失敗時顯示提示。
+
+## Android 快照閱讀與恢復
 
 ```text
 建立並連線 -> Runtime 工作 Shell -> 私有 tmux / bash
@@ -16,11 +39,9 @@ App 確認畫面已顯示 -> 保留顯示快照、釋放前一份快照
 
 Android 原生閱讀窗口最多 1024 行；上捲前插舊頁、持續輸出、開關鍵盤及視窗尺寸改變時，依原生列識別與像素位置維持閱讀點。停在底部才跟隨最新輸出。畫面呈現完成才確認快照，避免尚未顯示的頁面取代使用者正在閱讀的資料。
 
-Windows 上捲時以 `DesktopHistoryReader` 呈現共用 `HostHistoryWindow` 的歷史快照，使用與 Android 相同的 `viewport / older / ack / keep / close`。即時 PTY 仍持續交給 xterm；閱讀時維持行識別與像素位置，向下回到最新內容後返回即時畫面。畫面可選取、複製及呈現文字樣式，歷史窗口最多 1024 行。
+Android 的 `HostHistoryWindow` 維持既有 `viewport / older / ack / keep / close`，1024 行窗口、epoch、顯示後確認與保活規則不變。新增的原生 viewport 操作是共同受控端介面的相容擴充；使用快照的舊 App 不需要改動。tmux、socket、擷取及清理都由受控端封裝，App 不自行組合 tmux 指令。
 
-受控端 helper 提供固定的歷史介面，統一處理 tmux、工作驗證、快照擷取與清理。外部平台只提出讀取、分頁、確認、保活和關閉要求；Windows 不需要額外的原生滑鼠能力，也不改受控端 mouse／copy-mode／WheelUpPane 設定。
-
-Android 與 Windows 共用快照與分頁規則，平台差異僅在呈現及操作事件。兩平台均在資料實際顯示後確認，並只關閉自己持有的讀頁程序。Windows GUI 與 Android 原生 View 仍須分別驗證平台呈現；共用協定通過不代表所有平台操作均已驗收。
+Windows GUI 與 Android 原生 View 仍須分別驗證呈現與操作；共同介面相容測試通過不代表兩平台實機都已驗收。
 
 新建工作的生命週期以原始 Shell 為準：退出 Bash 時會結束該工作的私有 tmux session，閱讀快照不會讓已退出的工作繼續存活，App 因此能關閉對應分頁。退出 Codex 等前景程式回到 Bash，或只釋放閱讀快照，都不會結束工作或影響其他分頁。
 
@@ -32,7 +53,7 @@ Android 與 Windows 共用快照與分頁規則，平台差異僅在呈現及操
 
 本次 Screen 整合在新 tmux 工作中先啟動 Shell-owned supervisor，再啟動互動 Bash，binding 使用完整 `th2-` 工作名稱。Shell client 及其 coding CLI 共用該 Shell 的記憶體選擇；不是 Host 全域服務。CLI EOF 不清除選擇，明確 clear 拒絕新工具呼叫，Shell／tmux／Runtime 結束則移除 socket 並清記憶體。App 背景或切 Main 只停止取圖。
 
-歷史仍由原 tmux pane 與讀頁 helper 管理，supervisor 以自有 PTY 維持 Bash 前景程序群組及 resize，pipe-death guard 清理 supervisor 非正常結束後的自有 session，不增加常駐 Runtime Shell、不改 namespace／歷史 manifest；Ctrl+C、job control、resize、退出狀態與 kill 清理須另經真 PTY／Runtime 驗證。Screen 工具安裝另將建立 wrapper 放在持久化 `~/.local/share/art-term/tools/tmux-shell.py`，App 新建時優先使用，缺少時退回原有版本 wrapper；原 tmux-v2 binary／讀頁 helper 及可能指向 image 的 symlink 不改動，不需要更新映像或重啟 Pod。安裝不重啟既有工作；已執行的 Shell 不注入新啟動定義，需建立新連線，缺 helper 時仍可普通 Bash 相容。設計、工具介面與驗收界線見[Shell 工具 bridge](runtime-desktop.md)。
+歷史仍由原 tmux pane 與讀頁 helper 管理，supervisor 以自有 PTY 維持 Bash 前景程序群組及 resize，pipe-death guard 清理 supervisor 非正常結束後的自有 session，不增加常駐 Runtime Shell、不改 namespace／歷史 manifest；Ctrl+C、job control、resize、退出狀態與 kill 清理須另經真 PTY／Runtime 驗證。Screen 工具安裝另將建立 wrapper 放在持久化 `~/.local/share/art-term/tools/tmux-shell.py`，App 新建時優先使用，缺少時退回原有版本 wrapper；該桌面工具安裝不改原 tmux-v2 binary／讀頁 helper。原終端捲動則須更新同一通用讀頁 helper；若目錄指向 image，使用持久化使用者目錄並保留原映像檔，不需要更新映像或重啟 Pod。安裝不重啟既有工作；已執行的 Shell 不注入新啟動定義，需建立新連線，缺 helper 時仍可普通 Bash 相容。設計、工具介面與驗收界線見[Shell 工具 bridge](runtime-desktop.md)。
 
 ## 保存界線
 

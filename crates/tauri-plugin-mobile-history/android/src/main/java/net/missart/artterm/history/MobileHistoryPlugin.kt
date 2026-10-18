@@ -1,9 +1,8 @@
 package net.missart.artterm.history
 
 import android.app.Activity
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
 import android.graphics.Color
 import android.graphics.Typeface
@@ -33,6 +32,11 @@ import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
+
+@InvokeArg
+class WebUrlArgs {
+    var url: String = ""
+}
 
 @InvokeArg
 class RecordArgs {
@@ -97,6 +101,23 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
     private var links = emptyList<Link>()
     private var press: Press? = null
     private var cssScale = activity.resources.displayMetrics.density.toDouble()
+    /** Shared by the native text reader and the WebView fallback command. */
+    private fun openWebUrl(url: String) {
+        require(url.isNotEmpty() && url.toByteArray(Charsets.UTF_8).size <= 8192
+            && url.none { it.isISOControl() || it.isWhitespace() }) { "Invalid web URL" }
+        val uri = Uri.parse(url).normalizeScheme()
+        require(uri.scheme?.lowercase(java.util.Locale.ROOT) in listOf("http", "https")
+            && !uri.host.isNullOrEmpty()) { "Invalid web URL" }
+        activity.startActivity(Intent(Intent.ACTION_VIEW, uri).addCategory(Intent.CATEGORY_BROWSABLE))
+    }
+    @Command
+    fun openUrl(invoke: Invoke) {
+        val args = invoke.parseArgs(WebUrlArgs::class.java)
+        main.post {
+            try { openWebUrl(args.url); invoke.resolve() }
+            catch (_: Exception) { invoke.reject("無法開啟連結，請確認已安裝瀏覽器。") }
+        }
+    }
     private fun findLinks(value: String): List<Link> {
         return Regex("""https?://[^\s<>"'`]+""", RegexOption.IGNORE_CASE).findAll(value).mapNotNull { match ->
             var url = match.value.trimEnd('.', ',', ';', ':', '!', '?', '，', '。', '；', '！', '？', '、', '”', '》')
@@ -133,10 +154,8 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
                     if (p.link == null) send("tap")
                     else if (linkAt(event.x, event.y) == p.link) {
                         try {
-                            (activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
-                                .setPrimaryClip(ClipData.newPlainText("URL", p.link.url))
-                            Toast.makeText(activity, "已複製連結", Toast.LENGTH_SHORT).show()
-                        } catch (_: Exception) { Toast.makeText(activity, "複製失敗，請再點一次連結", Toast.LENGTH_SHORT).show() }
+                            openWebUrl(p.link.url)
+                        } catch (_: Exception) { Toast.makeText(activity, "無法開啟連結，請確認已安裝瀏覽器。", Toast.LENGTH_SHORT).show() }
                     }
                 }
             }

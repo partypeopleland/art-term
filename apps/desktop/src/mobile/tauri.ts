@@ -71,7 +71,7 @@ export function createMobileTauriTransport(): Transport {
     open: (targetId, rows, cols) =>
       call<SessionDto>('mobile_open', { targetId, rows, cols }),
     poll: (sessionId) => call<OutputDto>('mobile_poll', { sessionId }),
-    write: (sessionId, bytes) => call<void>('mobile_write', { sessionId, bytes }),
+    write: (sessionId, bytes, terminalReply) => call<void>('mobile_write', { sessionId, bytes, ...(terminalReply ? { terminalReply: true } : {}) }),
     resize: (sessionId, rows, cols) =>
       call<void>('mobile_resize', { sessionId, rows, cols }),
     close: (sessionId) => call<void>('mobile_close', { sessionId }),

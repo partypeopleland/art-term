@@ -81,3 +81,14 @@ Windows test runner
 針對原生閱讀區新增獨立測試入口，涵蓋真正拖曳、網路中斷後恢復，以及手動脫離再接回同一遠端 Shell。每次建立新的測試 AVD 與專用 Shell，不接管現有裝置或工作。使用 `ls`／`ls -al` 列出測試專用的虛構檔案，透過當次原生內容與畫面變化判斷舊輸出與捲動是否保留。
 
 執行前需準備可除錯的 x86_64 APK、可用的 NUC HTTPS 網址與 repo 外的管理憑證檔。工具啟動測試與真實歷史測試分開回報，沒有連線證據時不得宣稱歷史通過。完整命令、證據與清理方式見[NUC 歷史捲動測試](../../scripts/android-regression/reconnect-scroll.md)。
+
+## 終端網址
+
+`web_links.py` 在全新自建 AVD 安裝 debug x86_64 APK，透過真正的原生 IPC 與閱讀 View 點擊驗證 HTTP(S) 的系統開啟、錯誤網址拒絕及滑動／長按不開啟網址。測試只操作自己的模擬器，不連既有手機。瀏覽器 Intent 的路徑可能被 Android 診斷輸出隱藏，畫面測試核對 scheme／host；原始 URL 傳遞另由連結與平台邊界測試保護。
+
+```bash
+source target/android-tools/env.sh
+target/android-regression/venv/bin/python scripts/android-regression/web_links.py \
+  --sdk "$ANDROID_HOME" \
+  --apk crates/art-term-gui/gen/android/app/build/outputs/apk/x86_64/debug/app-x86_64-debug.apk
+```

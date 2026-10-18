@@ -101,16 +101,44 @@ async def pty(fixture):
             assert ws.close_code == 4004, repr((ws.close_code, ws.exception()))
 
 
+async def viewport(fixture):
+    class Socket:
+        def __init__(self): self.frames = []
+        async def send_bytes(self, data): self.frames.append(data)
+    work = {'history': b'', 'input': b'', 'resizes': [[3, 80]], 'nativeRows': [f'ROW-{i:04}' for i in range(1100)], 'ws': Socket()}
+    helper = {'history': b'', 'previewInput': b'', 'historyNonce': 'smoke', 'historyInstance': 'owner', 'historyWork': 'viewport-smoke', 'historyEpoch': 0, 'historySnapshots': {}, 'ws': Socket()}
+    fixture.sessions['viewport-smoke'] = work
+    async def request(op, **fields):
+        helper['previewInput'] += (json.dumps({'v': 1, 'nonce': 'smoke', 'requestId': 1, 'op': op, **fields})+'\n').encode()
+        await fixture.history_request(helper)
+        return json.loads(helper['ws'].frames[-1])
+    try:
+        answer = await request('scroll', lines=-1)
+        assert answer['type']=='view' and answer['available'] and answer['held'] and answer['offset']==1
+        assert b'ROW-1098' in work['ws'].frames[-1] and b'ROW-1099' not in work['ws'].frames[-1]
+        answer = await request('follow', input=base64.b64encode(b'once').decode())
+        assert not answer['held'] and work['input']==b'once'
+        page = await request('viewport')
+        assert page['type']=='page' and page['rowCount']==1100
+        assert (await request('ack', epoch=page['epoch']))['type']=='ack'
+        assert (await request('keep', epoch=page['epoch']))['type']=='ack'
+        await request('scroll', lines=-2)
+        assert (await request('close'))['type']=='ack' and work['nativeOwner'] is None and work['nativeOffset']==0
+    finally:
+        del fixture.sessions['viewport-smoke']
+
+
 def main():
     screenshots()
     with tempfile.TemporaryDirectory(prefix='art-term-fixture-smoke-') as directory:
         fixture = Fixture(Path(directory))
         try:
             asyncio.run(pty(fixture))
+            asyncio.run(viewport(fixture))
         finally:
             fixture.close()
             assert not fixture.thread.is_alive() and fixture.loop.is_closed()
-    print('PASS fixture-only JSON/SSE PNG decode, TLS/WSS bootstrap, READY/configure/clear, resize, exit4004, owned threads/sockets closed; Windows GUI NOT_RUN')
+    print('PASS fixture-only JSON/SSE PNG decode, TLS/WSS bootstrap, READY/configure/clear, resize, nativeViewport scroll/follow and legacy snapshot ops, exit4004, owned threads/sockets closed; Windows GUI NOT_RUN')
 
 
 if __name__ == '__main__':

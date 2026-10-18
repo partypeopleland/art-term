@@ -68,3 +68,13 @@ describe('mobile composition with xterm deferred commit', () => {
     expect(s.received).toEqual(['中'])
   })
 })
+
+it('forwards protocol source metadata independently of mobile composition fragments', () => {
+  const el = document.createElement('div'), real = new FakeTerm()
+  const wrapped = createMobileInput().wrap(el, real), received = vi.fn()
+  wrapped.onData(received)
+  el.dispatchEvent(new CompositionEvent('compositionstart', { data: '' }))
+  real.emitData('\x1b[1;1R', true)
+  expect(received).toHaveBeenCalledWith('\x1b[1;1R', true)
+  wrapped.dispose()
+})

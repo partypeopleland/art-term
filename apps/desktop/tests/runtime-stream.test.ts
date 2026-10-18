@@ -199,3 +199,21 @@ describe('runtime recovery keeps the original binding and emulator', () => {
     expect(transport.openCalls).toHaveLength(1)
   })
 })
+
+
+it('forwards generated terminal replies independently while ordinary user FIFO is held', async () => {
+  const { transport, controller, tab, term } = await setup()
+  const pending = deferred<void>()
+  const writes: { text: string; reply: boolean }[] = []
+  transport.write = async (_sid, bytes, terminalReply) => {
+    writes.push({ text: new TextDecoder().decode(Uint8Array.from(bytes)), reply: !!terminalReply })
+    if (!terminalReply) await pending.promise
+  }
+  controller.sendInput(tab, 'user-one')
+  controller.sendInput(tab, 'user-two')
+  term.emitData('\x1b[1;1R', true)
+  await flush()
+  expect(writes).toEqual([{ text: 'user-one', reply: false }, { text: '\x1b[1;1R', reply: true }])
+  pending.resolve(); await flush()
+  expect(writes.at(-1)).toEqual({ text: 'user-two', reply: false })
+})

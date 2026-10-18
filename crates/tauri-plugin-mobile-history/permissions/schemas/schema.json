@@ -331,6 +331,18 @@
           "markdownDescription": "Denies the open command without any pre-configured scope."
         },
         {
+          "description": "Enables the openUrl command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-openUrl",
+          "markdownDescription": "Enables the openUrl command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the openUrl command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-openUrl",
+          "markdownDescription": "Denies the openUrl command without any pre-configured scope."
+        },
+        {
           "description": "Enables the registerListener command without any pre-configured scope.",
           "type": "string",
           "const": "allow-registerListener",
@@ -391,10 +403,10 @@
           "markdownDescription": "Denies the update command without any pre-configured scope."
         },
         {
-          "description": "Local terminal text projection and native touch events. No network or credentials.\n#### This default permission set includes:\n\n- `allow-open`\n- `allow-update`\n- `allow-close`\n- `allow-keyboardStatus`\n- `allow-register-listener`\n- `allow-registerListener`\n- `allow-remove-listener`\n- `allow-removeListener`",
+          "description": "Local terminal text projection, native touch events, and opening HTTP/S links in the system browser.\n#### This default permission set includes:\n\n- `allow-openUrl`\n- `allow-open`\n- `allow-update`\n- `allow-close`\n- `allow-keyboardStatus`\n- `allow-register-listener`\n- `allow-registerListener`\n- `allow-remove-listener`\n- `allow-removeListener`",
           "type": "string",
           "const": "default",
-          "markdownDescription": "Local terminal text projection and native touch events. No network or credentials.\n#### This default permission set includes:\n\n- `allow-open`\n- `allow-update`\n- `allow-close`\n- `allow-keyboardStatus`\n- `allow-register-listener`\n- `allow-registerListener`\n- `allow-remove-listener`\n- `allow-removeListener`"
+          "markdownDescription": "Local terminal text projection, native touch events, and opening HTTP/S links in the system browser.\n#### This default permission set includes:\n\n- `allow-openUrl`\n- `allow-open`\n- `allow-update`\n- `allow-close`\n- `allow-keyboardStatus`\n- `allow-register-listener`\n- `allow-registerListener`\n- `allow-remove-listener`\n- `allow-removeListener`"
         }
       ]
     }

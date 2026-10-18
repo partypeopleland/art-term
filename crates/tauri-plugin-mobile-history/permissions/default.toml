@@ -1,3 +1,3 @@
 [default]
-description = "Local terminal text projection and native touch events. No network or credentials."
-permissions = ["allow-open", "allow-update", "allow-close", "allow-keyboardStatus", "allow-register-listener", "allow-registerListener", "allow-remove-listener", "allow-removeListener"]
+description = "Local terminal text projection, native touch events, and opening HTTP/S links in the system browser."
+permissions = ["allow-openUrl", "allow-open", "allow-update", "allow-close", "allow-keyboardStatus", "allow-register-listener", "allow-registerListener", "allow-remove-listener", "allow-removeListener"]

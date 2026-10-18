@@ -2,16 +2,18 @@ import { createNativeBufferProjection, type NativeTerminalBuffer, type NativeBuf
 // Terminal handle abstraction. The controller only sees this interface, so
 // tests can inject a fake without xterm.js or a real DOM renderer.
 import type { InjectionKey } from 'vue'
+import type { HostTerminalViewport } from './native'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { attachMobileScroll } from '../mobile/scroll'
-import { attachTerminalLinks, type ClipboardWriter } from './links'
+import { attachTerminalLinks, openPreviewWebUrl, type LinkOpener } from './links'
 
 export const SCROLLBACK_LINES = 5000
 
 export interface TerminalHandle {
   setTheme?(theme: ITheme): void
+  setHostViewport?(viewport: HostTerminalViewport | null): void
   readonly cols: number
   readonly rows: number
   /** Whether xterm currently has remote bracketed paste mode enabled. */
@@ -20,7 +22,7 @@ export interface TerminalHandle {
   setNativeReaderActive?(active: boolean): void
   /** Resolves when xterm has parsed the chunk (write-callback backpressure). */
   write(data: Uint8Array, historical?: boolean): Promise<void>
-  onData(cb: (text: string) => void): void
+  onData(cb: (text: string, terminalReply?: boolean) => void): void
   /** Return false from fn to keep the event out of xterm entirely. */
   setKeyInterceptor(fn: (ev: KeyboardEvent) => boolean): void
   fit(): void
@@ -34,16 +36,16 @@ export type TerminalFactory = (el: HTMLElement) => TerminalHandle
 
 export const TerminalFactoryKey: InjectionKey<TerminalFactory> = Symbol('TerminalFactory')
 
-export function createDesktopXtermTerminal(el: HTMLElement, writeClipboard?: ClipboardWriter): TerminalHandle {
-  return createXtermTerminal(el, true, false, writeClipboard)
+export function createDesktopXtermTerminal(el: HTMLElement, openLink?: LinkOpener): TerminalHandle {
+  return createXtermTerminal(el, true, false, openLink)
 }
 
-export function createMobileXtermTerminal(el: HTMLElement, writeClipboard?: ClipboardWriter): TerminalHandle {
-  return createXtermTerminal(el, true, true, writeClipboard)
+export function createMobileXtermTerminal(el: HTMLElement, openLink?: LinkOpener): TerminalHandle {
+  return createXtermTerminal(el, true, true, openLink)
 }
 
 export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobileScroll = false,
-  writeClipboard: ClipboardWriter = text => navigator.clipboard.writeText(text)): TerminalHandle {
+  openLink: LinkOpener = openPreviewWebUrl): TerminalHandle {
   const term = new Terminal({
     scrollback: SCROLLBACK_LINES,
     cursorBlink: true,
@@ -81,7 +83,7 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
   let disposeScroll = mobileScroll ? attachMobileScroll(el, term) : null
   let terminalDisposed = false
   const projection = mobileScroll ? createNativeBufferProjection(term) : null
-  const links = attachTerminalLinks(el, term, writeClipboard)
+  const links = attachTerminalLinks(el, term, openLink)
   let historicalParsing = false
   // A query may start in replay and finish in a live frame. Keep its replay
   // origin until the escape sequence ends, rather than replying to its suffix.
@@ -121,18 +123,40 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
     if (start < data.length) segments.push({ bytes: data.subarray(start), suppress: previous })
     return segments
   }
+  // Public parser observers run before the built-in handler and return false,
+  // so only its synchronous protocol-generated onData is marked as a reply.
+  let protocolReply = false, replyTurn = 0
+  const observeReply = () => {
+    protocolReply = true
+    const turn = ++replyTurn
+    queueMicrotask(() => { if (turn === replyTurn) protocolReply = false })
+    return false
+  }
+  const replyObservers = [
+    ...['', '>', '='].map(prefix => term.parser.registerCsiHandler({ prefix, final: 'c' }, observeReply)),
+    ...['', '?'].map(prefix => term.parser.registerCsiHandler({ prefix, final: 'n' }, observeReply)),
+    ...['', '?'].map(prefix => term.parser.registerCsiHandler({ prefix, intermediates: '$', final: 'p' }, observeReply)),
+    term.parser.registerCsiHandler({ final: 't' }, params => [14, 16, 18, 20, 21].includes(Number(params[0])) ? observeReply() : false),
+    ...[4, 10, 11, 12].map(id => term.parser.registerOscHandler(id, data => data.split(';').includes('?') ? observeReply() : false)),
+    term.parser.registerDcsHandler({ intermediates: '$', final: 'q' }, observeReply),
+    term.parser.registerEscHandler({ final: 'Z' }, observeReply)
+  ]
+  let hostViewport: HostTerminalViewport | null = null
   if (desktopWheel) {
     term.attachCustomWheelEventHandler(event => {
       if (term.buffer.active.type !== 'alternate' || term.modes.mouseTrackingMode !== 'none') return true
-      // Keep native mouse reporting for mouse-enabled tmux. Otherwise
-      // prevent xterm's wheel-to-arrow fallback, including the
-      // startup window before tmux enables mouse. Keyboard arrows stay intact.
       event.preventDefault()
+      if (!mobileScroll && hostViewport) {
+        const height = el.querySelector('.xterm-rows > div')?.getBoundingClientRect().height || 17
+        const lines = event.deltaMode === 1 ? event.deltaY : event.deltaMode === 2 ? Math.sign(event.deltaY) * term.rows : event.deltaY / height
+        hostViewport.scroll(lines)
+      }
       return false
     })
   }
   return {
     setTheme: theme => { term.options.theme = theme },
+    setHostViewport: viewport => { if (!mobileScroll) hostViewport = viewport },
     get cols() {
       return term.cols
     },
@@ -158,7 +182,7 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
     },
     onData(cb) {
       term.onData(text => {
-        if (!historicalParsing) cb(text)
+        if (!historicalParsing) cb(text, protocolReply || undefined)
       })
     },
     setKeyInterceptor(fn) {
@@ -195,6 +219,8 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
     },
     dispose() {
       terminalDisposed = true
+      hostViewport = null
+      replyObservers.forEach(observer => observer.dispose())
       projection?.dispose()
       links.dispose()
       disposeScroll?.dispose()

@@ -364,7 +364,7 @@ export function createAppController(
       return
     }
     tab.term = markRaw(handle)
-    handle.onData((text) => sendInput(tab, text))
+    handle.onData((text, terminalReply) => terminalReply ? sendTerminalReply(tab, text) : sendInput(tab, text))
     handle.setKeyInterceptor((ev) => !isSwitchKey(ev))
     const want = tab.wantDesktop
     tab.wantDesktop = false
@@ -595,6 +595,31 @@ export function createAppController(
       // visibility. Only idle polls pace themselves.
       if (!out.bytes.length && !out.runtime?.events.length && idlePollMs > 0) await sleep(idlePollMs)
     }
+  }
+
+  const replyQueues = new WeakMap<TabState, { sid: string; generation: number; bytes: number[]; writing: boolean }>()
+  function sendTerminalReply(tab: TabState, text: string): void {
+    if (disposed || tab.closed || tab.status !== 'live' || !tab.sessionId) return
+    let queue = replyQueues.get(tab)
+    if (!queue || queue.sid !== tab.sessionId || queue.generation !== tab.connectionGen) {
+      queue = { sid: tab.sessionId, generation: tab.connectionGen, bytes: [], writing: false }
+      replyQueues.set(tab, queue)
+    }
+    const bytes = Array.from(textEncoder.encode(text))
+    if (queue.bytes.length + bytes.length > 16 * 1024) return
+    queue.bytes.push(...bytes)
+    if (queue.writing) return
+    const owned = queue
+    owned.writing = true
+    void (async () => {
+      try {
+        while (owned.bytes.length && !tab.closed && !disposed && tab.sessionId === owned.sid && tab.connectionGen === owned.generation) {
+          const chunk = owned.bytes.splice(0, WRITE_CHUNK)
+          await transport.write(owned.sid, chunk, true)
+        }
+      } catch { owned.bytes = [] }
+      finally { owned.bytes = []; owned.writing = false }
+    })()
   }
 
   function sendInput(tab: TabState, text: string): void {

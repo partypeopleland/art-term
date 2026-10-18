@@ -76,6 +76,7 @@ async fn fixture(mode: &'static str) -> Fixture {
                     let mut ws = tokio_tungstenite::accept_async(s).await.unwrap();
                     ws.send(Message::Text("{\"v\":1,\"type\":\"attach-notice\",\"stream_offset\":0,\"ephemeral_workspace\":true,\"teardown_best_effort\":true}".into())).await.unwrap();
                     let mut nonce = String::new();
+                    let mut native_held = false;
                     while let Some(Ok(msg)) = ws.next().await {
                         match msg {
                             Message::Binary(b) => {
@@ -84,6 +85,8 @@ async fn fixture(mode: &'static str) -> Fixture {
                                 if nonce.is_empty() {
                                     nonce = text.split_whitespace().last().unwrap().to_string();
                                     let mut ready = serde_json::json!({"v":1,"nonce":nonce,"requestId":0,"instance":"b".repeat(32),"type":"ready","key":"a".repeat(24)});
+                                    if mode.starts_with("native") { ready["nativeViewport"] = 1.into(); }
+                                    if mode == "nativeBadCapability" { ready["nativeViewport"] = 2.into(); }
                                     if let Some(kind) = mode.strip_prefix("ready-") {
                                         ready["type"] = serde_json::json!("error");
                                         ready["kind"] = serde_json::json!(kind);
@@ -105,6 +108,21 @@ async fn fixture(mode: &'static str) -> Fixture {
                                     } else {
                                         serde_json::json!({"v":1,"nonce":nonce,"requestId":req["requestId"],"instance":"b".repeat(32),"type":"ack","op":op,"epoch":req["epoch"]})
                                     };
+                                    if op == "scroll" || op == "follow" {
+                                        if op == "scroll" && req["lines"].as_i64().unwrap() != 0 { native_held = req["lines"].as_i64().unwrap() < 0; }
+                                        if op == "follow" { native_held = false; }
+                                        reply = serde_json::json!({"v":1,"nonce":nonce,"requestId":req["requestId"],"instance":"b".repeat(32),"type":"view","op":op,"held":native_held,"offset":if native_held { 34 } else { 0 },"available":true});
+                                        if mode == "nativeBadOffset" { reply["offset"] = 6001.into(); }
+                                        if mode == "nativeBadFollow" { reply["held"] = true.into(); reply["offset"] = 1.into(); }
+                                        if mode == "nativeBadOp" { reply["op"] = "older".into(); }
+                                        if mode == "nativeModeUnavailable" { reply["held"] = false.into(); reply["offset"] = 0.into(); reply["available"] = false.into(); }
+                                    }
+                                    if mode == "nativeBusyStatus" && (op == "scroll" || op == "follow") { reply=serde_json::json!({"v":1,"nonce":nonce,"requestId":req["requestId"],"instance":"b".repeat(32),"type":"error","kind":"busy"}); }
+                                    if (mode == "nativeDropScroll" && op == "scroll") || (mode == "nativeDropFollow" && op == "follow") {
+                                        ws.close(None).await.unwrap();
+                                        break;
+                                    }
+                                    if mode == "nativeDelayScroll" && op == "scroll" { tokio::time::sleep(Duration::from_millis(200)).await; }
                                     if mode == "partialViewport" {
                                         reply["rows"] = serde_json::json!(24);
                                         reply["rowCount"] = serde_json::json!(1003);
@@ -215,7 +233,7 @@ async fn fixture(mode: &'static str) -> Fixture {
                 };
                 let status = if mode == "conflict" {
                     409
-                } else if step == 2 && mode == "deleteFail" {
+                } else if step == 2 && (mode == "deleteFail" || mode.starts_with("nativeDrop")) {
                     500
                 } else {
                     200
@@ -372,7 +390,7 @@ async fn public_history_channel_foreign_instance_is_rejected_before_input() {
     ));
     ch.close().await;
     let t = f.task.await.unwrap();
-    assert!(!t.iter().any(|s| s.contains("\"op\"")));
+    assert!(t.iter().filter(|s| s.contains("\"op\"")).all(|s| s.contains("\"op\":\"close\"")));
 }
 #[test]
 fn public_history_names_are_strict_routing_candidates() {
@@ -567,7 +585,7 @@ async fn public_history_r5_older257_is_rejected_without_input() {
     ));
     ch.close().await;
     let transcript = f.task.await.unwrap();
-    assert!(!transcript.iter().any(|s| s.contains("\"op\"")));
+    assert!(transcript.iter().filter(|s| s.contains("\"op\"")).all(|s| s.contains("\"op\":\"close\"")));
     assert!(owned.0.lock().unwrap().is_empty());
 }
 #[tokio::test]
@@ -612,4 +630,90 @@ fn bootstrap_selects_persistent_overlay_with_image_fallback() {
     for invalid in ["", "0123456789abcdef0123456;", "$(touch /tmp/invalid)"] {
         assert!(HistoryVersion::Paged.bootstrap_command(invalid).is_err());
     }
+}
+
+#[test]
+fn native_viewport_request_is_a_neutral_bounded_history_operation() {
+    let request = serde_json::from_str::<HistoryRequest>(r#"{"op":"scroll","lines":-34}"#);
+    assert!(request.is_ok(), "shared history endpoint should accept neutral scroll requests");
+}
+
+#[tokio::test]
+async fn public_history_native_capability_does_not_send_unknown_ops_to_old_helpers() {
+    let f = fixture("valid").await;
+    let mut ch = open(&f, Arc::new(Owned::default())).await.unwrap();
+    assert!(matches!(ch.request(HistoryRequest::Scroll { lines: -1 }).await.unwrap(), HistoryReply::Unsupported));
+    assert!(matches!(ch.request(HistoryRequest::Follow { input: None }).await.unwrap(), HistoryReply::Unsupported));
+    ch.close().await;
+    let transcript = f.task.await.unwrap();
+    assert!(!transcript.iter().any(|r| r.contains("\"op\":\"scroll\"") || r.contains("\"op\":\"follow\"")));
+}
+#[tokio::test]
+async fn public_history_native_view_bounds_input_and_graceful_release() {
+    let f = fixture("native").await;
+    let mut ch = open(&f, Arc::new(Owned::default())).await.unwrap();
+    assert!(matches!(ch.request(HistoryRequest::Scroll { lines: 257 }).await, Err(SessionError::Protocol)));
+    for input in ["Zg".to_string(), STANDARD.encode(vec![0;4097])] {
+        assert!(ch.request(HistoryRequest::Follow { input: Some(input) }).await.is_err());
+    }
+    assert!(matches!(ch.request(HistoryRequest::Scroll { lines: 0 }).await.unwrap(), HistoryReply::View { held: false, offset: 0, .. }));
+    assert!(matches!(ch.request(HistoryRequest::Scroll { lines: -34 }).await.unwrap(), HistoryReply::View { held: true, offset: 34, .. }));
+    assert!(ch.native_held());
+    let input = STANDARD.encode("繁體\u{7f}\n".as_bytes());
+    assert!(matches!(ch.request(HistoryRequest::Follow { input: Some(input.clone()) }).await.unwrap(), HistoryReply::View { held: false, offset: 0, .. }));
+    assert!(!ch.native_held());
+    ch.close().await;
+    let transcript = f.task.await.unwrap();
+    assert_eq!(transcript.iter().filter(|r| r.contains(&input)).count(),1);
+    assert_eq!(transcript.iter().filter(|r| r.contains("\"op\":\"close\"")).count(),1);
+}
+#[tokio::test]
+async fn public_history_native_reply_validation_is_strict_and_alternate_is_transient() {
+    for mode in ["nativeBadOffset", "nativeBadFollow", "nativeBadOp"] {
+        let f=fixture(mode).await; let mut ch=open(&f, Arc::new(Owned::default())).await.unwrap();
+        let req=if mode=="nativeBadFollow" { HistoryRequest::Follow { input: None } } else { HistoryRequest::Scroll { lines: -1 } };
+        assert!(matches!(ch.request(req).await, Err(SessionError::Protocol)), "{mode}");
+        f.task.await.unwrap();
+    }
+    let f=fixture("nativeModeUnavailable").await; let mut ch=open(&f,Arc::new(Owned::default())).await.unwrap();
+    assert!(matches!(ch.request(HistoryRequest::Scroll { lines: -1 }).await.unwrap(), HistoryReply::View { available: false, .. }));
+    // No permanent unsupported latch: subsequent requests remain on the same capable channel.
+    assert!(matches!(ch.request(HistoryRequest::Scroll { lines: -1 }).await.unwrap(), HistoryReply::View { available: false, .. }));
+    ch.close().await;f.task.await.unwrap();
+    let f=fixture("nativeBadCapability").await;assert!(matches!(open(&f,Arc::new(Owned::default())).await,Err(SessionError::Protocol)));f.task.await.unwrap();
+}
+
+#[tokio::test]
+async fn public_history_native_lost_ack_and_failed_delete_never_claim_clear() {
+    for mode in ["nativeDropScroll", "nativeDropFollow"] {
+        let f=fixture(mode).await;
+        let mut ch=open(&f,Arc::new(Owned::default())).await.unwrap();
+        if mode.ends_with("Follow") { ch.request(HistoryRequest::Scroll { lines:-34 }).await.unwrap(); }
+        let req=if mode.ends_with("Follow") { HistoryRequest::Follow { input:Some(STANDARD.encode(b"echo once\n")) } } else { HistoryRequest::Scroll { lines:-34 } };
+        assert!(ch.request(req).await.is_err());
+        assert!(ch.native_uncertain(), "a missing ACK is not proof of mode release");
+        assert!(!ch.close().await, "failed admin DELETE cannot confirm native mode clear");
+        let transcript=f.task.await.unwrap();
+        assert_eq!(transcript.iter().filter(|r| r.contains("\"op\":\"follow\"")).count(),usize::from(mode.ends_with("Follow")));
+    }
+}
+#[tokio::test]
+async fn public_history_native_close_during_pending_scroll_is_unconfirmed_not_replayed() {
+    let f=fixture("nativeDelayScroll").await;
+    let mut ch=open(&f,Arc::new(Owned::default())).await.unwrap();
+    assert!(tokio::time::timeout(Duration::from_millis(30),ch.request(HistoryRequest::Scroll {lines:-34})).await.is_err());
+    assert!(ch.native_uncertain());
+    assert!(!ch.close().await);
+    let transcript=f.task.await.unwrap();
+    assert_eq!(transcript.iter().filter(|r|r.contains("\"op\":\"scroll\"")).count(),1);
+}
+
+#[tokio::test]
+async fn public_history_native_prewarm_busy_keeps_unknown_state() {
+    let f=fixture("nativeBusyStatus").await;
+    let mut ch=open(&f,Arc::new(Owned::default())).await.unwrap();
+    assert!(matches!(ch.request(HistoryRequest::Scroll {lines:0}).await.unwrap(),HistoryReply::Error {error} if error=="busy"));
+    assert!(ch.native_uncertain());
+    assert!(!ch.close().await);
+    f.task.await.unwrap();
 }

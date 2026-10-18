@@ -76,11 +76,9 @@ it('stops previews under settings, restores prior visibility and never clears to
  expect(wrapper.find('.desktop-sidebar .desktop-preview img').exists()).toBe(true)
  controller.setPreviewVisible(tab,false);await wrapper.get('[data-testid="desktop-settings"]').trigger('click');await wrapper.get('[data-testid="desktop-workspace"]').trigger('click');await flush();expect(tab.previewVisible).toBe(false)
 })
-it('keeps live xterm mounted with no snapshot requests until the first wheel', async () => {
- const {wrapper,transport,terms,attach}=await setup(); await attach()
- expect(transport.runtimeHistory).not.toHaveBeenCalled()
- await wrapper.get('.pane').trigger('wheel', {deltaY:-34}); await flush()
- expect(transport.runtimeHistory).toHaveBeenCalledWith(expect.any(String), {op:'viewport'})
+it('prewarms control without snapshots and releases unsupported capability', async () => {
+ const {transport,terms,attach}=await setup(); await attach()
+ expect(transport.runtimeHistory.mock.calls.map(([,request])=>request.op)).toEqual(['scroll','close'])
  expect(terms[0].disposed).toBe(false)
 })
 it('closes only the finished Shell and leaves genuine transport failures as recoverable connection state',async()=>{
@@ -208,11 +206,4 @@ it('closes the Screen picker immediately and shows loading while CLI remains act
  expect(wrapper.find('.preview-loading').exists()).toBe(false)
  expect(wrapper.get('[data-testid="desktop-toggle"]').text()).toBe('')
  expect(wrapper.get('.preview .p-title').text()).toBe('Screen A')
-})
-
-it('honors the first upward 34px wheel using the existing snapshot contract', async () => {
- const { wrapper, transport, attach } = await setup(); await attach()
- transport.runtimeHistory.mockClear()
- await wrapper.get('.pane').trigger('wheel', { deltaY: -34 }); await flush()
- expect(transport.runtimeHistory.mock.calls.some(([, request]) => request.op === 'viewport')).toBe(true)
 })

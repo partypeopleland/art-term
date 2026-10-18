@@ -189,7 +189,7 @@ export interface Transport {
   open(targetId: string, rows: number, cols: number): Promise<SessionDto>
   /** Pull max bounded output; raw bytes. */
   poll(sessionId: string): Promise<OutputDto>
-  write(sessionId: string, bytes: number[]): Promise<void>
+  write(sessionId: string, bytes: number[], terminalReply?: boolean): Promise<void>
   resize(sessionId: string, rows: number, cols: number): Promise<void>
   /** Local detach only; remote session/lease semantics preserved by backend. */
   close(sessionId: string): Promise<void>

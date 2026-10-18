@@ -197,7 +197,7 @@ it('loads older native pages only after a user viewport event and holds that pag
     cols: 80, rows: 2, readStyledText: window => projection.read(window),
     setNativeReaderActive: vi.fn(), focus: vi.fn(), fit: () => {},
     write: bytes => new Promise<void>(resolve => term.write(bytes, resolve)),
-    onData: cb => { term.onData(cb) }, setKeyInterceptor: cb => term.attachCustomKeyEventHandler(cb),
+    onData: cb => { term.onData(text => cb(text)) }, setKeyInterceptor: cb => term.attachCustomKeyEventHandler(cb),
     reset: () => term.reset(), dispose: () => { projection.dispose(); term.dispose() }
   }
   const terminal = createMobileInput().wrap(document.createElement('div'), real)

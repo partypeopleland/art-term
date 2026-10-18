@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import NativeTerminalReader from './NativeTerminalReader.vue'
-import DesktopHistoryReader from './DesktopHistoryReader.vue'
-import { NativeHistoryKey } from '../terminal/native'
+import { NativeHistoryKey, HostTerminalViewport } from '../terminal/native'
 import type { AppController, TabState } from '../state/controller'
-import type { HostHistoryRequest, HostHistoryRequestFn } from '../terminal/native'
+import type { HostHistoryRequest } from '../terminal/native'
 import { TerminalFactoryKey, createDesktopXtermTerminal } from '../terminal/handle'
 
 const props = defineProps<{
@@ -22,18 +21,33 @@ let observer: ResizeObserver | null = null
 let disposed = false
 const historyRequest = (request: HostHistoryRequest) => props.controller.historyRequest(props.tab, request)
 const historyNotice = (text: string) => { if (!props.tab.closed) props.tab.notice = text }
-const desktopHistoryRequest = computed<HostHistoryRequestFn>(() => {
-  const session = props.tab.sessionId
-  return async request => {
-    if (props.tab.sessionId !== session) return { kind: 'unsupported' }
-    return props.controller.historyRequest(props.tab, request)
-  }
-})
-const desktopReader = ref<InstanceType<typeof DesktopHistoryReader> | null>(null)
-function historyWheel(event: WheelEvent): void {
-  if ((event.target as HTMLElement)?.closest('.desktop-history')) return
-  desktopReader.value?.wheel(event)
+let hostViewport: HostTerminalViewport | null = null
+let viewportBarrier: Promise<void> = Promise.resolve()
+let viewportTicket = 0
+function viewportEnabled(): boolean {
+  return !!props.nativeScroll && !nativeReader && props.active && props.readerVisible !== false && props.tab.runtime
+    && props.tab.status === 'live' && props.tab.key === props.controller.activeKey.value && !document.hidden && !disposed
 }
+function syncViewport(): void {
+  const ticket = ++viewportTicket
+  const previous = hostViewport
+  hostViewport = null
+  props.tab.term?.setHostViewport?.(null)
+  const closing = previous?.close() ?? Promise.resolve()
+  viewportBarrier = Promise.allSettled([viewportBarrier, closing]).then(() => undefined)
+  if (!viewportEnabled() || !props.tab.term) return
+  const session = props.tab.sessionId, terminal = props.tab.term
+  void viewportBarrier.then(() => {
+    if (ticket !== viewportTicket || !viewportEnabled() || props.tab.sessionId !== session) return
+    hostViewport = new HostTerminalViewport(async request => {
+      if (props.tab.sessionId !== session) return { kind: 'unsupported' }
+      return props.controller.historyRequest(props.tab, request)
+    }, historyNotice)
+    terminal.setHostViewport?.(hostViewport)
+    hostViewport.start()
+  })
+}
+watch(() => [props.active, props.readerVisible, props.nativeScroll, props.tab.term, props.tab.status, props.tab.sessionId, props.controller.activeKey.value], syncViewport)
 
 function fitAndReport(): void {
   const term = props.tab.term
@@ -50,6 +64,8 @@ onMounted(() => {
   handle.fit()
   props.controller.attachTerminal(props.tab, handle)
   if (props.active) handle.focus()
+  document.addEventListener('visibilitychange', syncViewport)
+  syncViewport()
 
   observer = new ResizeObserver(() => fitAndReport())
   observer.observe(el.value)
@@ -68,6 +84,8 @@ watch(
 
 onBeforeUnmount(() => {
   disposed = true
+  syncViewport()
+  document.removeEventListener('visibilitychange', syncViewport)
   observer?.disconnect()
   observer = null
   // The controller disposes the handle on tab close; guard anyway.
@@ -76,9 +94,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="pane" v-show="active" @wheel.capture="historyWheel">
+  <div class="pane" v-show="active">
     <div ref="el" class="term-host" />
-    <DesktopHistoryReader v-if="nativeScroll && !nativeReader && tab.runtime" :key="tab.sessionId ?? tab.key" ref="desktopReader" :request="desktopHistoryRequest" :visible="active && readerVisible !== false && tab.status === 'live'" :terminal="tab.term" :history-notice="historyNotice" />
     <NativeTerminalReader v-if="nativeReader && active && tab.status === 'live'"
       :key="tab.sessionId ?? tab.key" :terminal="tab.term"
       :history-request="tab.runtime ? historyRequest : undefined" :history-notice="historyNotice"

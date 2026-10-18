@@ -27,11 +27,11 @@ Windows App
 
 設定預設放 EXE 旁，或以 `art-term-gui.exe --config C:/art-term-private/connections.toml` 指定可寫路徑。缺檔正常顯示空清單，不嵌入私人預設資料。沒有 Screen 保存 schema 5，有 Screen 保存 schema 6；首次桌面保存前私有備份與降版方式見[設定](../refarch/connections.md)。
 
-切頁用 Alt+[／Alt+] 或 Ctrl+PageUp／PageDown；Ctrl+V 遵守 bracketed-paste，Ctrl+C 由遠端解讀。表單輸入不被終端快捷鍵攔截，關頁／關窗只做本機 detach。點終端 HTTP(S) 連結複製到剪貼簿。終端在設定／首頁遮蓋時仍繼續處理輸出，回工作區後重新 fit／focus，不重開連線。
+切頁用 Alt+[／Alt+] 或 Ctrl+PageUp／PageDown；Ctrl+V 遵守 bracketed-paste，Ctrl+C 由遠端解讀。表單輸入不被終端快捷鍵攔截，關頁／關窗只做本機 detach。點終端 HTTP(S) 網址會開啟系統預設瀏覽器；即時畫面與歷史均可使用，拖曳選取不會開啟網址。終端在設定／首頁遮蓋時仍繼續處理輸出，回工作區後重新 fit／focus，不重開連線。
 
-Windows 即時輸入輸出使用 xterm。向上滾輪讀歷史時，桌面元件使用與 Android 相同的快照介面及共用 HostHistoryWindow，按需取得 viewport／older，顯示後 ack、閱讀時 keep、結束時 close；窗口最多 1024 行。平台層只處理 DOM 與操作事件，受控端維持固定介面。
+Windows 的即時畫面與歷史使用同一個 xterm 視窗。上捲時，受控端沿原連線呈現較早內容；向下捲到底便自然接續最新輸出，不切換閱讀畫面、不改變字型或亮度，也沒有「返回即時」按鈕。文字選取、複製、連結與全站主題都由原終端處理。
 
-Windows 歷史閱讀直接相容現有手機已使用的 helper，無須新增 terminalMouse 能力或為 Windows 更動受控端的滑鼠設定。live xterm 保持掛載與輸出，上捲時固定閱讀位置，向下回到最新內容後返回即時終端；隱藏／關頁只釋放自有快照。細節見[終端歷史](../refarch/terminal-history.md)。
+原生連線層統一處理閱讀中的輸入：打字、貼上、快捷鍵與 coding CLI 啟動會先回到即時位置，再交給 CLI。新版需要同一通用歷史 helper 宣告原生 viewport 能力；舊 helper 仍可供手機快照使用，但不能讓新版桌面假裝已能原生捲動。升級既有 helper 不需要更換 Runtime、重啟 Pod 或重新建立仍活著的 tmux 工作，也不增加 Windows 專用安裝項。細節與相容性見[終端歷史](../refarch/terminal-history.md)。
 
 ## 工具鏈與新建置
 

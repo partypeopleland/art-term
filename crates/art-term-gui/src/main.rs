@@ -7,6 +7,7 @@ mod runtime_hosts;
 mod instance_desktops;
 mod runtime_sessions;
 mod runtime_transfer;
+mod browser;
 use art_term_core::connections::Connections;
 use runtime_hosts::{
     gui_runtime_delete_host, gui_runtime_hosts, gui_runtime_save_host, gui_runtime_test_host,
@@ -85,13 +86,14 @@ async fn gui_write(
     runtime: State<'_, Arc<RuntimeSessions>>,
     session_id: String,
     bytes: Vec<u8>,
+    terminal_reply: Option<bool>,
 ) -> Reply<()> {
     if !RuntimeSessions::is_session(&session_id) {
         return Err(GuiError::Runtime(
             art_term_core::openab::session::SessionError::StateChanged.into(),
         ));
     }
-    runtime.write(&session_id, &bytes).map_err(Into::into)
+    runtime.write(&session_id, &bytes, terminal_reply.unwrap_or(false)).await.map_err(Into::into)
 }
 #[tauri::command]
 async fn gui_resize(
@@ -243,6 +245,11 @@ fn startup_error(message: &str) {
     eprintln!("{message}");
 }
 
+#[tauri::command]
+fn gui_open_web_url(url: String) -> Result<(), String> {
+    browser::open_web_url(&url).map_err(str::to_owned)
+}
+
 fn main() {
     // Resolve the sole writable source; missing files load as an empty store.
     let runtime_connections = match initialize() {
@@ -298,6 +305,7 @@ fn main() {
             crate::instance_desktops::gui_instance_select,
             crate::instance_desktops::gui_instance_clear,
             crate::instance_desktops::gui_instance_launch,
+            gui_open_web_url,
             gui_platform,
             gui_open,
             gui_poll,

@@ -4,7 +4,7 @@ import { createApp } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import App from './App.vue'
 import { createTauriTransport } from './transport/tauri'
-import { writeClipboardText } from './transport/clipboard'
+import { createNativeWebLinkOpener } from './transport/browser'
 import { createDesktopXtermTerminal, createMobileXtermTerminal } from './terminal/handle'
 import './style.css'
 
@@ -17,12 +17,12 @@ async function mountApplication() {
     ])
     createApp(MobileApp, {
       transport: createMobileTauriTransport(),
-      terminalFactory: (el: HTMLElement) => createMobileXtermTerminal(el, writeClipboardText)
+      terminalFactory: (el: HTMLElement) => createMobileXtermTerminal(el, createNativeWebLinkOpener('android'))
     }).mount('#app')
   } else if (platform === 'windows') {
     createApp(App, {
       transport: createTauriTransport(),
-      terminalFactory: (el: HTMLElement) => createDesktopXtermTerminal(el, writeClipboardText)
+      terminalFactory: (el: HTMLElement) => createDesktopXtermTerminal(el, createNativeWebLinkOpener('windows'))
     }).mount('#app')
   } else {
     throw new Error('Unsupported platform')

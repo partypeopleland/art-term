@@ -7,6 +7,7 @@ use super::{
     session::{SessionBinding, SessionError, SessionHandle},
 };
 use serde::{Deserialize, Serialize};
+use base64::{engine::general_purpose::STANDARD, Engine};
 use std::sync::Arc;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -27,6 +28,8 @@ pub enum HistoryRequest {
         instance: String,
         epoch: u64,
     },
+    Scroll { lines: i16 },
+    Follow { #[serde(default, skip_serializing_if = "Option::is_none")] input: Option<String> },
     Close,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -62,6 +65,7 @@ pub enum HistoryReply {
         #[serde(skip_serializing_if = "Option::is_none")]
         epoch: Option<u64>,
     },
+    View { op: String, instance: String, held: bool, offset: usize, available: bool },
     Unsupported,
     Error {
         error: String,
@@ -168,12 +172,18 @@ pub struct HistoryChannel {
     pre_ready: usize,
     next_id: u64,
     in_flight: bool,
+    native_viewport: bool,
+    native_held: bool,
+    native_known: bool,
 }
 impl HistoryChannel {
     /// Reserved owned Shell name; never a credential or ownership proof.
     pub fn helper_name(&self) -> &str {
         &self.cleanup.name
     }
+    pub fn native_held(&self) -> bool { self.native_held }
+    pub fn native_uncertain(&self) -> bool { !self.native_known }
+    pub fn native_supported(&self) -> bool { self.native_viewport }
     pub fn key(&self) -> &str {
         &self.key
     }
@@ -213,6 +223,9 @@ impl HistoryChannel {
             pre_ready: 0,
             next_id: 1,
             in_flight: false,
+            native_viewport: false,
+            native_held: false,
+            native_known: true,
         };
         let result = tokio::time::timeout(DEADLINE, async {
             let host = channel
@@ -271,6 +284,7 @@ impl HistoryChannel {
                 .filter(|s| hex(s, 32))
                 .ok_or(SessionError::Protocol)?;
             channel.instance = instance.into();
+            channel.native_viewport = match value.get("nativeViewport") { None => false, Some(v) if v.as_u64() == Some(1) => true, _ => return Err(SessionError::Protocol) };
             Ok(())
         })
         .await
@@ -313,6 +327,20 @@ impl HistoryChannel {
                 self.check_epoch(instance, *epoch)?;
                 ("keep", Some(*epoch))
             }
+            HistoryRequest::Scroll { lines } => {
+                if !(-256..=256).contains(lines) { return Err(SessionError::Protocol); }
+                if !self.native_viewport { return Ok(HistoryReply::Unsupported); }
+                ("scroll", None)
+            }
+            HistoryRequest::Follow { input } => {
+                if let Some(input) = input {
+                    if input.len() > 5464 { return Err(SessionError::Capacity); }
+                    let bytes = STANDARD.decode(input).map_err(|_| SessionError::Protocol)?;
+                    if bytes.len() > 4096 || STANDARD.encode(&bytes) != *input { return Err(SessionError::Protocol); }
+                }
+                if !self.native_viewport { return Ok(HistoryReply::Unsupported); }
+                ("follow", None)
+            }
             HistoryRequest::Close => ("close", None),
         };
         let id = self.next_id;
@@ -330,6 +358,7 @@ impl HistoryChannel {
         if bytes.len() > 8192 {
             return Err(SessionError::Capacity);
         }
+        if matches!(request, HistoryRequest::Scroll { .. } | HistoryRequest::Follow { .. }) { self.native_known = false; }
         self.in_flight = true;
         let result = tokio::time::timeout(DEADLINE, async {
             self.handle
@@ -342,8 +371,10 @@ impl HistoryChannel {
         .await
         .unwrap_or(Err(SessionError::Timeout));
         self.in_flight = false;
+        if let Ok(HistoryReply::View { held, .. }) = &result { self.native_held = *held; self.native_known = true; }
+        // A close ACK confirms only this helper released its tag, never a foreign/manual mode.
         if result.is_err() || matches!(request, HistoryRequest::Close) {
-            self.close().await;
+            self.hard_close().await;
         }
         result
     }
@@ -354,7 +385,41 @@ impl HistoryChannel {
             Ok(())
         }
     }
-    pub async fn close(&mut self) {
+    /// True only when native mode is known clear, never merely because DELETE was attempted.
+    pub async fn close(&mut self) -> bool {
+        // A close ACK only confirms our tag cleanup. An authoritative follow View is
+        // required to clear an unknown/held native state; foreign/manual Busy stays fenced.
+        if self.native_viewport && (!self.native_known || self.native_held) && !self.in_flight && self.handle.is_some() {
+            let id = self.next_id;
+            self.next_id = self.next_id.saturating_add(1);
+            self.in_flight = true;
+            let wire = format!("{}\n", serde_json::json!({"v":1,"nonce":self.nonce,"requestId":id,"op":"follow"}));
+            let confirmed = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                self.handle.as_ref().ok_or(SessionError::Cancelled)?.write(wire.as_bytes())?;
+                let reply = self.receive(false).await?;
+                self.validate_reply(reply, &HistoryRequest::Follow {input:None}, "follow", None, id)
+            }).await;
+            if matches!(confirmed, Ok(Ok(HistoryReply::View {held:false,offset:0,..}))) { self.native_known = true; self.native_held = false; }
+            self.in_flight = false;
+        }
+        // An abandoned in-flight operation is never replayed. Pipe guard owns crash cleanup.
+        if !self.in_flight && self.handle.is_some() && !self.instance.is_empty() {
+            let id = self.next_id;
+            self.next_id = self.next_id.saturating_add(1);
+            self.in_flight = true;
+            let wire = format!("{}\n", serde_json::json!({"v":1,"nonce":self.nonce,"requestId":id,"op":"close"}));
+            let confirmed = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                self.handle.as_ref().ok_or(SessionError::Cancelled)?.write(wire.as_bytes())?;
+                let reply = self.receive(false).await?;
+                self.validate_reply(reply, &HistoryRequest::Close, "close", None, id)
+            }).await;
+            let _ = confirmed; // ACK alone is not a no-foreign-mode assertion.
+            self.in_flight = false;
+        }
+        self.hard_close().await;
+        self.native_known && !self.native_held
+    }
+    async fn hard_close(&mut self) {
         if let Some(handle) = self.handle.take() {
             handle.shutdown().await;
         }
@@ -470,6 +535,14 @@ impl HistoryChannel {
                     instance: self.instance.clone(),
                     epoch,
                 })
+            }
+            Some("view") => {
+                if !matches!(op, "scroll" | "follow") || v["op"].as_str() != Some(op) { return Err(SessionError::Protocol); }
+                let held = v["held"].as_bool().ok_or(SessionError::Protocol)?;
+                let available = v["available"].as_bool().ok_or(SessionError::Protocol)?;
+                let offset = v["offset"].as_u64().filter(|n| *n <= 6000).ok_or(SessionError::Protocol)? as usize;
+                if (!held && offset != 0) || (!available && (held || offset != 0)) || (op == "follow" && (held || offset != 0)) { return Err(SessionError::Protocol); }
+                Ok(HistoryReply::View { op: op.into(), instance: self.instance.clone(), held, offset, available })
             }
             Some("page") => {
                 if !matches!(op, "viewport" | "older") || v["op"].as_str() != Some(op) {

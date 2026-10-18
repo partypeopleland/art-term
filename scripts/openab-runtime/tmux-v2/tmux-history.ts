@@ -1,4 +1,5 @@
 /** Page-only Node 22 worker. tmux owns rendering, history and reader snapshots. */
+import { NativeViewport } from './native-viewport'
 import { randomBytes } from 'node:crypto'
 import { lstatSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -81,7 +82,10 @@ async function release(epoch: number): Promise<void> {
 async function prune(): Promise<void> {
   for (const [epoch, value] of snapshots) if (value.expires <= Date.now()) await release(epoch)
 }
+let native: NativeViewport | undefined
+let nativeOpened = false
 async function cleanup(): Promise<void> {
+  await native?.close().catch(() => {})
   await removeBuffer(instance).catch(() => {})
   for (const window of [...owned]) await removeWindow(window).catch(() => {})
 }
@@ -108,10 +112,10 @@ function get(epoch: unknown): Snapshot {
 }
 function renew(snapshot: Snapshot): void { snapshot.expires = Date.now() + LEASE_MS }
 const SIZE = ['display-message', '-p', '-t', 'work:0.0', '#{pane_width},#{pane_height},#{pane_dead},#{alternate_on}']
-function parseDimensions(raw: string): { columns: number; rows: number } {
+function parseDimensions(raw: string, allowAlternate = false): { columns: number; rows: number } {
   const match = /^(\d+),(\d+),0,([01])$/.exec(raw)
   if (!match) fail('unavailable')
-  if (match[3] === '1') fail('unsupported')
+  if (match[3] === '1' && !allowAlternate) fail('unsupported')
   const columns = Number(match[1]), rows = Number(match[2])
   if (columns < 1 || columns > 500 || rows < 1 || rows > 500) fail('limit')
   return { columns, rows }
@@ -262,13 +266,24 @@ async function request(value: any): Promise<void> {
   let authenticated = false
   try {
     if (!value || value.v !== 1 || value.nonce !== nonce || requestId <= lastRequest
-      || !['viewport', 'older', 'ack', 'keep', 'close'].includes(value.op)) fail('protocol')
+      || !['viewport', 'older', 'ack', 'keep', 'close', 'scroll', 'follow'].includes(value.op)) fail('protocol')
     lastRequest = requestId
     authenticated = true
     clearTimeout(idleTimer)
     identity()
     await prune()
-    if (value.op === 'viewport') {
+    if (value.op === 'scroll' || value.op === 'follow') {
+      if (value.op === 'scroll' && (!Number.isSafeInteger(value.lines) || value.lines < -256 || value.lines > 256)) fail('protocol')
+      if (value.op === 'follow' && value.input !== undefined) {
+        if (typeof value.input !== 'string' || value.input.length > 5464) fail('protocol')
+        const input = Buffer.from(value.input, 'base64')
+        if (input.length > 4096 || input.toString('base64') !== value.input) fail('protocol')
+      }
+      if (!native) fail('unavailable')
+      if (!nativeOpened) { await native.open(); nativeOpened = true }
+      const result = await native.request({ op: value.op, ...(value.op === 'scroll' ? {lines:value.lines} : value.input === undefined ? {} : {input:value.input}) }).catch(error => fail(error.message === 'busy' ? 'busy' : 'unavailable'))
+      await send(requestId, { type: 'view', op: value.op, ...result })
+    } else if (value.op === 'viewport') {
       const snapshot = await capture()
       await page(requestId, value.op, snapshot, snapshot.history, snapshot.rowCount)
     } else if (value.op === 'older') {
@@ -288,6 +303,7 @@ async function request(value: any): Promise<void> {
       renew(snapshot)
       await send(requestId, { type: 'ack', op: value.op, epoch: snapshot.epoch })
     } else {
+      if (nativeOpened && !(await native!.close())) fail('unavailable')
       await send(requestId, { type: 'ack', op: 'close' })
       closing = true
     }
@@ -305,13 +321,14 @@ async function request(value: any): Promise<void> {
 }
 async function main(): Promise<void> {
   identity(true)
-  await dimensions()
+  parseDimensions((await tmux(SIZE)).toString('utf8').trim(), true)
   await cleanStale()
+  native = new NativeViewport({ state, manifest, owner, workerPid: process.pid, workerStart: proc(process.pid).start, tmux: path.join(homedir(), '.local/share/art-term/openab-pty/tmux-v2/tmux') }, () => { closing = true; process.stdin.destroy() })
   if (process.stdin.isTTY) process.stdin.setRawMode(true)
   // Interactive bash emits its final bracketed-paste control before exec.
   // Put that pre-ready noise on its own line; never require a VT parser here.
   process.stdout.write('\n')
-  await send(0, { type: 'ready', key })
+  await send(0, { type: 'ready', key, nativeViewport: 1 })
   armIdle()
   // Async iteration pauses reading during each request; no unbounded application queue.
   let buffer = Buffer.alloc(0)
@@ -327,7 +344,7 @@ async function main(): Promise<void> {
     }
   }
 }
-for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => { closing = true; process.stdin.destroy() })
+for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) process.on(signal, () => { closing = true; process.stdin.destroy() })
 main().catch(async error => {
   if (closing) return
   try { await send(0, { type: 'error', kind: error instanceof Failure ? error.kind : 'unavailable' }) } finally { process.exitCode = 1 }

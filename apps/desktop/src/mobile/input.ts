@@ -75,7 +75,7 @@ export function createMobileInput(): MobileInput {
   }
 
   function wrap(el: HTMLElement, real: TerminalHandle): TerminalHandle {
-    let cb: ((text: string) => void) | null = null
+    let cb: ((text: string, terminalReply?: boolean) => void) | null = null
     let innerInterceptor: ((ev: KeyboardEvent) => boolean) | null = null
     let imeActive = false
     let imeHeld: string[] = []
@@ -156,7 +156,8 @@ export function createMobileInput(): MobileInput {
       }
       return innerInterceptor ? innerInterceptor(ev) : true
     })
-    real.onData((text) => {
+    real.onData((text, terminalReply) => {
+      if (terminalReply) { if (!disposed) cb?.(text, true); return }
       if (disposed || suspended || discardedComposition) return
       if (imeActive) {
         imeHeld.push(text)

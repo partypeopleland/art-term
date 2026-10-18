@@ -135,12 +135,13 @@ async fn mobile_poll(
 async fn mobile_write(
     session_id: String,
     bytes: Vec<u8>,
+    terminal_reply: Option<bool>,
     sessions: State<'_, Arc<RuntimeSessions>>,
 ) -> Result<(), MobileSessionError> {
     if !RuntimeSessions::is_session(&session_id) {
         return Err(stale_id());
     }
-    sessions.write(&session_id, &bytes).map_err(Into::into)
+    sessions.write(&session_id, &bytes, terminal_reply.unwrap_or(false)).await.map_err(Into::into)
 }
 #[tauri::command]
 async fn mobile_resize(

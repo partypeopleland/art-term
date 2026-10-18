@@ -52,7 +52,8 @@ try {
         '不讀取使用者目錄中的舊 runtime-hosts-v1.json；舊版本連線需先在舊 App 匯出，再於新版匯入。',
         '每個 live Shell 可獨立選 Screen；App 原生層直接 MCP 取圖，不把截圖命令輸入工作 Shell。停止預覽與取消桌面工具分開操作。',
         '需要 Shell／coding CLI 工具時，先在受控端安裝通用 broker helper，再建立新連線；不注入正在執行的 CLI。Screen 選擇限定該 Shell，不是 Host 全域設定。',
-        '即時輸入輸出使用xterm；上捲歷史與Android共用既有快照介面，按需分頁、固定閱讀位置，回到底部恢復即時畫面。受控端提供統一介面，無需另裝Windows專用滑鼠控制能力。',
+        '即時輸出與歷史都使用原本的終端視窗；上捲閱讀、下捲到底自然接續即時輸出。受控端須使用支援scroll／follow的通用helper；Android既有快照介面維持相容，沒有Windows專用helper。',
+        '終端中的 HTTP／HTTPS 網址點擊後由系統預設瀏覽器開啟，歷史內容也能使用；滑動與拖曳選取不開啟網址。',
         '整個交付資料夾一起搬移，請保留設定、備份與授權檔案；DPAPI 密文不能直接移給不同 Windows 帳號。',
         '關分頁只本機脫離；遠端工作仍受 TTL／Runtime 生命週期限制，退出工作 Bash 則結束該工作。'
     )

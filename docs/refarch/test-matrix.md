@@ -21,8 +21,8 @@
 | 真官方 Runtime configure | Rust 原生 configure→未修改官方 Runtime 管理 PTY→adapter→固定 client→A／B；raw／關 echo READY 握手，token 不在 replay／history／cmdline／environ／log；管理 Shell 刪除與名額恢復；renew 後仍可 configure／clear |
 | 工具生命週期 | 無 adapter 不假報 ready、auth／timeout／isError、clear 拒新呼叫、CLI stdio EOF 保留 Shell 選擇、Shell 結束清記憶體／socket、背景／晚到回應、App 重啟／takeover 不沿用未核對選擇；owner／0700／非 symlink 及同 UID 邊界 |
 | CLI 契約 | 確定性檢查 Codex -c stdio command／args 不含 URL／token、timeout 75秒、其他 CLI 不猜語法、不對既有程式偷偷輸入；此項不等於真 Codex／AI 已測 |
-| Windows 平台呈現 | 保留200px可調左欄／左下預覽／右側終端與全頁設定；live xterm 保持即時輸入，首個小幅上捲透過共用快照模型讀歷史；1024行窗口、anchor、閱讀中輸出不跳走、到底回live、再次上捲、中文／Backspace、resize／Theme／焦點／表單快捷鍵 |
-| 跨平台歷史契約 | Android／Windows 同用 viewport／older／ack／keep／close 及 HostHistoryWindow；舊版已安裝 helper 可用、沒有平台專用控制操作；延遲首回覆不吞手勢，hidden／close 只釋放自有讀頁程序，快照失敗保留 live xterm，兩平台呈現另測 |
+| Windows 平台呈現 | 保留200px可調左欄／左下預覽／右側終端與全頁設定；同一 xterm 原視窗直接顯示較早內容，字型主題與選取保持；首個小幅 wheel、閱讀中輸出保持、下捲自然追尾、閱讀中輸入／貼上、中文／Backspace、resize／Theme／焦點／表單快捷鍵 |
+| 共同受控端歷史契約 | 同一 helper／Rust channel 向後相容提供 snapshot 五操作及中立 scroll／follow；Android HostHistoryWindow 原流程不變，Windows HostTerminalViewport 使用原 PTY；能力協商、舊 helper 不收未知操作、busy／inner alternate、輸入排序／protocol reply、hidden／close／SIGKILL 只清自有狀態；無平台專用安裝，兩平台呈現另測 |
 | 回歸 | tmux 歷史按需讀頁、輸入／ACK／重連、固定滑動頂列／四主題／語音與鍵列、Host／Screen 混合搬移、Screen-only 還原及舊版 Host 檔相容、無私人預填 |
 
 ARM64 手機、現場網路／MCP、實際 Codex CLI 與 AI 模型各自需要明確結果；固定 client E2E、命令契約或舊 helper 案例不替代它們。無授權不操作 Owner 手機或既有共享服務。
@@ -83,3 +83,5 @@ ARM64 release原簽章更新、硬體Keystore、各廠牌中文IME／觸控手�
 ## 附錄：案例實作
 
 [Windows四流程](../../scripts/windows-regression/run.py)、[Android與跨裝置流程](../../scripts/android-regression/run.py)、[Linux流程](../../scripts/linux-regression/run.py)、[核心協定tests](../../crates/art-term-core/src/openab/tests.rs)、[憑證DPAPI tests](../../crates/art-term-gui/src/dpapi.rs)、[搬移tests](../../crates/art-term-core/src/openab/transfer_tests.rs)、[前端tests](../../apps/desktop/tests)。
+
+HTTP(S) 網址另由前端 `terminal-links.test.ts`／`web-browser.test.ts`、Windows `browser::tests` 與 Android `web_links.py` 保護：點擊開啟本機瀏覽器、保留 URL、錯誤處理，以及滑動／拖曳／長按不誤開網址。

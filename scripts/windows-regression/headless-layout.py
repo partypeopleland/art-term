@@ -49,7 +49,7 @@ def main():
         ActionChains(driver).move_to_element(node(testid)).click_and_hold().move_by_offset(dx, dy).release().perform()
 
     def wheel(amount):
-        host = next((e for e in driver.find_elements(By.CSS_SELECTOR, '.history-viewport') if e.is_displayed()), None) or driver.find_element(By.CSS_SELECTOR, '.xterm-screen')
+        host = next(e for e in driver.find_elements(By.CSS_SELECTOR, '.pane .xterm-screen') if e.is_displayed())
         ActionChains(driver).scroll_from_origin(ScrollOrigin.from_element(host), 0, amount).perform()
 
     def terminal_text():
@@ -72,27 +72,61 @@ def main():
         wait.until(lambda _: abs(node('preview-divider').rect['y'] - preview_before + 70) < 2)
         checks['dragPreviewHeight'] = True
         node('runtime-demo-host').find_element(By.CSS_SELECTOR, '.new-connection').click()
-        wait.until(lambda _: 'ROW-96' in terminal_text())
-        check(not any(e.is_displayed() for e in driver.find_elements(By.CSS_SELECTOR, '.desktop-history')), 'live terminal is covered')
-        check(js("return !window.__desktopPreview.requests.some(r=>r.op==='viewport'||r.op==='older')"), 'live display polls snapshots')
+        wait.until(lambda _: 'ROW-1100' in terminal_text())
+        js("window.__inlineXterm=document.querySelector('.pane .xterm')")
+        def visible_rows():
+            return js("const host=document.querySelector('.pane .xterm-screen'),box=host.getBoundingClientRect();return [...host.querySelectorAll('.xterm-rows>div')].filter(e=>{const b=e.getBoundingClientRect();return b.bottom>box.top&&b.top<box.bottom}).map(e=>e.innerText).filter(Boolean)")
+        def same_renderer():
+            check(js("return window.__inlineXterm===document.querySelector('.pane .xterm')"), 'xterm instance/DOM was replaced')
+            check(not driver.find_elements(By.CSS_SELECTOR, '.desktop-history,.history-viewport,[data-testid=history-close]'), 'second reader/return control exists')
+        live = visible_rows()
+        original_font = js("return getComputedStyle(document.querySelector('.xterm-rows')).font")
         wheel(-34)
-        wait.until(lambda _: any(e.is_displayed() for e in driver.find_elements(By.CSS_SELECTOR, '.desktop-history')))
-        wait.until(lambda _: js("return window.__desktopPreview.requests.some(r=>r.op==='older'&&r.limit===256)"))
-        history_text = lambda: js("return document.querySelector('.history-viewport')?.textContent || ''")
-        check('ROW-1 ' in history_text(), 'first small wheel did not load older snapshot rows')
-        checks['firstSmallWheelUsesSnapshotOlder'] = True
-        held = history_text()
-        js('window.__desktopPreview.append()')
-        driver.execute_async_script('const done=arguments[0];setTimeout(done,200)')
-        check(history_text() == held, 'new output moved held snapshot')
-        for _ in range(64):
-            if not any(e.is_displayed() for e in driver.find_elements(By.CSS_SELECTOR, '.desktop-history')): break
-            wheel(120)
-        wait.until(lambda _: not any(e.is_displayed() for e in driver.find_elements(By.CSS_SELECTOR, '.desktop-history')))
-        wait.until(lambda _: 'ROW-121' in terminal_text())
-        check(js("return !window.__desktopPreview.requests.some(r=>r.op==='terminalMouse')"), 'platform-specific host request remains')
-        checks['heldSnapshotAndReturnToLiveXterm'] = True
-        driver.save_screenshot(str(output / 'workspace-shared-snapshot.png'))
+        wait.until(lambda _: visible_rows() != live)
+        same_renderer()
+        first = js("return {request:window.__desktopPreview.requests.find(r=>r.op===\u0027scroll\u0027&&r.lines<0),cellHeight:document.querySelector(\u0027.xterm-rows>div\u0027).getBoundingClientRect().height}")
+        check(first["request"] and first["request"]["lines"] <= -1, "first34px wheel did not reach an earlier row")
+        ids = [int(row.split("ROW-")[1].split()[0]) for row in visible_rows() if "ROW-" in row]
+        live_ids = [int(row.split("ROW-")[1].split()[0]) for row in live if "ROW-" in row]
+        check(ids[0] < live_ids[0] and all(b == a + 1 for a, b in zip(ids, ids[1:])), "first wheel does not show earlier consecutive rows")
+        checks["firstWheelMeasurement"] = first
+        check(js("return !window.__desktopPreview.requests.some(r=>['viewport','older','ack','keep'].includes(r.op))"), 'Windows still polls snapshots')
+        checks['first34pxSameOriginalXterm'] = True
+        for _ in range(6): wheel(-5000)
+        wait.until(lambda _: any('ROW-0001 ' in row for row in visible_rows()))
+        same_renderer()
+        check(any('桌面終端示範' in row for row in visible_rows()), 'Unicode history is not actually visible')
+        held = visible_rows()
+        for _ in range(3):
+            js('window.__desktopPreview.append(7)')
+            driver.execute_async_script('const done=arguments[0];setTimeout(done,80)')
+            check(visible_rows() == held, 'continuous output moved held original viewport')
+        check(js("return getComputedStyle(document.querySelector('.xterm-rows')).font") == original_font, 'history swaps original font')
+        check(js("return [...document.querySelectorAll('.xterm-rows span')].some(e=>getComputedStyle(e).color==='rgb(86, 180, 233)')"), 'history lost original RGB style')
+        row = next(e for e in driver.find_elements(By.CSS_SELECTOR, ".xterm-rows>div") if "ROW-0001 " in e.text)
+        ActionChains(driver).move_to_element_with_offset(row, -row.rect["width"] / 2 + 8, 0).click_and_hold().move_by_offset(200, 0).release().perform()
+        check(js("return document.querySelectorAll(\u0027.xterm-selection div\u0027).length>0"), "trusted mouse selection missing from original xterm")
+        for _ in range(6): wheel(5000)
+        wait.until(lambda _: any('ROW-1121 ' in row for row in visible_rows()))
+        js('window.__desktopPreview.append(1)')
+        wait.until(lambda _: any('ROW-1122 ' in row for row in visible_rows()))
+        same_renderer()
+        checks['thousandRowsHeldOutputAndNaturalFollow'] = True
+        # A real theme change reaches the same renderer, not just an outer class.
+        before_color = js("return getComputedStyle(document.querySelector('.xterm-rows')).color")
+        node('desktop-settings').click()
+        next(e for e in driver.find_elements(By.CSS_SELECTOR,'.theme-option') if '柔光' in e.text).click()
+        node('desktop-workspace').click()
+        wait.until(lambda _: js("return getComputedStyle(document.querySelector('.xterm-rows')).color") != before_color)
+        same_renderer()
+        check(js("return getComputedStyle(document.querySelector('.xterm-rows')).font") == original_font, 'theme changed font when entering history')
+        # CSS font styling remains on the original row DOM throughout control.
+        js("const s=document.createElement('style');s.id='owned-font-proof';s.textContent='.xterm-rows{font-family:monospace!important}';document.head.append(s)")
+        check('monospace' in js("return getComputedStyle(document.querySelector('.xterm-rows')).fontFamily"), 'computed font style did not actually change')
+        same_renderer()
+        js("document.getElementById('owned-font-proof').remove()")
+        checks['originalRgbSelectionFontAndActualThemeChange'] = True
+        driver.save_screenshot(str(output / 'workspace-inline-original-xterm.png'))
         node('desktop-toggle').click()
         node('choose-screen-demo-screen').click()
         check(not driver.find_elements(By.CSS_SELECTOR, '[data-testid=screen-picker]'), 'Screen picker waits for background selection')
