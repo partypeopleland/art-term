@@ -105,6 +105,15 @@ pub async fn gui_instance_select(
         .map_err(|_| "桌面切換未確認成功；請重新選擇，並確認受控端工具入口已安裝".into())
 }
 #[tauri::command]
+pub async fn gui_instance_restore(
+    hosts: State<'_, Arc<RuntimeHosts>>,
+    sessions: State<'_, Arc<RuntimeSessions>>,
+    session_id: String,
+) -> Result<Option<InstanceSelection>, String> {
+    sessions.restore_instance(&hosts, &session_id).await
+        .map_err(|_| "無法核對 Shell 的既有 Screen；請檢查連線後重試".into())
+}
+#[tauri::command]
 pub async fn gui_instance_clear(
     hosts: State<'_, Arc<RuntimeHosts>>,
     sessions: State<'_, Arc<RuntimeSessions>>,

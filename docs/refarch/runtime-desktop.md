@@ -33,7 +33,7 @@ Unix socket 位於 owner-only 0700 runtime 目錄，驗證 owner、mode 及非 s
 
 App 以 `exec python3` 啟動短命 configure Shell；接收端先關 echo／canonical mode，完成後才印 nonce READY。App 等 READY 再送有界 length-prefixed base64 JSON frame，最多 16 KiB、10 秒；token 為可見 ASCII、最多 1024 bytes。configure 只回非秘密結果，結束、失敗或取消都清理自建管理 Shell，不把秘密輸入使用者工作終端。
 
-配置回報的 Screen id／revision／選擇 generation 核對後，才能確認 Shell 接入；不存在 broker 不得假報 ready。generation 是工具選擇版本，不是 Runtime generation；過期 rollback／clear 不能撤銷較新選擇。App 重啟或接管不假定舊選擇仍有效，須重新明確配置。一般 Main 切換及 App 背景只停取圖，不清除 Shell 工具；取消工具／關閉本機連線 best-effort clear。斷網不保證 clear 立即送達，Shell 程序結束才保證其記憶體釋放。
+配置回報的 Screen id／revision／選擇 generation 核對後，才能確認 Shell 接入；不存在 broker 不得假報 ready。generation 是工具選擇版本，不是 Runtime generation；過期 rollback／clear 不能撤銷較新選擇。App 重啟或接管時先查詢該 Shell broker 的現有指派，核對 Screen id／revision、當前憑證與上游；已刪除或改版的指派會清除，不能沿用失效認證。一般 Main 切換、App 背景、關頁、detach 與關閉 App 只停本機取圖及連線；明確取消工具才 clear。Shell 程序結束時釋放其記憶體指派。
 
 ## Shell 與 coding CLI 使用同一選擇
 

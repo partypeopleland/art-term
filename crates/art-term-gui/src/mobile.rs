@@ -157,14 +157,13 @@ async fn mobile_resize(
 }
 #[tauri::command]
 async fn mobile_close(
-    hosts: State<'_, Arc<RuntimeHosts>>,
     session_id: String,
     sessions: State<'_, Arc<RuntimeSessions>>,
 ) -> Result<(), MobileSessionError> {
     if !RuntimeSessions::is_session(&session_id) {
         return Err(stale_id());
     }
-    sessions.close_with_tools(&hosts, &session_id).await.map_err(Into::into)
+    sessions.close(&session_id).await.map_err(Into::into)
 }
 
 pub fn run() {
@@ -203,6 +202,7 @@ pub fn run() {
             crate::instance_desktops::gui_instance_test,
             crate::instance_desktops::gui_instance_select,
             crate::instance_desktops::gui_instance_clear,
+            crate::instance_desktops::gui_instance_restore,
             crate::instance_desktops::gui_instance_launch,
             gui_platform,
             mobile_desktop,
@@ -262,7 +262,7 @@ pub fn run() {
                     tauri::async_runtime::spawn(async move {
                         let _ = tokio::time::timeout(
                             std::time::Duration::from_secs(8),
-                            app.state::<Arc<RuntimeSessions>>().shutdown_with_tools(app.state::<Arc<RuntimeHosts>>().inner().clone()),
+                            app.state::<Arc<RuntimeSessions>>().shutdown(),
                         )
                         .await;
                         shutdown_complete.store(true, std::sync::atomic::Ordering::SeqCst);

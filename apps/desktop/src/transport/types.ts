@@ -167,6 +167,7 @@ export interface Transport {
   instanceDelete?(id: string, expectedRevision: number): Promise<void>
   instanceTest?(id: string, expectedRevision: number): Promise<void>
   instanceSelect?(sessionId: string, desktopId: string, expectedRevision: number): Promise<InstanceSelection>
+  instanceRestore?(sessionId: string): Promise<InstanceSelection | null>
   instanceClear?(sessionId: string): Promise<void>
   instanceLaunch?(sessionId: string): Promise<InstanceSelection>
 
