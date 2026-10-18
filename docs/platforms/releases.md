@@ -3,7 +3,7 @@
 Git push 只會上傳原始碼；GitHub 不會自行執行本機打包腳本。此專案的 `Build and release` workflow 在推送 `v*` 版本標籤後，用 GitHub 的 Windows runner 建置 EXE 和已簽章的 ARM64 APK，再建立 GitHub Release。Release 本文取自該 tag 中的 `docs/report/<version>.md`，發布前必須完成對應更新說明。成果不需要加入 Git。
 
 ```text
-push v0.1.28 --+--> Windows EXE + ZIP -----------+
+push v0.1.29 --+--> Windows EXE + ZIP -----------+
               +--> Android APK + verification --+--> GitHub Release + SHA256SUMS
 ```
 
@@ -79,14 +79,14 @@ Repository 必須允許 GitHub Actions 執行。Workflow 僅在發布 job 要求
 
 ## 發布版本
 
-先將 workflow、腳本與設定變更 commit 並 push 至 `main`。目前 App 版本為 `0.1.28`，發布可執行：
+先將 workflow、腳本與設定變更 commit 並 push 至 `main`。目前 App 版本為 `0.1.29`，發布可執行：
 
 ```sh
-git tag -a v0.1.28 -m "Release 0.1.28"
-git push origin v0.1.28
+git tag -a v0.1.29 -m "Release 0.1.29"
+git push origin v0.1.29
 ```
 
-標籤必須指向包含 workflow 的 commit。後續發布先同步修改 `crates/art-term-gui/tauri.conf.json` 與 `crates/art-term-gui/tauri.android.conf.json` 的 `version`，並增加 Android 設定的 `bundle.android.versionCode`（目前為 `1054`）。Commit、push 後，再推送對應的新標籤，例如 `v0.1.28`。Workflow 會拒絕與 App 版本不一致的標籤。
+標籤必須指向包含 workflow 的 commit。後續發布先同步修改 `crates/art-term-gui/tauri.conf.json` 與 `crates/art-term-gui/tauri.android.conf.json` 的 `version`，並增加 Android 設定的 `bundle.android.versionCode`（目前為 `1058`）。Commit、push 後，再推送對應的新標籤，例如 `v0.1.29`。Workflow 會拒絕與 App 版本不一致的標籤。
 
 成功後 Release 附件包含：
 

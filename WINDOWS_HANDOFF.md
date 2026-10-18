@@ -1,6 +1,6 @@
 # Windows 開發交接
 
-分支：`feat/windows-mobile-parity`。本輪接續 `8bc8650`，修復上捲時切換成另一個歷史畫面、字型與亮度不同的問題。
+版本：`0.1.29`；開發分支：`feat/windows-mobile-parity`。本輪接續 `8bc8650`，修復上捲時切換成另一個歷史畫面、字型與亮度不同的問題。
 
 ## 原終端直接捲動
 
@@ -28,7 +28,7 @@ NUC／Hana 的同一通用 helper 已升級為 SHA256 `bfcf0fd3d72e14545e3915c22
 
 不操作 Owner 正在執行的 App 或既有工作。新套件放在獨立目錄，更換 EXE 前先關閉 App，保留私人 `connections.toml`；既有遠端工作可重新 attach。
 
-OS 中文候選選字、實際 AI 推論、Android APK／Keystore 本輪未驗收。本輪沒有重跑完整 All suite；既有 Host-only golden vector 失敗及全量 Rust 格式差異紀錄保留。
+OS 中文候選選字、實際 AI 推論本輪未驗收；Android 候選 APK 原簽章與封裝驗證通過，Owner 已確認本版可發布。本輪沒有重跑完整 All suite；既有 Host-only golden vector 失敗及全量 Rust 格式差異紀錄保留。
 
 ## 接續方式
 
@@ -41,11 +41,11 @@ $env:CARGO_BUILD_JOBS = '1'
 pwsh -NoProfile -File scripts/package-windows.ps1 -OutputPath dist/windows/new-package
 ```
 
-本輪基本驗收後 commit／push 開發分支；不合 main、不 tag、不發布正式 Release。
+2026-10-18 Owner 確認本版可發布，接續合併 main 並以 `v0.1.29` 發布。正式套件從 [GitHub Release](https://github.com/partypeopleland/art-term/releases/tag/v0.1.29) 取得；以下保留候選包資訊供追溯。
 
 ## APK 候選
 
-Android 0.1.28／code1056，原簽章與 16KB 對齊驗證通過；不包含私人連線及 fixture。NAS：`\\art.ds\files\my-cli-release\art-term-0.1.28-build1056-android-arm64.apk`。SHA256：`182bd8d3c7ba81d7b697e63a0d054784ad9b6942218e088e15f662ce20c96987`。手機實機通過後再處理 main／正式發布。
+Android 0.1.28／code1056，原簽章與 16KB 對齊驗證通過；不包含私人連線及 fixture。NAS：`\\art.ds\files\my-cli-release\art-term-0.1.28-build1056-android-arm64.apk`。SHA256：`182bd8d3c7ba81d7b697e63a0d054784ad9b6942218e088e15f662ce20c96987`。Owner 已確認此版本可發布；正式版為 0.1.29／code1058。
 
 ## Windows 修正版套件
 
