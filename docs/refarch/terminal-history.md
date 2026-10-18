@@ -1,13 +1,13 @@
 # tmux 終端歷史與按需捲動
 
-新建 Shell 統一使用主機上的私有 tmux，保留有限主機歷史。Windows 以單一 xterm 直接顯示 PTY，normal buffer 用本機 scrollback，tmux alternate buffer 用原生 mouse／copy-mode。Android 保留原生 snapshot 閱讀：先取當前畫面，向上才分批取較早紀錄。即時輸入輸出仍走官方 Runtime。
+新建 Shell 統一使用主機上的私有 tmux，保留有限主機歷史。Windows 與 Android 都遵循同一套歷史快照介面，先取當前畫面，向上才分批取較早紀錄。Windows 即時畫面使用 xterm，歷史以桌面元件呈現；Android 以原生 View 呈現。即時輸入輸出仍走官方 Runtime。
 
 ## 閱讀與恢復
 
 ```text
 建立並連線 -> Runtime 工作 Shell -> 私有 tmux / bash
                                           |
-App 初次連線 -> 讀頁 helper -> tmux 原生閱讀快照 -> 當前畫面
+App 要求歷史 -> 讀頁 helper -> tmux 原生閱讀快照 -> 當前畫面
 App 向上捲動 -> 同一快照指定範圍擷取            -> 最多 256 行
 App 確認畫面已顯示 -> 保留顯示快照、釋放前一份快照
 ```
@@ -16,11 +16,11 @@ App 確認畫面已顯示 -> 保留顯示快照、釋放前一份快照
 
 Android 原生閱讀窗口最多 1024 行；上捲前插舊頁、持續輸出、開關鍵盤及視窗尺寸改變時，依原生列識別與像素位置維持閱讀點。停在底部才跟隨最新輸出。畫面呈現完成才確認快照，避免尚未顯示的頁面取代使用者正在閱讀的資料。
 
-Windows 已移除 DesktopHistoryReader 與 Windows 專用 snapshot 預載。PTY 原始資料直接交給同一 xterm，保留輸入、選取、Theme、連結、fit／resize；normal buffer 的 scrollback 上限為 5000 行，使用原生垂直捲軸。tmux alternate buffer 使用原生 mouse VT／copy-mode，位置由 tmux 指示，不能宣稱具備相同的本機捲軸或加一套文字 renderer。
+Windows 上捲時以 `DesktopHistoryReader` 呈現共用 `HostHistoryWindow` 的歷史快照，使用與 Android 相同的 `viewport / older / ack / keep / close`。即時 PTY 仍持續交給 xterm；閱讀時維持行識別與像素位置，向下回到最新內容後返回即時畫面。畫面可選取、複製及呈現文字樣式，歷史窗口最多 1024 行。
 
-只有活動且可見的 Windows 終端持有 `terminalMouse` lease。helper READY 宣告 capability 後，前端才送 enable；60 秒保活只續控制租約，不取 viewport／snapshot。分頁切換、視窗隱藏與 unmount 釋放。控制限定 manifest／UID／PID／nonce 綁定的專案私有 tmux socket，保存最初 mouse、copy-mode 與 root WheelUpPane 綁定，以 owner CAS 還原，避免舊 helper 撤銷新 owner。無 child mouse／既有 mode 時，首次 WheelUp 原生進 copy-mode 並上移兩行；已有 mode 或 child mouse 則沿用 `send-keys -M`。不在工作 PTY 注入命令，也不更動個人 tmux 設定。舊 helper 未宣告能力就不送未知操作，顯示更新提示，原 PTY 仍可操作。
+受控端 helper 提供固定的歷史介面，統一處理 tmux、工作驗證、快照擷取與清理。外部平台只提出讀取、分頁、確認、保活和關閉要求；Windows 不需要額外的原生滑鼠能力，也不改受控端 mouse／copy-mode／WheelUpPane 設定。
 
-Android 的 viewport／older／ACK／keep／close、最多兩份快照與原生 View 均保留；Windows native lease 與手機 snapshot 是不同用途。normal xterm、真 tmux alternate、Windows GUI、真 Codex 及 OS IME 選字須分開驗收，不能用單純 echo fixture 或直接 SGR mouse 測試冒稱完整路徑已通過。
+Android 與 Windows 共用快照與分頁規則，平台差異僅在呈現及操作事件。兩平台均在資料實際顯示後確認，並只關閉自己持有的讀頁程序。Windows GUI 與 Android 原生 View 仍須分別驗證平台呈現；共用協定通過不代表所有平台操作均已驗收。
 
 新建工作的生命週期以原始 Shell 為準：退出 Bash 時會結束該工作的私有 tmux session，閱讀快照不會讓已退出的工作繼續存活，App 因此能關閉對應分頁。退出 Codex 等前景程式回到 Bash，或只釋放閱讀快照，都不會結束工作或影響其他分頁。
 

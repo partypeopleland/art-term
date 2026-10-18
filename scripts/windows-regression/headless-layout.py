@@ -49,7 +49,7 @@ def main():
         ActionChains(driver).move_to_element(node(testid)).click_and_hold().move_by_offset(dx, dy).release().perform()
 
     def wheel(amount):
-        host = driver.find_element(By.CSS_SELECTOR, '.xterm-screen')
+        host = next((e for e in driver.find_elements(By.CSS_SELECTOR, '.history-viewport') if e.is_displayed()), None) or driver.find_element(By.CSS_SELECTOR, '.xterm-screen')
         ActionChains(driver).scroll_from_origin(ScrollOrigin.from_element(host), 0, amount).perform()
 
     def terminal_text():
@@ -73,23 +73,26 @@ def main():
         checks['dragPreviewHeight'] = True
         node('runtime-demo-host').find_element(By.CSS_SELECTOR, '.new-connection').click()
         wait.until(lambda _: 'ROW-96' in terminal_text())
-        check(not driver.find_elements(By.CSS_SELECTOR, '.desktop-history'), 'custom text overlay remains')
-        check(js("return !window.__desktopPreview.requests.some(r=>r.op==='viewport'||r.op==='older')"), 'display polls Host text snapshots')
-        before = terminal_text()
+        check(not any(e.is_displayed() for e in driver.find_elements(By.CSS_SELECTOR, '.desktop-history')), 'live terminal is covered')
+        check(js("return !window.__desktopPreview.requests.some(r=>r.op==='viewport'||r.op==='older')"), 'live display polls snapshots')
         wheel(-34)
-        wait.until(lambda _: terminal_text() != before)
-        check('ROW-96' not in terminal_text(), 'small wheel did not move terminal rows')
-        checks['nativeXtermSmallWheelAndNoTextOverlay'] = True
-        held = terminal_text()
+        wait.until(lambda _: any(e.is_displayed() for e in driver.find_elements(By.CSS_SELECTOR, '.desktop-history')))
+        wait.until(lambda _: js("return window.__desktopPreview.requests.some(r=>r.op==='older'&&r.limit===256)"))
+        history_text = lambda: js("return document.querySelector('.history-viewport')?.textContent || ''")
+        check('ROW-1 ' in history_text(), 'first small wheel did not load older snapshot rows')
+        checks['firstSmallWheelUsesSnapshotOlder'] = True
+        held = history_text()
         js('window.__desktopPreview.append()')
         driver.execute_async_script('const done=arguments[0];setTimeout(done,200)')
-        check(terminal_text() == held, 'new output moved held native viewport')
+        check(history_text() == held, 'new output moved held snapshot')
         for _ in range(64):
-            if 'ROW-121' in terminal_text(): break
+            if not any(e.is_displayed() for e in driver.find_elements(By.CSS_SELECTOR, '.desktop-history')): break
             wheel(120)
+        wait.until(lambda _: not any(e.is_displayed() for e in driver.find_elements(By.CSS_SELECTOR, '.desktop-history')))
         wait.until(lambda _: 'ROW-121' in terminal_text())
-        checks['heldAndBottomFollowsLatest'] = True
-        driver.save_screenshot(str(output / 'workspace-native-xterm.png'))
+        check(js("return !window.__desktopPreview.requests.some(r=>r.op==='terminalMouse')"), 'platform-specific host request remains')
+        checks['heldSnapshotAndReturnToLiveXterm'] = True
+        driver.save_screenshot(str(output / 'workspace-shared-snapshot.png'))
         node('desktop-toggle').click()
         node('choose-screen-demo-screen').click()
         check(not driver.find_elements(By.CSS_SELECTOR, '[data-testid=screen-picker]'), 'Screen picker waits for background selection')

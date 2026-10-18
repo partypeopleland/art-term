@@ -38,7 +38,6 @@ export type NativeKeyboardListener = (receive: (visible: boolean) => void) => Pr
 export const NativeKeyboardKey: InjectionKey<NativeKeyboardListener> = Symbol('NativeKeyboardVisibility')
 
 export type HostHistoryRequest = { op: 'viewport' | 'close' }
-  | { op: 'terminalMouse'; enabled: boolean }
   | { op: 'older'; instance: string; epoch: number; before: number; limit: number }
   | { op: 'ack' | 'keep'; instance: string; epoch: number }
 export interface HostHistoryPage {
@@ -68,6 +67,7 @@ export class HostHistoryWindow {
   constructor(private request: HostHistoryRequestFn, private notice: (text: string) => void = () => {}) {}
   static key(page: Pick<HostHistoryPage, 'instance' | 'epoch'>): string { return `${page.instance}:${page.epoch}` }
   get sourceEpoch(): string | undefined { return this.page ? HostHistoryWindow.key(this.page) : undefined }
+  get unavailable(): boolean { return this.unsupported || this.fallback }
   get visiblePage(): HostHistoryPage | null { return this.fallback ? null : this.page }
   private call(request: HostHistoryRequest): Promise<HostHistoryReply> {
     const next = this.queue.catch(() => {}).then(() => this.closed && request.op !== 'close'

@@ -7,6 +7,9 @@ const transport = createPreviewTransport()
 const requests: HostHistoryRequest[] = []
 const pending = new Map<string, number[]>()
 let count = 0
+let epoch = 0
+const snapshots = new Map<number, string[]>()
+const records: string[] = []
 const open = transport.open
 transport.open = async (...args) => {
   const session = await open(...args)
@@ -22,7 +25,16 @@ transport.poll = async sid => {
 }
 transport.runtimeHistory = async (_sid, request) => {
   requests.push(request)
-  return { kind: 'ack', instance: 'a'.repeat(32), op: request.op }
+  const instance = 'a'.repeat(32)
+  if (request.op === 'viewport' || request.op === 'older') {
+    if (request.op === 'viewport') snapshots.set(++epoch, [...records])
+    const selectedEpoch = request.op === 'older' ? request.epoch : epoch
+    const saved = snapshots.get(selectedEpoch) ?? []
+    const end = request.op === 'older' ? request.before : saved.length
+    const start = Math.max(0, end - (request.op === 'older' ? request.limit : 24))
+    return { kind: 'page', instance, epoch: selectedEpoch, columns: 80, rows: 24, rowCount: saved.length, start, end, hasOlder: start > 0, records: saved.slice(start, end).map((text, i) => ({id:start+i+1,text,styles:[]})) }
+  }
+  return { kind: 'ack', instance, op: request.op }
 }
 const select = transport.instanceSelect!
 transport.instanceSelect = async (...args) => {
@@ -35,7 +47,9 @@ transport.write = async (sid, input) => {
   else await write(sid, input)
 }
 function append(amount = 25) {
-  const text = Array.from({ length: amount }, () => `ROW-${++count} 桌面終端示範\r\n`).join('')
+  const lines = Array.from({ length: amount }, () => `ROW-${++count} 桌面終端示範`)
+  records.push(...lines)
+  const text = lines.join('\r\n') + '\r\n'
   for (const queue of pending.values()) queue.push(...new TextEncoder().encode(text))
 }
 Object.assign(window, { __desktopPreview: { requests, append } })

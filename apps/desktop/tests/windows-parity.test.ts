@@ -76,14 +76,12 @@ it('stops previews under settings, restores prior visibility and never clears to
  expect(wrapper.find('.desktop-sidebar .desktop-preview img').exists()).toBe(true)
  controller.setPreviewVisible(tab,false);await wrapper.get('[data-testid="desktop-settings"]').trigger('click');await wrapper.get('[data-testid="desktop-workspace"]').trigger('click');await flush();expect(tab.previewVisible).toBe(false)
 })
-it('uses one xterm renderer without snapshot polling and releases native control on tab switch',async()=>{
- const {wrapper,controller,transport,terms,attach}=await setup();const first=await attach()
- expect(wrapper.find('[data-testid="open-desktop-history"]').exists()).toBe(false)
- expect(transport.runtimeHistory).toHaveBeenCalledWith(first.sessionId,{op:'terminalMouse',enabled:true});expect(terms[0].disposed).toBe(false)
- expect(wrapper.find('.desktop-history').exists()).toBe(false)
- expect(transport.runtimeHistory.mock.calls.some(([,r])=>r.op==='viewport')).toBe(false)
- const second=makeTarget('other','host');controller.openTarget({dto:makeHost('host',[second]),expanded:true},second,false);await flush()
- expect(transport.runtimeHistory).toHaveBeenCalledWith(first.sessionId,{op:'close'});expect(terms[0].disposed).toBe(false)
+it('keeps live xterm mounted with no snapshot requests until the first wheel', async () => {
+ const {wrapper,transport,terms,attach}=await setup(); await attach()
+ expect(transport.runtimeHistory).not.toHaveBeenCalled()
+ await wrapper.get('.pane').trigger('wheel', {deltaY:-34}); await flush()
+ expect(transport.runtimeHistory).toHaveBeenCalledWith(expect.any(String), {op:'viewport'})
+ expect(terms[0].disposed).toBe(false)
 })
 it('closes only the finished Shell and leaves genuine transport failures as recoverable connection state',async()=>{
  const {controller,transport,attach}=await setup();const first=await attach();const secondTarget=makeTarget('other','host');controller.openTarget({dto:makeHost('host',[secondTarget]),expanded:true},secondTarget,false);await flush();const second=controller.activeTab.value!
@@ -210,4 +208,11 @@ it('closes the Screen picker immediately and shows loading while CLI remains act
  expect(wrapper.find('.preview-loading').exists()).toBe(false)
  expect(wrapper.get('[data-testid="desktop-toggle"]').text()).toBe('')
  expect(wrapper.get('.preview .p-title').text()).toBe('Screen A')
+})
+
+it('honors the first upward 34px wheel using the existing snapshot contract', async () => {
+ const { wrapper, transport, attach } = await setup(); await attach()
+ transport.runtimeHistory.mockClear()
+ await wrapper.get('.pane').trigger('wheel', { deltaY: -34 }); await flush()
+ expect(transport.runtimeHistory.mock.calls.some(([, request]) => request.op === 'viewport')).toBe(true)
 })

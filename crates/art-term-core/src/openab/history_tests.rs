@@ -84,7 +84,6 @@ async fn fixture(mode: &'static str) -> Fixture {
                                 if nonce.is_empty() {
                                     nonce = text.split_whitespace().last().unwrap().to_string();
                                     let mut ready = serde_json::json!({"v":1,"nonce":nonce,"requestId":0,"instance":"b".repeat(32),"type":"ready","key":"a".repeat(24)});
-                                    if mode == "nativeMouse" { ready["terminalMouse"] = serde_json::json!(true); }
                                     if let Some(kind) = mode.strip_prefix("ready-") {
                                         ready["type"] = serde_json::json!("error");
                                         ready["kind"] = serde_json::json!(kind);
@@ -257,22 +256,6 @@ async fn open_version(f: &Fixture, owned: Arc<Owned>, version: HistoryVersion) -
         },
     )
     .await
-}
-#[tokio::test]
-async fn public_native_mouse_requires_capability_and_never_requests_a_snapshot() {
-    for capable in [false, true] {
-        let f = fixture(if capable { "nativeMouse" } else { "valid" }).await;
-        let mut channel = open(&f, Arc::new(Owned::default())).await.unwrap();
-        for enabled in [true, false] {
-            let reply = channel.request(HistoryRequest::TerminalMouse { enabled }).await.unwrap();
-            assert_eq!(matches!(reply, HistoryReply::Ack { .. }), capable);
-            assert_eq!(matches!(reply, HistoryReply::Unsupported), !capable);
-        }
-        channel.close().await;
-        let transcript = f.task.await.unwrap().join("\n");
-        assert!(!transcript.contains("\"op\":\"viewport\""));
-        assert_eq!(transcript.contains("\"op\":\"terminalMouse\""), capable);
-    }
 }
 #[tokio::test]
 async fn public_history_channel_reads_fragmented_page_ack_and_deletes_only_helper() {

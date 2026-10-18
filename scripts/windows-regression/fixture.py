@@ -156,9 +156,9 @@ class Fixture:
                              start=start, end=end, hasOlder=start > 0,
                              records=[{'id': i + 1, 'text': records[i], 'styles': [[0, len(records[i].encode('utf-16-le')) // 2, 0x569cd6, -1, 0]] if records[i] else []} for i in range(start, end)])
                 event.update(epoch=epoch, before=end, limit=limit)
-            elif op in ('ack', 'keep', 'close', 'terminalMouse'):
+            elif op in ('ack', 'keep', 'close'):
                 reply['type'] = 'ack'
-                if op not in ('close', 'terminalMouse'):
+                if op not in ('close',):
                     reply['epoch'] = request['epoch']
                     event['epoch'] = request['epoch']
             else:
@@ -203,7 +203,7 @@ class Fixture:
                                              historyWork='th2-' + history[1].decode(), historyEpoch=0, historySnapshots={})
                                     s['previewInput'] = b''
                                     await self.output(s, (json.dumps({'v': 1, 'type': 'ready', 'requestId': 0,
-                                        'key': history[1].decode(), 'nonce': s['historyNonce'], 'instance': s['historyInstance'], 'terminalMouse': True}) + '\n').encode())
+                                        'key': history[1].decode(), 'nonce': s['historyNonce'], 'instance': s['historyInstance']}) + '\n').encode())
                         elif len(s['previewInput']) >= 4:
                             size = struct.unpack('!I', s['previewInput'][:4])[0]
                             if size > 16384:

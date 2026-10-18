@@ -29,9 +29,9 @@ Windows App
 
 切頁用 Alt+[／Alt+] 或 Ctrl+PageUp／PageDown；Ctrl+V 遵守 bracketed-paste，Ctrl+C 由遠端解讀。表單輸入不被終端快捷鍵攔截，關頁／關窗只做本機 detach。點終端 HTTP(S) 連結複製到剪貼簿。終端在設定／首頁遮蓋時仍繼續處理輸出，回工作區後重新 fit／focus，不重開連線。
 
-Windows 只使用一個 xterm 呈現即時 PTY 輸出與鍵盤／IME 輸入，不再用文字 DOM 覆蓋層、500ms snapshot 更新或背景預載重畫終端。normal buffer 使用 xterm 內建 5000 行 scrollback 與原生垂直捲軸。tmux 外層 alternate buffer 則由 xterm 轉送原生 mouse VT，使用 tmux copy-mode 與其原生位置指示；它沒有與 normal buffer 相同的本機捲軸，不合成假捲軸、不抑制 alternate VT sequence，也不改寫 xterm 私有 buffer。
+Windows 即時輸入輸出使用 xterm。向上滾輪讀歷史時，桌面元件使用與 Android 相同的快照介面及共用 HostHistoryWindow，按需取得 viewport／older，顯示後 ack、閱讀時 keep、結束時 close；窗口最多 1024 行。平台層只處理 DOM 與操作事件，受控端維持固定介面。
 
-目前 Windows 選中的可見終端才啟用原生 mouse lease，經綁定工作與私有 tmux socket 的 helper 控制；READY 宣告 `terminalMouse: true` 才可送型別化 `terminalMouse { enabled: boolean }`。約每 60 秒只續租控制狀態，不取文字或重繪。切換分頁、隱藏視窗或 unmount 釋放；owner CAS 保護原 mouse／copy-mode／WheelUpPane 綁定還原，舊 owner 不得覆蓋新 owner。首次小幅上滾在無 child mouse／pane mode 時原生進 copy-mode 並上移兩行；已有 mode／child mouse 時維持 mouse 轉送。舊 helper 不支援時提示更新，PTY 輸入仍可用，不退回文字覆蓋層。Android 原生 snapshot 閱讀保持原行為。細節見[終端歷史](../refarch/terminal-history.md)。
+Windows 歷史閱讀直接相容現有手機已使用的 helper，無須新增 terminalMouse 能力或為 Windows 更動受控端的滑鼠設定。live xterm 保持掛載與輸出，上捲時固定閱讀位置，向下回到最新內容後返回即時終端；隱藏／關頁只釋放自有快照。細節見[終端歷史](../refarch/terminal-history.md)。
 
 ## 工具鏈與新建置
 

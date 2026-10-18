@@ -13,7 +13,6 @@ use std::sync::Arc;
 #[serde(tag = "op", rename_all = "camelCase")]
 pub enum HistoryRequest {
     Viewport,
-    TerminalMouse { enabled: bool },
     Older {
         instance: String,
         epoch: u64,
@@ -169,7 +168,6 @@ pub struct HistoryChannel {
     pre_ready: usize,
     next_id: u64,
     in_flight: bool,
-    terminal_mouse: bool,
 }
 impl HistoryChannel {
     /// Reserved owned Shell name; never a credential or ownership proof.
@@ -215,7 +213,6 @@ impl HistoryChannel {
             pre_ready: 0,
             next_id: 1,
             in_flight: false,
-            terminal_mouse: false,
         };
         let result = tokio::time::timeout(DEADLINE, async {
             let host = channel
@@ -274,7 +271,6 @@ impl HistoryChannel {
                 .filter(|s| hex(s, 32))
                 .ok_or(SessionError::Protocol)?;
             channel.instance = instance.into();
-            channel.terminal_mouse = value["terminalMouse"].as_bool().unwrap_or(false);
             Ok(())
         })
         .await
@@ -297,10 +293,6 @@ impl HistoryChannel {
         }
         let (op, epoch) = match &request {
             HistoryRequest::Viewport => ("viewport", None),
-            HistoryRequest::TerminalMouse { .. } => {
-                if !self.terminal_mouse { return Ok(HistoryReply::Unsupported); }
-                ("terminalMouse", None)
-            }
             HistoryRequest::Older {
                 instance,
                 epoch,
@@ -467,7 +459,7 @@ impl HistoryChannel {
                 }
             }
             Some("ack") => {
-                if !matches!(op, "ack" | "keep" | "close" | "terminalMouse")
+                if !matches!(op, "ack" | "keep" | "close")
                     || v["op"].as_str() != Some(op)
                     || v.get("epoch").and_then(|v| v.as_u64()) != epoch
                 {

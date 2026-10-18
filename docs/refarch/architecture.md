@@ -31,6 +31,12 @@ native GUI adapter 驗證 Host 操作並發出 target。target 是後端核發�
 
 Rust 核心讀取唯一 `connections.toml`，透過官方 HTTPS API 列出、建立或依使用者選擇續期 Shell，再以 WSS 連接已核發的 target。HTTPS 管理呼叫不接受 redirect、環境代理或降級，錯誤使用固定安全訊息。Runtime 使用未修改的官方產物；這條路徑不需要本專案伺服器補丁，也不恢復已退役的 SSH terminal、CLI／TUI 或 gateway。
 
+## 受控端提供固定介面
+
+受控端是獨立的受控點，內部實作由它負責。外部 App 遵循同一套介面；平台差異限於呈現與操作事件，不因某個平台的畫面需求增加受控端專用協定或安裝要求。
+
+歷史閱讀統一使用既有 `viewport / older / ack / keep / close` 快照協定。共用 Rust 層管理工作身分、通道與回覆驗證，`HostHistoryWindow` 管理快照、分頁、顯示確認、保活及 1024 行窗口。Android 原生 View 與 Windows DOM 閱讀元件只將操作交給這個模型，再呈現模型提供的資料。tmux、socket、擷取及清理由受控端 helper 處理，平台閱讀元件不操作它們。未來介面變更須維持共同契約與相容性，不能由單一平台另開一條控制路徑。
+
 ## Android 畫面與原生閱讀器
 
 手機介面以固定頂列統一導覽；軟體資訊及設定是頂列下方的內容頁，Main 與 Connect 是可水平拖曳的工作頁。頁面位移與指示色條共用同一滑動進度，因此手指停在中間時，畫面與色條位置一致。
@@ -58,22 +64,24 @@ Android 終端閱讀器是覆蓋在 WebView 終端位置的原生 View，水平�
 
 瀏覽器預覽沿用手機元件，但以獨立入口注入記憶體 transport、假語音與瀏覽器終端；正式入口使用原生 transport、裝置端辨識及原生閱讀器。預覽不接真實 Runtime，不參與 APK 打包，詳見[手機畫面預覽](../platforms/ui-preview.md)。
 
-## Windows 共用工作區與單一 xterm
+## Windows 共用工作區與歷史閱讀
 
 Windows App 接入同一套分類 Dashboard、全頁 settings、homepage、四主題及 Screen picker，保留 Host 管理、硬體鍵盤與 xterm。設定／首頁遮蓋時終端元件保持掛載並處理輸出，返回後 fit／focus，表單正常輸入不被終端快捷鍵攔截。語音與 Android 原生閱讀／手勢 plugin 不移植。
 
-Windows 工作區保留預設 200px 可調左欄、左下桌面預覽與右側多分頁終端。唯一可見終端 renderer 是 xterm：原始 PTY 輸出直接呈現，normal buffer 使用 5000 行 scrollback，tmux alternate 透過 mouse VT／copy-mode 回傳到同一 xterm。沒有 Windows 文字 DOM 覆蓋、500ms snapshot 重繪或 1024／768 行預載。tmux 使用原生位置指示，不合成 normal-buffer 式的假捲軸。
+Windows 即時輸入輸出由 xterm 處理；上捲歷史使用受控端既有快照介面及共用 `HostHistoryWindow`。桌面閱讀元件負責滑鼠、DOM、選取與呈現，Android 原生閱讀器負責觸控與原生 View；兩者共用歷史取得、分頁、確認及保活規則。Windows 閱讀期間固定快照位置，回到底部返回即時終端，無須受控端新增滑鼠控制能力。
 
 ```text
 Windows keyboard / IME -> xterm -> Runtime PTY -> tmux / CLI
                              ^                        |
                              +------- raw PTY --------+
-wheel -> normal xterm scrollback OR mouse VT -> tmux copy-mode
-active Windows tab -> capability-gated terminalMouse lease -> private tmux
-Android NativeTerminalReader -> bounded snapshot / older / ACK / keep / close
+Windows wheel / Android touch
+          |
+     HostHistoryWindow -> viewport / older / ack / keep / close
+          |                         |
+   platform renderer          controlled Host helper
 ```
 
-Windows `terminalMouse` 控制先核對 helper capability，只為可見活動分頁持有 lease；60 秒續租不抓畫面。切頁、隱藏、unmount 釋放，以 owner CAS 保存／還原原 mouse、copy-mode、WheelUpPane 綁定，避免操作其他私有 server 或讓舊 owner 撤銷新 owner。Android 原生 View 與 snapshot 契約保留。Windows EXE／WebView2、真 tmux／Codex 與 OS 中文候選選字仍須各自實測，來源檢查不能代替。
+Windows EXE／WebView2 與 Android 原生 View 的操作仍須分別驗證；平台呈現測試不能取代受控端契約測試。
 
 ## 輸出完成後才確認
 
@@ -129,7 +137,7 @@ App --create--> Runtime work Shell --wrapper--> private tmux work pane
  Android native reader: viewport first, upward gesture -> older page
 ```
 
-每個工作使用自己的 socket，tmux 與系統版本並存。輔助程序最多維持兩份 tmux 原生閱讀快照；Android snapshot 首次只讀當前畫面，上捲才最多取得 256 行，手機閱讀窗口最多 1024 行。Windows 使用原生 mouse lease，不以此窗口覆蓋 xterm。歷史版面與軟換行由 tmux 提供，輔助程序不先擷取完整歷史再切頁。畫面確認已顯示後才釋放舊快照，前插舊頁與新輸出均保留閱讀位置。生命週期、限制與主機準備見[終端歷史](terminal-history.md)。
+每個工作使用自己的 socket，tmux 與系統版本並存。輔助程序最多維持兩份 tmux 原生閱讀快照；兩平台的快照首次只讀當前畫面，上捲才最多取得 256 行，閱讀窗口最多 1024 行。歷史版面與軟換行由 tmux 提供，輔助程序不先擷取完整歷史再切頁。畫面確認已顯示後才釋放舊快照，前插舊頁與新輸出均保留閱讀位置。生命週期、限制與主機準備見[終端歷史](terminal-history.md)。
 
 ## 平台層負責什麼
 
