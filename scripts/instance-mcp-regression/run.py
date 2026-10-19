@@ -73,7 +73,9 @@ def main():
         assert bridge.configure(one.binding, a.config())['adapters'] == 1
         assert bridge.configure(two.binding, a.config())['adapters'] == 1
         target_a = one.target()
-        assert bridge.configure(one.binding, {'op': 'current'})['targets'] == [target_a]
+        current = bridge.configure(one.binding, {'op': 'current'})
+        assert current['targets'] == [target_a] and current['urls'] == [a.url]
+        assert a.token not in json.dumps(current), 'current status exposed the configured token'
         assert bridge.configure(one.binding, {'op': 'clear_stale', 'expected_targets': [{'id': 'other-screen', 'revision': 1, 'generation': target_a['generation']}]})['targets'] == [target_a]
         discovery = json.loads(one.tool('list_target_tools')['content'][0]['text'])
         assert discovery['target'] == target_a and any(t['name'] == 'browser_navigate' for t in discovery['tools'])

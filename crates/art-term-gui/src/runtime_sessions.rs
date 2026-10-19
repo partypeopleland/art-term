@@ -1043,24 +1043,43 @@ impl RuntimeSessions {
     pub async fn restore_instance(&self, hosts: &RuntimeHosts, id: &str) -> anyhow::Result<Option<InstanceSelection>> {
         let conn = self.connection(id).map_err(|_| anyhow::anyhow!("連線已結束"))?;
         let _guard = conn.desktop_operation.lock().await;
-        let status = Self::configure_tools(hosts, &conn, zeroize::Zeroizing::new("{\"op\":\"current\"}".into())).await?;
+        let status = Self::configure_tools(hosts, &conn, zeroize::Zeroizing::new("{\"op\":\"current\"}".into()))
+            .await.context("Shell broker 查詢失敗")?;
         let Some(targets) = status["targets"].as_array().filter(|targets| !targets.is_empty()) else { return Ok(None) };
         if targets.iter().all(serde_json::Value::is_null) { return Ok(None) }
         let target = targets[0].as_object().ok_or_else(|| anyhow::anyhow!("Shell 工具指派狀態不一致"))?;
         let (Some(desktop_id), Some(revision)) = (target.get("id").and_then(|v| v.as_str()), target.get("revision").and_then(|v| v.as_u64())) else { anyhow::bail!("Shell 工具指派格式不符") };
         anyhow::ensure!(targets.iter().all(|item| item["id"] == desktop_id && item["revision"] == revision), "Shell 工具指派狀態不一致");
-        let snapshot = hosts.store().map_err(|_| anyhow::anyhow!("設定不可用"))?.desktop(desktop_id);
-        if !snapshot.as_ref().is_ok_and(|saved| saved.profile.revision == revision) {
+        let urls = status["urls"].as_array().filter(|urls| urls.len() == targets.len());
+        let source_url = urls.and_then(|urls| urls.first()).and_then(|url| url.as_str());
+        anyhow::ensure!(urls.is_none_or(|urls| urls.iter().all(|url| url.as_str() == source_url)), "Shell 工具來源不一致");
+        let store = hosts.store().map_err(|_| anyhow::anyhow!("設定不可用"))?;
+        let desktops = store.desktops().context("桌面清單讀取失敗")?;
+        let local = desktops.iter().find(|desktop| desktop.id == desktop_id);
+        if local.is_some_and(|desktop| desktop.revision != revision) {
             let payload = zeroize::Zeroizing::new(serde_json::json!({"op":"clear_stale","expected_targets":targets}).to_string());
-            let cleared = Self::configure_tools(hosts, &conn, payload).await?;
+            let cleared = Self::configure_tools(hosts, &conn, payload).await.context("過期指派清除失敗")?;
             anyhow::ensure!(cleared["targets"].as_array().is_some_and(|items| items.len() == targets.len() && items.iter().all(serde_json::Value::is_null)), "既有桌面指派未確認清除");
             return Ok(None);
         }
-        let snapshot = snapshot?;
+        // Imported Screens get local ids and revisions. A current broker can
+        // supply its canonical URL so the receiving App can find that Screen.
+        // An older broker lacks this field: unknown ids must never be cleared
+        // on the assumption that they were deleted on this device.
+        let profile = if let Some(local) = local {
+            anyhow::ensure!(source_url.is_none_or(|url| url == local.mcp_url), "Shell 指派網址與本機桌面不符");
+            local
+        } else {
+            let url = source_url.context("Shell 指派來自其他裝置，受控端需更新後才能核對")?;
+            let matches: Vec<_> = desktops.iter().filter(|desktop| desktop.mcp_url == url).collect();
+            anyhow::ensure!(matches.len() == 1, "Shell 指派的桌面在本機不存在或網址不唯一");
+            matches[0]
+        };
+        let snapshot = store.desktop(&profile.id).context("桌面憑證讀取失敗")?;
         let profile = snapshot.profile;
         // Revalidate the current credentials and upstream on every attach. The
         // broker's memory remains scoped to the live work Shell, not this App.
-        let tool_ready = Self::configure_selected(hosts, &conn, &profile).await?;
+        let tool_ready = Self::configure_selected(hosts, &conn, &profile).await.context("桌面工具重新驗證失敗")?;
         anyhow::ensure!(!conn.closed.load(Ordering::SeqCst), "連線已結束");
         *conn.selected_desktop.lock().map_err(|_| anyhow::anyhow!("桌面狀態不可用"))? = Some(profile.clone());
         conn.desktop_enabled.store(true, Ordering::SeqCst);

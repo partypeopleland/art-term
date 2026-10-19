@@ -236,7 +236,8 @@ def configure(binding, body):
             except Exception:
                 pass
         raise ValueError(ERROR)
-    return {'ok': True, 'adapters': len(statuses), 'targets': [s.get('target') for s in statuses]}
+    return {'ok': True, 'adapters': len(statuses), 'targets': [s.get('target') for s in statuses],
+            'urls': [s.get('url') for s in statuses]}
 
 
 def text(value):
@@ -263,7 +264,9 @@ class Broker:
     def configure(self, body):
         if body.get('op') == 'current':
             with self.lock:
-                return {'ok': True, 'target': self.target(self.selection['config'], self.selection['generation'])}
+                config = self.selection['config']
+                return {'ok': True, 'target': self.target(config, self.selection['generation']),
+                        'url': config['url'] if config else None}
         if body.get('op') == 'clear_stale':
             with self.lock:
                 current = self.target(self.selection['config'], self.selection['generation'])

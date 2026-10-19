@@ -430,9 +430,11 @@ export function createAppController(
       tab.previewVisible = true
       invalidateCapture(tab)
       if (canCapture(tab)) requestCapture(tab)
-    } catch {
+    } catch (error) {
       if (!disposed && !tab.closed && tab.sessionId === sid && tab.connectionGen === connectionGeneration && instanceOperations.get(tab.key) === operation) {
-        tab.desktopError = '無法核對 Shell 的既有 Screen；請檢查連線後重試'
+        const message = errText(error)
+        tab.desktopError = message.startsWith('無法恢復 Shell 的既有 Screen（')
+          ? message : '無法核對 Shell 的既有 Screen；請檢查連線後重試'
       }
     }
   }

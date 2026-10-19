@@ -20,7 +20,7 @@ settings + credential -> password-encrypted JSON -> unlock -> preview / select
                     salt + nonce + ciphertext
 ```
 
-來源裝置先用自己的平台金鑰解開已保存的管理憑證與 Screen token，再把設定與憑證一起放入密碼保護檔。目的裝置使用檔案密碼解鎖，預覽並確認項目後，以自己的 DPAPI／Keystore 重新保護（seal）並保存。搬移的是可還原的設定與憑證，不是平台金鑰、Shell 分頁或 session binding；因此新裝置不必取得來源裝置的金鑰，也不會接管來源工作。
+來源裝置先用自己的平台金鑰解開已保存的管理憑證與 Screen token，再把設定與憑證一起放入密碼保護檔。目的裝置使用檔案密碼解鎖，預覽並確認項目後，以自己的 DPAPI／Keystore 重新保護（seal）並保存。搬移的是可還原的設定與憑證，不是平台金鑰、Shell 分頁或 session binding；因此新裝置不必取得來源裝置的金鑰，也不會自動接管來源工作。使用者明確接管仍存活的同一 Shell 時，新版受控端可依 Screen URL 核對匯入設定並恢復其桌面指派。
 
 ## 匯出／匯入生命週期
 
