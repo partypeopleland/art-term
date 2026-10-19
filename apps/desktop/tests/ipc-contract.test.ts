@@ -21,6 +21,8 @@ async function exercise(transport: Transport): Promise<string[]> {
   await transport.transferApply('opaque-token',[{key:'opaque-entry',action:'skip'}])
   await transport.transferCancel()
   await transport.runtimeHosts()
+  expect(transport.instanceRestore).toBeTypeOf('function')
+  await transport.instanceRestore!('issued-session')
   await transport.open('issued-target', 24, 80)
   await transport.poll('issued-session')
   await transport.write('issued-session', [0x03])
@@ -32,6 +34,16 @@ async function exercise(transport: Transport): Promise<string[]> {
 }
 
 describe('adapters agree with the registered and authorized native surface', () => {
+  it.each([createTauriTransport, createMobileTauriTransport])('restores the selected Screen through the native command', async (create) => {
+    const selection = { desktop: { id: 'screen-a', revision: 1, name: 'Screen A', mcpUrl: 'https://screen.example.test/mcp', tokenPresent: true }, toolReady: true }
+    invoke.mockReset().mockResolvedValueOnce(selection)
+    const transport = create()
+    expect(transport.instanceRestore).toBeTypeOf('function')
+    await expect(transport.instanceRestore!('issued-session')).resolves.toEqual(selection)
+    expect(invoke).toHaveBeenCalledExactlyOnceWith('gui_instance_restore', { sessionId: 'issued-session' })
+    invoke.mockResolvedValue(undefined)
+  })
+
   it.each([createTauriTransport, createMobileTauriTransport])('snapshots supplemental credential arguments before the UI clears them', async (create) => {
     invoke.mockClear()
     const choices: TransferChoice[] = [{key:'opaque',action:'add',credential:'fictional-one-shot'}]
