@@ -186,6 +186,27 @@ def send(sock, body):
     sock.sendall(struct.pack('!I', len(raw))+raw)
 
 
+def legacy_current(binding, path):
+    reply = broker_request(binding, {'op': 'rpc', 'request': {'method': 'tools/call', 'params': {'name': 'current_target', 'arguments': {}}}}, path)
+    if reply.get('isError'):
+        return None
+    target = json.loads(reply['content'][0]['text'])['target']
+    require(isinstance(target, dict) and isinstance(target.get('id'), str)
+            and type(target.get('revision')) is int and type(target.get('generation')) is int)
+    return target
+
+
+def verify_target(binding, path, expected):
+    require(isinstance(expected, list) and 0 < len(expected) <= 64)
+    target = legacy_current(binding, path)
+    require(target is not None and target in expected)
+    reply = broker_request(binding, {'op': 'rpc', 'request': {'method': 'tools/call', 'params': {
+        'name': 'list_target_tools', 'arguments': {}}}}, path)
+    require(not reply.get('isError') and reply.get('_meta', {}).get('artTermTarget') == target)
+    require(legacy_current(binding, path) == target)
+    return {'ok': True, 'target': target}
+
+
 def configure(binding, body):
     statuses = []
     confirmed = []
@@ -196,8 +217,20 @@ def configure(binding, body):
     for path in paths:
         s = socket.socket(socket.AF_UNIX); s.settimeout(20)
         try:
-            s.connect(str(path)); send(s, body)
-            status = receive(s, 65536)
+            if body.get('op') == 'verify':
+                status = verify_target(binding, path, body.get('expected_targets'))
+            else:
+                s.connect(str(path)); send(s, body)
+                status = receive(s, 65536)
+            # A Shell created before this helper update still has the older
+            # broker in memory. Its existing MCP current_target and fenced
+            # clear operations are enough to recover without restarting it.
+            if not status.get('ok') and body.get('op') in ('current', 'clear_stale'):
+                target = legacy_current(binding, path)
+                if body['op'] == 'clear_stale' and target in body.get('expected_targets', []):
+                    status = broker_request(binding, {'op': 'clear', 'expected_target': target}, path)
+                else:
+                    status = {'ok': True, 'target': target}
             statuses.append(status)
             if status.get('ok') and status.get('target'):
                 confirmed.append((path, status['target']))
@@ -209,7 +242,7 @@ def configure(binding, body):
             s.close()
     if not all(v.get('ok') for v in statuses):
         # Roll back only our confirmed generation, never a newer selection.
-        for path, expected in confirmed:
+        for path, expected in (confirmed if body.get('op') == 'configure' else []):
             try:
                 with socket.socket(socket.AF_UNIX) as client:
                     client.settimeout(2); client.connect(str(path))
@@ -217,7 +250,8 @@ def configure(binding, body):
             except Exception:
                 pass
         raise ValueError(ERROR)
-    return {'ok': True, 'adapters': len(statuses), 'targets': [s.get('target') for s in statuses]}
+    return {'ok': True, 'adapters': len(statuses), 'targets': [s.get('target') for s in statuses],
+            'urls': [s.get('url') for s in statuses]}
 
 
 def text(value):
@@ -242,6 +276,22 @@ class Broker:
         return {'id': config['id'], 'revision': config['revision'], 'generation': generation} if config else None
 
     def configure(self, body):
+        if body.get('op') == 'current':
+            with self.lock:
+                config = self.selection['config']
+                return {'ok': True, 'target': self.target(config, self.selection['generation']),
+                        'url': config['url'] if config else None}
+        if body.get('op') == 'clear_stale':
+            with self.lock:
+                current = self.target(self.selection['config'], self.selection['generation'])
+                expected = body.get('expected_targets')
+                require(isinstance(expected, list) and len(expected) <= 64)
+                if current and current in expected:
+                    self.selection['config'] = None
+                    self.selection['generation'] += 1
+                    self.selection['request_generation'] += 1
+                    current = None
+                return {'ok': True, 'target': current}
         if body.get('op') == 'clear' and 'expected_target' in body:
             with self.lock:
                 current = self.target(self.selection['config'], self.selection['generation'])

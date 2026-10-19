@@ -41,6 +41,7 @@ export interface FakeSession {
 
 export class FakeTransport implements Transport {
   instanceSelect?: Transport['instanceSelect']
+  instanceRestore?: Transport['instanceRestore']
   instanceClear?: Transport['instanceClear']
   instanceLaunch?: Transport['instanceLaunch']
 

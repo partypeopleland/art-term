@@ -49,6 +49,7 @@ export function createMobileTauriTransport(): Transport {
     instanceDelete: (id, expectedRevision) => call('gui_instance_delete', { id, expectedRevision }),
     instanceTest: (id, expectedRevision) => call('gui_instance_test', { id, expectedRevision }),
     instanceSelect: (sessionId, desktopId, expectedRevision) => call<InstanceSelection>('gui_instance_select', { sessionId, desktopId, expectedRevision }),
+    instanceRestore: sessionId => call<InstanceSelection | null>('gui_instance_restore', { sessionId }),
     instanceClear: sessionId => call('gui_instance_clear', { sessionId }),
     instanceLaunch: sessionId => call<InstanceSelection>('gui_instance_launch', { sessionId }),
     transferExport: input => call('gui_transfer_export', { input }),

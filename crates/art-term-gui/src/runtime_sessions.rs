@@ -149,7 +149,6 @@ pub struct Connection {
     desktop_route: Option<DesktopRoute>,
     desktop_enabled: AtomicBool,
     selected_desktop: Mutex<Option<art_term_core::instance_mcp::DesktopProfile>>,
-    instance_touched: AtomicBool,
     preview_cancel: watch::Sender<u64>,
     preview_operation: Arc<tokio::sync::Mutex<()>>,
     owned_shells: Arc<Mutex<HashMap<String, HashSet<String>>>>,
@@ -434,7 +433,6 @@ impl RuntimeSessions {
                     desktop_route: target.desktop.as_ref().and_then(|m| m.route.clone()),
                     desktop_enabled: AtomicBool::new(false),
                     selected_desktop: Mutex::new(None),
-                    instance_touched: AtomicBool::new(false),
                     preview_cancel: watch::channel(0).0,
                     preview_operation: self.preview_operation.clone(),
                     owned_shells: self.owned_shells.clone(),
@@ -1042,12 +1040,41 @@ impl RuntimeSessions {
         // Preview is independent of an installed/running adapter. No false tool-ready claim.
         Ok(Self::configure_tools(hosts, conn, payload).await.map(|result| Self::tools_confirmed(&result, profile)).unwrap_or(false))
     }
+    pub async fn restore_instance(&self, hosts: &RuntimeHosts, id: &str) -> anyhow::Result<Option<InstanceSelection>> {
+        let conn = self.connection(id).map_err(|_| anyhow::anyhow!("連線已結束"))?;
+        let _guard = conn.desktop_operation.lock().await;
+        let epoch = *conn.preview_cancel.borrow();
+        let mut cancel = conn.preview_cancel.subscribe();
+        let status = Self::configure_tools(hosts, &conn, zeroize::Zeroizing::new("{\"op\":\"current\"}".into()))
+            .await.context("Shell broker 查詢失敗")?;
+        let store = hosts.store().map_err(|_| anyhow::anyhow!("設定不可用"))?;
+        let desktops = store.desktops().context("桌面清單讀取失敗")?;
+        let Some(selection) = crate::instance_restore::resolve(&status, &desktops)? else { return Ok(None) };
+        let snapshot = store.desktop(&selection.profile.id).context("桌面憑證讀取失敗")?;
+        anyhow::ensure!(snapshot.profile == selection.profile, "桌面設定已變更");
+        tokio::select! {
+            _ = cancel.changed() => anyhow::bail!("桌面恢復已取消"),
+            result = art_term_core::instance_mcp::screenshot(snapshot) => { result.context("桌面預覽重新驗證失敗")?; }
+        }
+        anyhow::ensure!(!conn.closed.load(Ordering::SeqCst) && *conn.preview_cancel.borrow() == epoch, "桌面恢復已取消");
+        // Restoring a local preview must not change the live Shell's identity,
+        // credentials or generation, including an assignment from another App.
+        let probe = zeroize::Zeroizing::new(serde_json::json!({"op":"verify","expected_targets":selection.broker_targets}).to_string());
+        let tool_ready = Self::configure_tools(hosts, &conn, probe).await
+            .is_ok_and(|result| result["targets"] == status["targets"]);
+        let current = Self::configure_tools(hosts, &conn, zeroize::Zeroizing::new("{\"op\":\"current\"}".into()))
+            .await.context("Shell broker 重新核對失敗")?;
+        let latest = store.desktop(&selection.profile.id).context("桌面憑證讀取失敗")?.profile;
+        let profile = selection.confirm(&current, &latest, epoch, *conn.preview_cancel.borrow(), conn.closed.load(Ordering::SeqCst))?;
+        *conn.selected_desktop.lock().map_err(|_| anyhow::anyhow!("桌面狀態不可用"))? = Some(profile.clone());
+        conn.desktop_enabled.store(true, Ordering::SeqCst);
+        Ok(Some(InstanceSelection { desktop: profile, tool_ready }))
+    }
     pub async fn select_instance(&self, hosts: &RuntimeHosts, id: &str, desktop_id: &str, revision: u64) -> anyhow::Result<InstanceSelection> {
         let conn = self.connection(id).map_err(|_| anyhow::anyhow!("連線已結束"))?;
         conn.desktop_enabled.store(false, Ordering::SeqCst);
         conn.preview_cancel.send_modify(|n| *n = n.wrapping_add(1));
         let epoch = *conn.preview_cancel.borrow();
-        conn.instance_touched.store(true, Ordering::SeqCst);
         let _guard = conn.desktop_operation.lock().await;
         anyhow::ensure!(!conn.closed.load(Ordering::SeqCst) && *conn.preview_cancel.borrow() == epoch, "桌面選擇已取消");
         // A live binding, rather than a saved Host capability, authorizes this per-tab selection.
@@ -1108,24 +1135,6 @@ impl RuntimeSessions {
         anyhow::bail!("Codex 工具入口尚未確認啟動；請查看終端，桌面預覽仍可使用")
     }
 
-    pub async fn close_with_tools(&self, hosts: &RuntimeHosts, id: &str) -> Reply<()> {
-        let touched = self.connection(id).ok().is_some_and(|conn| conn.instance_touched.load(Ordering::SeqCst));
-        if touched {
-            // A bounded best-effort clear; offline target cleanup cannot be guaranteed.
-            let _ = tokio::time::timeout(std::time::Duration::from_secs(3), self.clear_instance(hosts, id)).await;
-        }
-        self.close(id).await
-    }
-    pub async fn shutdown_with_tools(self: &Arc<Self>, hosts: Arc<RuntimeHosts>) {
-        let ids: Vec<_> = self.sessions.lock().map(|sessions| sessions.keys().cloned().collect()).unwrap_or_default();
-        let mut tasks = tokio::task::JoinSet::new();
-        for id in ids {
-            let sessions = self.clone(); let hosts = hosts.clone();
-            tasks.spawn(async move { let _ = sessions.close_with_tools(&hosts, &id).await; });
-        }
-        while tasks.join_next().await.is_some() {}
-        self.shutdown().await;
-    }
     pub async fn close(&self, id: &str) -> Reply<()> {
         let connection = self
             .sessions
@@ -1510,7 +1519,6 @@ mod tests {
                 desktop_route: route,
                 desktop_enabled: AtomicBool::new(false),
                 selected_desktop: Mutex::new(None),
-                    instance_touched: AtomicBool::new(false),
                 preview_cancel: watch::channel(0).0,
                 preview_operation: Arc::default(),
                 owned_shells: Arc::default(),

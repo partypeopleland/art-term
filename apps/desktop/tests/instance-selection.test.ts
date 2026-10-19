@@ -22,6 +22,59 @@ function setup() {
   return { controller, transport, tab }
 }
 describe('direct Screen selection', () => {
+  it.each([
+    ['無法恢復 Shell 的既有 Screen；指派已保留，請重新選擇 Screen', '無法恢復 Shell 的既有 Screen；指派已保留，請重新選擇 Screen'],
+    ['unrecognized backend error with fictional-token', '無法核對 Shell 的既有 Screen；請檢查連線後重試'],
+    ['無法恢復 Shell 的既有 Screen；指派已保留，請重新選擇 Screen fictional-token', '無法核對 Shell 的既有 Screen；請檢查連線後重試'],
+  ])('handles the restore error %s safely', async (message, expected) => {
+    const transport = new FakeTransport()
+    transport.instanceRestore = vi.fn(async () => { throw new Error(message) })
+    const controller = createAppController(transport, { idlePollMs: 0 })
+    controller.openTarget({ dto: HOSTS[0], expanded: true }, HOSTS[0].targets[0], false)
+    const tab = controller.tabs[0]
+    controller.attachTerminal(tab, new FakeTerm())
+    try {
+      await flush()
+      expect(transport.instanceRestore).toHaveBeenCalledWith(tab.sessionId)
+      expect(tab.desktopError).toBe(expected)
+      expect(tab.instanceDesktop ?? null).toBeNull()
+    } finally { controller.dispose() }
+  })
+  it('restores the live Shell selection after attach and keeps it on local close', async () => {
+    const transport = new FakeTransport()
+    transport.instanceRestore = vi.fn(async () => ({ desktop: A, toolReady: true }))
+    transport.instanceClear = vi.fn(async () => {})
+    transport.shot = { ...transport.shot, desktopId: A.id, desktopRevision: A.revision }
+    const controller = createAppController(transport, { idlePollMs: 0 })
+    controller.openTarget({ dto: HOSTS[0], expanded: true }, HOSTS[0].targets[0], false)
+    const tab = controller.tabs[0]
+    controller.attachTerminal(tab, new FakeTerm())
+    try {
+      await flush()
+      expect(transport.instanceRestore).toHaveBeenCalledWith(tab.sessionId)
+      expect(tab.instanceDesktop?.id).toBe(A.id)
+      expect(tab.instanceToolReady).toBe(true)
+      expect(tab.desktopEnabled).toBe(true)
+      await controller.closeTab(tab)
+      expect(transport.instanceClear).not.toHaveBeenCalled()
+    } finally { controller.dispose() }
+  })
+  it('does not replace an explicit selection with a late restore reply', async () => {
+    const gate = deferred<InstanceSelection | null>()
+    const transport = new FakeTransport()
+    transport.instanceRestore = vi.fn(() => gate.promise)
+    transport.instanceSelect = vi.fn(async () => ({ desktop: B, toolReady: true }))
+    const controller = createAppController(transport, { idlePollMs: 0 })
+    controller.openTarget({ dto: HOSTS[0], expanded: true }, HOSTS[0].targets[0], false)
+    const tab = controller.tabs[0]
+    controller.attachTerminal(tab, new FakeTerm())
+    try {
+      await flush()
+      await controller.selectInstance(tab, B)
+      gate.resolve({ desktop: A, toolReady: true }); await flush()
+      expect(tab.instanceDesktop?.id).toBe(B.id)
+    } finally { gate.resolve(null); controller.dispose() }
+  })
   it('previews a selected Screen independent of host desktop capability or tools readiness', async () => {
     const { controller: c, transport: t, tab } = setup()
     try {

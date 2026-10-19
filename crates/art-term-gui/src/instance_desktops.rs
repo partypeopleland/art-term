@@ -105,6 +105,28 @@ pub async fn gui_instance_select(
         .map_err(|_| "桌面切換未確認成功；請重新選擇，並確認受控端工具入口已安裝".into())
 }
 #[tauri::command]
+pub async fn gui_instance_restore(
+    hosts: State<'_, Arc<RuntimeHosts>>,
+    sessions: State<'_, Arc<RuntimeSessions>>,
+    session_id: String,
+) -> Result<Option<InstanceSelection>, String> {
+    sessions.restore_instance(&hosts, &session_id).await.map_err(|error| {
+        if matches!(error.to_string().as_str(), "Shell 指派無法核對，請重新選擇 Screen" | "Shell 指派版本與本機桌面不符，請重新選擇 Screen") {
+            return "無法恢復 Shell 的既有 Screen；指派已保留，請重新選擇 Screen".into();
+        }
+        let stage = match error.to_string().as_str() {
+            "Shell broker 查詢失敗" => "Shell broker 查詢",
+            "Shell broker 重新核對失敗" => "Shell broker 重新核對",
+            "桌面清單讀取失敗" => "本機桌面清單讀取",
+            "桌面憑證讀取失敗" => "本機桌面憑證讀取",
+            "桌面預覽重新驗證失敗" => "桌面預覽重新驗證",
+            "Shell 指派的桌面在本機不存在或網址不唯一" => "本機 Screen 網址核對",
+            _ => "Screen 身分核對",
+        };
+        format!("無法恢復 Shell 的既有 Screen（{stage}）；請檢查連線後重試")
+    })
+}
+#[tauri::command]
 pub async fn gui_instance_clear(
     hosts: State<'_, Arc<RuntimeHosts>>,
     sessions: State<'_, Arc<RuntimeSessions>>,

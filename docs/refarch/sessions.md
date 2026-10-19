@@ -31,7 +31,7 @@ Android Main 直接呈現既有 Shell 按鈕，點名稱才 attach；多筆預�
 
 target 與 session ID 由 backend 發出，UI 不解析它們來組成遠端命令。binding 固定 Host 設定版本、Runtime 入口、Shell 名稱與官方 generation（工作世代）；綠點僅表示本機有已連線分頁，不是遠端在線探測。官方協定沒有 Runtime process 或 Shell incarnation 身分欄位，因此名稱與 generation 不能證明服務重啟後仍是原工作。短暫斷線沿用原 attach token，由 Runtime 驗證它是否仍能連接原工作；token 失效時停止自動恢復，交由使用者重新選擇。
 
-Runtime 與 coding CLI 能力在 target／session 發出時凍結，不從 Host／Agent 名稱或分類推斷。獨立 Screen 由每個 live Shell 分頁明確選取，與舊 desktop_transport 無關；Screen id／revision 與工具選擇 generation 另外核對，後者不是 Runtime generation。App 重新啟動或 takeover 不假定舊工具選擇仍生效，需重新明確選擇與 configure 核對。
+Runtime 與 coding CLI 能力在 target／session 發出時凍結，不從 Host／Agent 名稱或分類推斷。獨立 Screen 由每個 live Shell 明確選取，與舊 desktop_transport 無關；Screen id／revision 與工具選擇 generation 另外核對，後者不是 Runtime generation。App 重新啟動或 takeover 會查詢該 Shell 的 broker，核對現有指派及目前設定後恢復；無有效指派時保持未指定。
 
 ## 輸入、輸出與 ACK
 

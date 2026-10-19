@@ -416,6 +416,28 @@ export function createAppController(
     tab.exitCode = null
     void pollLoop(tab, session.id)
     if (withDesktop) void setDesktop(tab, true)
+    if (transport.instanceRestore) void restoreInstance(tab, session.id, generation)
+  }
+
+  async function restoreInstance(tab: TabState, sid: string, connectionGeneration: number): Promise<void> {
+    const operation = instanceOperations.get(tab.key)
+    try {
+      const result = await transport.instanceRestore?.(sid)
+      if (!result || disposed || tab.closed || tab.sessionId !== sid || tab.connectionGen !== connectionGeneration || instanceOperations.get(tab.key) !== operation) return
+      tab.instanceDesktop = { ...result.desktop }
+      tab.instanceToolReady = result.toolReady
+      tab.desktopEnabled = true
+      tab.previewVisible = true
+      invalidateCapture(tab)
+      if (canCapture(tab)) requestCapture(tab)
+    } catch (error) {
+      if (!disposed && !tab.closed && tab.sessionId === sid && tab.connectionGen === connectionGeneration && instanceOperations.get(tab.key) === operation) {
+        const message = errText(error)
+        tab.desktopError = message.startsWith('無法恢復 Shell 的既有 Screen（')
+          || message === '無法恢復 Shell 的既有 Screen；指派已保留，請重新選擇 Screen'
+          ? message : '無法核對 Shell 的既有 Screen；請檢查連線後重試'
+      }
+    }
   }
 
   /**

@@ -5,6 +5,7 @@ mod dpapi;
 mod runtime_bootstrap;
 mod runtime_hosts;
 mod instance_desktops;
+mod instance_restore;
 mod runtime_sessions;
 mod runtime_transfer;
 mod browser;
@@ -110,13 +111,13 @@ async fn gui_resize(
     runtime.resize(&session_id, rows, cols).map_err(Into::into)
 }
 #[tauri::command]
-async fn gui_close(hosts: State<'_, Arc<runtime_hosts::RuntimeHosts>>, runtime: State<'_, Arc<RuntimeSessions>>, session_id: String) -> Reply<()> {
+async fn gui_close(runtime: State<'_, Arc<RuntimeSessions>>, session_id: String) -> Reply<()> {
     if !RuntimeSessions::is_session(&session_id) {
         return Err(GuiError::Runtime(
             art_term_core::openab::session::SessionError::StateChanged.into(),
         ));
     }
-    runtime.close_with_tools(&hosts, &session_id).await.map_err(Into::into)
+    runtime.close(&session_id).await.map_err(Into::into)
 }
 #[tauri::command]
 async fn gui_desktop(
@@ -304,6 +305,7 @@ fn main() {
             crate::instance_desktops::gui_instance_test,
             crate::instance_desktops::gui_instance_select,
             crate::instance_desktops::gui_instance_clear,
+            crate::instance_desktops::gui_instance_restore,
             crate::instance_desktops::gui_instance_launch,
             gui_open_web_url,
             gui_platform,
@@ -354,7 +356,7 @@ fn main() {
                 if !shutting_down.swap(true, Ordering::SeqCst) {
                     let app = window.app_handle().clone();
                     tauri::async_runtime::spawn(async move {
-                        app.state::<Arc<RuntimeSessions>>().shutdown_with_tools(app.state::<Arc<runtime_hosts::RuntimeHosts>>().inner().clone()).await;
+                        let _ = tokio::time::timeout(std::time::Duration::from_secs(8), app.state::<Arc<RuntimeSessions>>().shutdown()).await;
                         app.exit(0);
                     });
                 }
