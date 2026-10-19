@@ -1,5 +1,5 @@
 {
-  "version": "0.1.30",
+  "version": "0.1.31",
   "identifier": "net.missart.artterm",
   "app": {
     "windows": [{"label": "main", "title": "art-term", "dragDropEnabled": false, "useHttpsScheme": true}],
@@ -13,5 +13,5 @@
       }]
     }
   },
-  "bundle": {"active": true, "targets": "all", "resources": [], "android": {"versionCode": 1059}}
+  "bundle": {"active": true, "targets": "all", "resources": [], "android": {"versionCode": 1062}}
 }
