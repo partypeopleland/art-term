@@ -434,6 +434,7 @@ export function createAppController(
       if (!disposed && !tab.closed && tab.sessionId === sid && tab.connectionGen === connectionGeneration && instanceOperations.get(tab.key) === operation) {
         const message = errText(error)
         tab.desktopError = message.startsWith('無法恢復 Shell 的既有 Screen（')
+          || message === '無法恢復 Shell 的既有 Screen；指派已保留，請重新選擇 Screen'
           ? message : '無法核對 Shell 的既有 Screen；請檢查連線後重試'
       }
     }
