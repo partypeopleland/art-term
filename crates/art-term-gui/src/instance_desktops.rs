@@ -111,13 +111,15 @@ pub async fn gui_instance_restore(
     session_id: String,
 ) -> Result<Option<InstanceSelection>, String> {
     sessions.restore_instance(&hosts, &session_id).await.map_err(|error| {
+        if matches!(error.to_string().as_str(), "Shell 指派無法核對，請重新選擇 Screen" | "Shell 指派版本與本機桌面不符，請重新選擇 Screen") {
+            return "無法恢復 Shell 的既有 Screen；指派已保留，請重新選擇 Screen".into();
+        }
         let stage = match error.to_string().as_str() {
             "Shell broker 查詢失敗" => "Shell broker 查詢",
+            "Shell broker 重新核對失敗" => "Shell broker 重新核對",
             "桌面清單讀取失敗" => "本機桌面清單讀取",
-            "過期指派清除失敗" => "過期指派清除",
             "桌面憑證讀取失敗" => "本機桌面憑證讀取",
-            "桌面工具重新驗證失敗" => "桌面工具重新驗證",
-            "Shell 指派來自其他裝置，受控端需更新後才能核對" => "受控端缺少跨裝置身分資訊",
+            "桌面預覽重新驗證失敗" => "桌面預覽重新驗證",
             "Shell 指派的桌面在本機不存在或網址不唯一" => "本機 Screen 網址核對",
             _ => "Screen 身分核對",
         };

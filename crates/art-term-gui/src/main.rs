@@ -5,6 +5,7 @@ mod dpapi;
 mod runtime_bootstrap;
 mod runtime_hosts;
 mod instance_desktops;
+mod instance_restore;
 mod runtime_sessions;
 mod runtime_transfer;
 mod browser;

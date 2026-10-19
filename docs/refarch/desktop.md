@@ -18,7 +18,7 @@ App -- temporary raw/no-echo configure Shell -+
 
 Main 的 Screens 列出實際儲存的桌面與數量，可像其他分類收合。全站齒輪的新增連線分類可選 Screen，另有獨立 Screen 編輯／刪除區。名稱、MCP URL 與 token 保存規則見[連線設定](connections.md)，不預填私人入口或憑證。
 
-每個 live Shell 分頁都能開 Screen 選單，與 Host 的舊 `desktop_transport` 無關。第一次可選任意 Screen，再次可切換或停止預覽；清單共用，指派只作用於該工作 Shell。切換先清除舊圖，後端依 Screen id／revision 與本次請求核對來源，關頁、背景、切換或設定修改後的晚到圖片不得重新顯示。App 重開或接管工作後查詢該 Shell 的現有指派，核對當前 Screen 設定與上游連線後恢復預覽。跨裝置匯入設定後，本機 Screen ID 可不同；新版受控端會回報既有指派的 URL，App 只在本機找到唯一相同 URL 的 Screen 時重新驗證並接管。無法辨識外端指派時保留 broker 狀態並顯示錯誤，不顯示舊圖或改選其他 Screen；較舊的存活 Shell 若不回報 URL，需重新建立支援此查詢的 Shell。
+每個 live Shell 分頁都能開 Screen 選單，與 Host 的舊 `desktop_transport` 無關。第一次可選任意 Screen，再次可切換或停止預覽；清單共用，指派只作用於該工作 Shell。切換先清除舊圖，後端依 Screen id／revision 與本次請求核對來源，關頁、背景、切換或設定修改後的晚到圖片不得重新顯示。App 重開或接管工作後查詢該 Shell 的現有指派，以當前本機憑證實際擷取成功後恢復預覽。跨裝置匯入設定後，本機 Screen ID 可不同；新版受控端會回報既有指派的 URL，App 只在本機找到唯一相同 URL 的 Screen 時重新驗證並恢復。恢復只讀取既有指派，不改寫 Shell 的 Screen 身分、憑證或 generation；工具就緒另以既有 broker 的憑證實際查詢工具清單並核對 generation。無法辨識外端指派、版本不符或預覽驗證失敗時保留 broker 狀態並顯示錯誤，不顯示舊圖或改選其他 Screen。較舊的存活 Shell 若不回報 URL，相同本機 ID／revision 仍可恢復；外端 ID 則須使用者明確重新選擇 Screen，不需為此重啟工作 Shell。
 
 預覽標題顯示所選 Screen，圖片下方不顯示擷取時間或工具接入說明，以保留畫面空間；擷取與操作錯誤仍顯示。立即擷取、定時與手動更新只在當前可見分頁進行；停止預覽只停止取圖，並不清除已配置的 AI 工具。「取消桌面工具」才向該 Shell broker 送 clear，清除其 token 並停止預覽。關頁、detach、App 關閉只釋放本機連線與預覽；Shell supervisor 結束時釋放其記憶體指派；CLI stdio EOF 不清除 Shell 選擇。所有操作都不停止共享桌面、瀏覽器、instance-mcp 或使用者工作 Shell。
 

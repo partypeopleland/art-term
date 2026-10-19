@@ -196,6 +196,17 @@ def legacy_current(binding, path):
     return target
 
 
+def verify_target(binding, path, expected):
+    require(isinstance(expected, list) and 0 < len(expected) <= 64)
+    target = legacy_current(binding, path)
+    require(target is not None and target in expected)
+    reply = broker_request(binding, {'op': 'rpc', 'request': {'method': 'tools/call', 'params': {
+        'name': 'list_target_tools', 'arguments': {}}}}, path)
+    require(not reply.get('isError') and reply.get('_meta', {}).get('artTermTarget') == target)
+    require(legacy_current(binding, path) == target)
+    return {'ok': True, 'target': target}
+
+
 def configure(binding, body):
     statuses = []
     confirmed = []
@@ -206,8 +217,11 @@ def configure(binding, body):
     for path in paths:
         s = socket.socket(socket.AF_UNIX); s.settimeout(20)
         try:
-            s.connect(str(path)); send(s, body)
-            status = receive(s, 65536)
+            if body.get('op') == 'verify':
+                status = verify_target(binding, path, body.get('expected_targets'))
+            else:
+                s.connect(str(path)); send(s, body)
+                status = receive(s, 65536)
             # A Shell created before this helper update still has the older
             # broker in memory. Its existing MCP current_target and fenced
             # clear operations are enough to recover without restarting it.
