@@ -37,6 +37,10 @@ async function load(): Promise<void> {
     if (current(ticket, profile)) busy.value = false
   }
 }
+function toggleConnections(): void {
+  if ((group.value?.targets.length ?? 0) > 1) expanded.value = !expanded.value
+  void load()
+}
 function attach(target: TargetDto): void {
   if (!busy.value && group.value && target.running && props.active && !document.hidden) emit('open', group.value, target)
 }
@@ -71,7 +75,7 @@ onBeforeUnmount(() => { alive = false; cancelPending(); document.removeEventList
 <template>
   <div class="host-connections" :data-testid="`runtime-${profile.id}`">
     <div class="host-connection-grid">
-      <button class="host-identity" :data-runtime-label="profile.name" :disabled="busy" :aria-label="`${profile.agentName || profile.name}，${(group?.targets.length ?? 0) > 1 ? expanded ? '收合連線' : '展開連線' : '重新整理連線'}`" :aria-expanded="(group?.targets.length ?? 0) > 1 ? expanded : undefined" @click="(group?.targets.length ?? 0) > 1 ? expanded = !expanded : load()">
+      <button class="host-identity" :data-runtime-label="profile.name" :disabled="busy" :aria-label="`${profile.agentName || profile.name}，${(group?.targets.length ?? 0) > 1 ? expanded ? '收合連線' : '展開連線' : '重新整理連線'}`" :aria-expanded="(group?.targets.length ?? 0) > 1 ? expanded : undefined" @click="toggleConnections">
         <span class="connection-dot" :class="{ on: connected }" :data-testid="`runtime-status-${profile.id}`" :title="connected ? '已連線（本機分頁）' : '未連線'" />
         <span class="host-copy"><strong>{{ profile.agentName || profile.name }}</strong><small>{{ profile.agentTool || 'openab-pty' }}</small></span>
       </button>
@@ -79,7 +83,7 @@ onBeforeUnmount(() => { alive = false; cancelPending(); document.removeEventList
         <span v-if="busy && !group" class="session-empty">讀取中…</span>
         <span v-else-if="error && !group?.targets.length" class="session-empty">讀取失敗</span>
         <div v-if="(group?.targets.length ?? 0) > 1" class="connection-summary-row">
-          <button v-if="!expanded" class="attach-button connection-summary" :disabled="busy" :aria-expanded="false" @click="expanded = true"><span>連線數:{{ String(group?.targets.length ?? 0).padStart(2, '0') }}</span></button>
+          <button v-if="!expanded" class="attach-button connection-summary" :disabled="busy" :aria-expanded="false" @click="toggleConnections"><span>連線數:{{ String(group?.targets.length ?? 0).padStart(2, '0') }}</span></button>
           <button v-else class="attach-button" :disabled="busy || !group!.targets[0].running" :title="group!.targets[0].phase === 'attached' ? '接管此連線，會中斷原連線' : 'Attach 此連線'" @click="attach(group!.targets[0])"><span>{{ group!.targets[0].label }}</span><small v-if="group!.targets[0].phase === 'attached'">接管</small><span v-else class="attach-arrow" aria-hidden="true">↗</span></button>
         </div>
         <template v-if="expanded || (group?.targets.length ?? 0) <= 1">
