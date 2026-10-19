@@ -1,53 +1,55 @@
 # art-term
 
-[English](README.md)
+[English](README.md) · [下載 Windows 與 Android 版](https://github.com/partypeopleland/art-term/releases/latest)
 
-art-term 是給開發者在 Windows 電腦或 Android 手機上連線操作 Linux Shell 與 coding CLI 的 App。Shell 和工具都在遠端 Linux Host 執行；App 負責管理連線並呈現終端。
+用 Windows 電腦或 Android 手機，接著操作 Linux 上的終端與 coding CLI。指令和工具都在 Linux 主機執行；art-term 提供 Shell 分頁、歷史捲動，也能選配遠端桌面預覽。
 
-## 功能
+## 畫面預覽
 
-- 多個 Shell 分頁與有限度恢復：短暫斷線後可恢復原工作階段；不重送結果不確定的輸入。
-- 選配的共享桌面預覽：顯示 Host 共享桌面的截圖，不是可操作的遠端桌面。
-- Windows 與 Android 共用連線核心，並可用密碼加密的連線檔案匯出／匯入，將設定搬到其他裝置。
-- 實驗中的 Android 語音輸入：使用裝置端辨識；裝置有可用語言資料時可離線辨識。停頓不會結束錄音，完成後會把文字送到開始錄音的分頁。目前只在 Pixel 9 測試；英文技術名詞、指令與路徑可能辨識錯誤。
+以下是使用正式介面元件、搭配虛構示範資料的瀏覽器截圖。預覽不含原生視窗外框、Android 系統鍵盤與裝置服務。
 
-## 運作方式
+| Android 連線首頁 | Android 終端 |
+| --- | --- |
+| <img src="assets/screenshots/android-home.png" alt="Android 首頁，依 Computers、Agents 與 Screens 分類" width="300"> | <img src="assets/screenshots/android-terminal.png" alt="Android 終端，含 Shell 分頁與快捷鍵" width="300"> |
 
-```text
-Windows／Android App
-   | HTTPS：管理 Shell；WSS：傳送終端與截圖資料
-   v
-官方 openab-pty 遠端 Runtime
-   +--> 工作 Shell --> 命令／coding CLI
-   +--> 暫時截圖 Shell --> Host helper --> 選配的 instance-mcp
-                                                   |
-                                              共享桌面
-```
+<img src="assets/screenshots/windows-home.png" alt="Windows 連線首頁" width="900">
 
-art-term 與 openab-pty 是獨立專案。App 與官方 openab-pty Runtime 配合，由 Runtime 管理遠端 Shell 並傳送終端資料。使用選配桌面預覽時，Host 還需要 helper 與 instance-mcp。App 不會安裝這些遠端服務或 coding CLI。
+想自己點看看，可在本機啟動[介面預覽](docs/platforms/ui-preview.md)。預覽使用示範回應，不會執行指令。
+
+## 可以做什麼
+
+- 同時開多個 Shell 分頁，建立新工作或接回既有工作。
+- 上捲查看終端歷史，點擊網址用裝置瀏覽器開啟。
+- 選擇 Screen 查看共享桌面。Windows 可用能拖曳、調整大小的放大面板；Android 支援全螢幕雙指縮放與平移。預覽圖片不提供遠端滑鼠、鍵盤操作。
+- 用密碼加密匯出、匯入連線與 Screen 設定，搬到其他裝置。
+- Android 可試用裝置端語音輸入。目前只在 Pixel 9 測試；離線使用需要語言資料，技術名詞可能辨識錯誤。
 
 ## 開始使用
 
-準備一台 Linux Host，讓 Windows 電腦或 Android 手機可透過同一個私人 Tailnet（例如 Tailscale）連線，並先設定好官方 openab-pty Runtime。再於 App 填入 Runtime 網址與管理憑證。coding CLI 是選配工具，使用前須先安裝在 Host。要使用桌面預覽，還需準備共享桌面、Host helper 與 instance-mcp。
+1. 到 [Releases](https://github.com/partypeopleland/art-term/releases/latest) 下載 Windows ZIP 或 Android ARM64 APK。
+2. 準備已安裝官方 openab-pty Runtime 的 Linux 主機，讓裝置能透過私人網路連線，例如 Tailscale。詳見[使用前準備](docs/openab-host-setup.md)。
+3. 在 App 新增 Runtime 網址與管理憑證，建立或選擇 Shell。想使用的 coding CLI 要先裝在主機上。
 
-## 本地打包與製作自己的版本
+桌面預覽是選配，需要另外準備共享桌面與 instance-mcp。App 不會代裝遠端服務或 coding 工具。
 
-Clone 本專案或自己的 fork 後，依[本地建置與自訂版本指南](docs/platforms/local-build.md)準備 Windows 工具鏈。編譯 App 不需要遠端 Runtime；要實際連線操作 Shell 時才需要。
+## 系統怎麼連在一起
 
-工具準備好後，在專案根目錄的 PowerShell 執行這一行，即可建置 Windows 可攜資料夾：
-
-```powershell
-.\scripts\package-windows.ps1 -OutputPath ".\dist\windows\art-term-$(Get-Date -Format yyyyMMdd-HHmmss)"
+```text
+Windows／Android App
+  Vue 介面 + 終端
+         |
+  Tauri 原生層 + 共用 Rust 核心
+         |-- HTTPS / WSS --> openab-pty Runtime --> tmux Shell --> coding CLI
+         |
+         +-- 直接 MCP --> instance-mcp --> 共享桌面截圖
+                                     ^
+                    Shell 工具橋接 --+  （供 coding CLI 選配使用）
 ```
 
-Android 的首次 SDK 設定、debug APK、自有 release 金鑰與 APK 驗證，以及名稱、圖示、識別碼和版本號的調整，都收在上述指南。Clone／fork 不會取得維護者的簽章金鑰。
+openab-pty 管理遠端 Shell 與終端傳輸，tmux 在主機保留工作與歷史。App 直接透過 MCP 取得 Screen 圖片；選配的 Shell 工具橋接，讓已設定的 coding 工具使用所選桌面。Windows 與 Android 共用連線核心，鍵盤、觸控與憑證保存則由各平台處理。詳見[系統架構](docs/refarch/architecture.md)與[桌面預覽](docs/refarch/desktop.md)。
 
-## 文件與建置
+## 自行建置與更多文件
 
-自動建置 Windows EXE、Android APK 並發布 GitHub Release，請見[自動發布設定](docs/platforms/releases.md)。推送版本標籤即可觸發；Android 使用保存在 GitHub Actions Secrets 的固定簽章金鑰，fork 維護者可建立自己的金鑰。
+想打包自己的版本，可讀[本地建置與自訂](docs/platforms/local-build.md)、[自動發布](docs/platforms/releases.md)，或從[文件入口](docs/INDEX.md)找需要的主題。
 
-目前詳細文件以繁體中文撰寫。可從[使用前準備](docs/openab-host-setup.md)或[文件入口](docs/INDEX.md)開始，並參考[架構](docs/refarch/architecture.md)、[Shell 工作階段與恢復](docs/refarch/sessions.md)、[桌面預覽](docs/refarch/desktop.md)、[連線搬移](docs/refarch/connection-transfer.md)、[Windows 建置指南](docs/platforms/windows.md)、[Android 建置指南](docs/platforms/android.md)及[Android 語音輸入決策](docs/bdr/BDR-001-android-voice-input.md)。
-
-## Issues 與授權
-
-Issues 開放，歡迎回報問題。請勿貼上憑證、主機位址或其他私人資訊。本專案採 MIT 授權；第三方元件仍適用各自的授權條款。詳見 [LICENSE](LICENSE) 與[第三方說明](docs/third-party-notices.md)。
+歡迎到 [Issues](https://github.com/partypeopleland/art-term/issues) 回報問題，請勿附上憑證或私人主機資訊。[MIT 授權](LICENSE) · [第三方說明](docs/third-party-notices.md)。

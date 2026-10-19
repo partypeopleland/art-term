@@ -1,53 +1,55 @@
 # art-term
 
-[繁體中文](README.zh-TW.md)
+[繁體中文](README.zh-TW.md) · [Download Windows & Android](https://github.com/partypeopleland/art-term/releases/latest)
 
-art-term is a Windows and Android app for developers who want to use Linux shells and coding CLIs from a desktop or phone. Shells and tools run on the remote Linux host; the app manages connections and presents the terminal.
+Use your Linux terminal and coding CLIs from a Windows PC or Android phone. Your commands keep running on the Linux host; art-term gives you Shell tabs, terminal history, and an optional view of the remote desktop.
 
-## Features
+## Preview
 
-- Multiple Shell tabs with bounded recovery. After a temporary disconnect, art-term can resume the original session; it does not replay input whose result is uncertain.
-- Optional shared desktop preview. The app displays screenshots of the host's shared desktop; it is not an interactive remote desktop.
-- A shared Windows and Android connection core, with password-encrypted connection export and import for moving settings between devices.
-- Experimental Android voice input. On-device recognition can work offline when the required language data is available. Pauses do not end recording, and finished text is sent to the tab where recording began. Tested only on Pixel 9 so far; English technical terms, commands, and paths can be misrecognized.
+These are browser captures of the app's UI components with fictional demo data. Native window borders, Android keyboard, and device services are outside this preview.
 
-## How it works
+| Android connections | Android terminal |
+| --- | --- |
+| <img src="assets/screenshots/android-home.png" alt="Android connection dashboard with Computers, Agents, and Screens" width="300"> | <img src="assets/screenshots/android-terminal.png" alt="Android terminal with Shell tabs and quick keys" width="300"> |
+
+<img src="assets/screenshots/windows-home.png" alt="Windows connection dashboard" width="900">
+
+To explore the demo locally, see [UI preview](docs/platforms/ui-preview.md). It uses demo responses and does not execute commands.
+
+## What you can do
+
+- Open multiple Shell tabs, create work sessions, or reconnect to an existing one.
+- Scroll back through terminal history and open web links in your device's browser.
+- View a selected Screen. Windows has a movable, resizable zoom panel; Android has full-screen pinch zoom and panning. Preview images do not accept remote desktop input.
+- Move connection and Screen settings between devices with password-encrypted export and import.
+- Dictate text on Android with experimental on-device voice input. Tested on Pixel 9; language data is required for offline use, and technical terms can be misrecognized.
+
+## Get started
+
+1. Download the Windows ZIP or Android ARM64 APK from [Releases](https://github.com/partypeopleland/art-term/releases/latest).
+2. Prepare a Linux host with the official openab-pty Runtime, reachable through your private network, such as Tailscale. See [host setup](docs/openab-host-setup.md).
+3. Add the Runtime URL and management credential in the app, then create or select a Shell. Install any coding CLI you want to use on the host.
+
+Desktop preview is optional and needs a separately configured shared desktop with instance-mcp. The app does not install the remote services or coding tools.
+
+## How the pieces connect
 
 ```text
 Windows / Android app
-   | HTTPS: Shell management; WSS: terminal and screenshot data
-   v
-Official openab-pty remote Runtime
-   +--> work Shell --> commands / coding CLI
-   +--> temporary screenshot Shell --> Host helper --> optional instance-mcp
-                                                            |
-                                                       shared desktop
+  Vue UI + terminal
+         |
+  Tauri native layer + shared Rust core
+         |-- HTTPS / WSS --> openab-pty Runtime --> tmux Shell --> coding CLI
+         |
+         +-- direct MCP --> instance-mcp --> shared desktop screenshots
+                                      ^
+                  Shell tool bridge --+  (optional, for coding CLI tools)
 ```
 
-art-term and openab-pty are independent projects. This app works with the official openab-pty Runtime, which manages remote Shells and carries terminal data. The optional desktop preview also needs a Host helper and instance-mcp. The app does not install these remote services or coding CLIs.
+openab-pty manages remote Shells and terminal traffic. tmux keeps the work session and its history on the host. The app fetches Screen images directly through MCP; the optional Shell tool bridge lets configured coding tools access the selected desktop. Windows and Android share the connection core, with platform-specific keyboard, touch, and credential storage. See [architecture](docs/refarch/architecture.md) and [desktop preview](docs/refarch/desktop.md).
 
-## Getting started
+## Build and learn more
 
-Prepare a Linux host reachable from your Windows PC or Android device over the same private Tailnet, such as Tailscale, and have the official openab-pty Runtime configured. Add its URL and management credential in the app. A coding CLI is optional and must already be installed on the host. For desktop previews, also prepare a shared desktop, the Host helper, and instance-mcp.
+Detailed guides are in Traditional Chinese. Start with [local builds and customization](docs/platforms/local-build.md), [automated releases](docs/platforms/releases.md), or the [documentation index](docs/INDEX.md).
 
-## Build your own version
-
-Clone this repository (or your fork), then follow the [local build and customization guide](docs/platforms/local-build.md) (Traditional Chinese) to install the Windows toolchain. Building the app does not require a remote Runtime; connecting to a shell does.
-
-Once the prerequisites are ready, run this from the repository root in PowerShell to build a Windows portable package:
-
-```powershell
-.\scripts\package-windows.ps1 -OutputPath ".\dist\windows\art-term-$(Get-Date -Format yyyyMMdd-HHmmss)"
-```
-
-For Android, the guide covers first-time SDK setup, a debug APK, your own release signing key, and APK verification. It also explains how to change the app name, icons, identifiers, and version. Signing keys are not included in a clone or fork.
-
-## Documentation and builds
-
-For automatic Windows EXE and Android APK builds and publishing GitHub Releases, see the [release setup guide](docs/platforms/releases.md). Publishing is triggered by a version tag; Android uses a persistent signing key stored in GitHub Actions secrets. Fork maintainers can create their own key.
-
-The detailed documentation is currently written in Traditional Chinese. Start with the [quick start](docs/openab-host-setup.md) or [documentation index](docs/INDEX.md). See also [architecture](docs/refarch/architecture.md), [Shell sessions and recovery](docs/refarch/sessions.md), [desktop preview](docs/refarch/desktop.md), [connection transfer](docs/refarch/connection-transfer.md), the [Windows build guide](docs/platforms/windows.md), the [Android build guide](docs/platforms/android.md), and the [Android voice-input decision](docs/bdr/BDR-001-android-voice-input.md).
-
-## Issues and license
-
-Issues are open, and bug reports are welcome. Do not post credentials, host addresses, or other private information. This project is MIT licensed; third-party components retain their own license terms. See [LICENSE](LICENSE) and [third-party notices](docs/third-party-notices.md).
+Bug reports are welcome in [Issues](https://github.com/partypeopleland/art-term/issues). Keep credentials and private host details out of reports. [MIT license](LICENSE) · [Third-party notices](docs/third-party-notices.md).
