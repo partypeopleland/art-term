@@ -7,6 +7,12 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
 };
+// Independently authenticated with Argon2id and AES-GCM, outside this codec.
+const LEGACY_V1_VECTOR: &str = r#"{"format":"art-term-connections","version":1,"mode":"encrypted","kdf":{"name":"argon2id","version":19,"memory_kib":65536,"iterations":3,"parallelism":4},"cipher":"aes-256-gcm","salt":"BwcHBwcHBwcHBwcHBwcHBw==","nonce":"CQkJCQkJCQkJCQkJ","ciphertext":"bHNskqUfv5U2gYtBZpPexx//ToWWpFgTEM+rKMC+6MedmZ6kK6KPzqaoNL1XEQsPsO/HoObEQ0cMgPghNnVZdkLryPQtlZJZTuZ6bj35wX5C9jGyW9/naj2OHP3mah8hV/2DChXMQ0q7iip1XqKeutgKUcdmxTuxzPUQT9eCjl+YEk8JgwzVKET0Cv/ek2BNzWtcHlVIosX/uM9LNwuR5VUalMWvPU94gEDQPzpP3Z5v+VxB+ONBX+ChxZ0qWpWrZ8f60v8Ew0Cv2BfpoNHyDk++mstEVKqJvXAQbl7F4K3/ys++r3/XvW7Rq87PbDTORibgBKqtuF5/eehTuDSoNEx+cigDmxED+f5N1317YZqqUdGLZ8Q3B6W5k4lvbuvrcQAP8ACiZEtGO43zNVVUfqZMQB73oNFnIvKqAHgarX4DwWctZB+ir5c7ohJSXlcyHFI8RvssxdLSYeLrO1BlBNA41FD/0ThGTE9Y/xY8"}"#;
+
+// Stale my-cli ciphertext under an art-term envelope must never authenticate.
+const WRONG_DOMAIN_V1_VECTOR: &str = r#"{"format":"art-term-connections","version":1,"mode":"encrypted","kdf":{"name":"argon2id","version":19,"memory_kib":65536,"iterations":3,"parallelism":4},"cipher":"aes-256-gcm","salt":"BwcHBwcHBwcHBwcHBwcHBw==","nonce":"CQkJCQkJCQkJCQkJ","ciphertext":"bHNskqUfv5U2gYtNbcqQ3xOgQMebpVMeAcWwL9zyt8fH3pqyML6Ig/K7Iq4YXAYOu+LWqv3DXwtF+blYIzZacg20yIhmq49USPYoSnrdyG8OrjHxCdX5bjGwDtbvQRMMTq3VCkeaX068wHZgEOqas8lKQJFi0Cqw2bcBBNCT3weYUwgQhxzVOESiUabGiyNayXhWC0MY4cWk/ctCJkfJ5R1dg8uoOUtIhG3FIyhRwZx0qRJBsLRdXue4yd0iFIjqO8e1n/gCyU6e3CTj7oKrFl340ZVED/ubp3ANfETQrPX/iIy9qzCIvRWAmdTPcSbUU2q4BOXgtlxzeu0f5jTzZV5kcjURgQRA7r9HmTh7LMqsUJTCHtxBCOX7moNnKavrMUsX/AamegoNO477dB5ZcucBNEHX8Y4ocvS8AHILqmsGgjEtOFSnsp0gpRxQElhtGkQ8TOor0NeRcJ3rRKlvJ6gM50FOI9vAzyiOwg=="}"#;
+
 fn payload(private: bool) -> Payload {
     Payload {
         desktops: Vec::new(),
@@ -56,9 +62,8 @@ fn public_strict_roundtrip_and_private_vector() {
     ] {
         assert!(!text.contains(plain));
     }
-    const VECTOR: &str = r#"{"format":"art-term-connections","version":1,"mode":"encrypted","kdf":{"name":"argon2id","version":19,"memory_kib":65536,"iterations":3,"parallelism":4},"cipher":"aes-256-gcm","salt":"BwcHBwcHBwcHBwcHBwcHBw==","nonce":"CQkJCQkJCQkJCQkJ","ciphertext":"bHNskqUfv5U2gYtNbcqQ3xOgQMebpVMeAcWwL9zyt8fH3pqyML6Ig/K7Iq4YXAYOu+LWqv3DXwtF+blYIzZacg20yIhmq49USPYoSnrdyG8OrjHxCdX5bjGwDtbvQRMMTq3VCkeaX068wHZgEOqas8lKQJFi0Cqw2bcBBNCT3weYUwgQhxzVOESiUabGiyNayXhWC0MY4cWk/ctCJkfJ5R1dg8uoOUtIhG3FIyhRwZx0qRJBsLRdXue4yd0iFIjqO8e1n/gCyU6e3CTj7oKrFl340ZVED/ubp3ANfETQrPX/iIy9qzCIvRWAmdTPcSbUU2q4BOXgtlxzeu0f5jTzZV5kcjURgQRA7r9HmTh7LMqsUJTCHtxBCOX7moNnKavrMUsX/AamegoNO477dB5ZcucBNEHX8Y4ocvS8AHILqmsGgjEtOFSnsp0gpRxQElhtGkQ8TOor0NeRcJ3rRKlvJ6gM50FOI9vAzyiOwg=="}"#;
-    assert_eq!(b, VECTOR.as_bytes());
-    let p = decoded(VECTOR.as_bytes(), " 密碼 pass ");
+    assert_eq!(b, LEGACY_V1_VECTOR.as_bytes());
+    let p = decoded(LEGACY_V1_VECTOR.as_bytes(), " 密碼 pass ");
     assert_eq!(
         p.entries[0].credential.as_ref().unwrap().expose(),
         "fictional-credential"
@@ -68,9 +73,38 @@ fn public_strict_roundtrip_and_private_vector() {
     let digest = format!("{:x}", Sha256::digest(&b));
     assert_eq!(
         digest,
-        "55506b0d8f844fcdb8300c5edc08decfeb624e18729a7fa8f9f0444774f14ec1"
+        "cb4f9307d3590401d730ff637bd5daad25d0bc7053d4a7b49735b330a0d979ec"
     );
 }
+#[test]
+fn legacy_v1_fixed_file_decodes_full_payload() {
+    let Decoded::Encrypted(file) = decode(LEGACY_V1_VECTOR.as_bytes()).unwrap() else {
+        panic!("legacy v1 fixture must require its password")
+    };
+    let p = unlock(file, Zeroizing::new(" 密碼 pass ".into())).unwrap();
+    assert!(p.desktops.is_empty());
+    assert_eq!(p.entries.len(), 1);
+    let entry = &p.entries[0];
+    assert_eq!(entry.name, "Fixture Agent");
+    assert_eq!(entry.origin, "https://agent.example.test/");
+    assert_eq!(entry.metadata, payload(false).entries[0].metadata);
+    assert_eq!(
+        entry.credential.as_ref().unwrap().expose(),
+        "fictional-credential"
+    );
+}
+
+#[test]
+fn legacy_wrong_domain_ciphertext_is_rejected() {
+    let Decoded::Encrypted(file) = decode(WRONG_DOMAIN_V1_VECTOR.as_bytes()).unwrap() else {
+        panic!("wrong-domain fixture must remain an encrypted envelope")
+    };
+    assert!(matches!(
+        unlock(file, Zeroizing::new(" 密碼 pass ".into())),
+        Err(ApiError::Auth)
+    ));
+}
+
 #[test]
 fn reject_untrusted_files_and_authenticated_changes() {
     let public = encode(payload(false), None).unwrap();
