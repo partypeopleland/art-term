@@ -335,7 +335,10 @@ async fn http_status_redirect_and_body_bounds() {
         (404, ApiError::SessionMissing),
         (409, ApiError::StateChanged),
         (429, ApiError::Throttled),
+        (502, ApiError::GatewayUnavailable),
         (503, ApiError::Capacity),
+        (504, ApiError::GatewayUnavailable),
+        (500, ApiError::Protocol),
         (302, ApiError::Protocol),
     ] {
         let (origin, task) = fixture(

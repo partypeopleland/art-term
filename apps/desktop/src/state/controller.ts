@@ -172,6 +172,7 @@ const KIND_FALLBACK: Record<string, string> = {
   cancelled: '本機已中斷連線',
   inputUncertain: '輸入是否送達尚未確認，未自動重送',
   internal: '遠端 runtime 發生內部錯誤',
+  gatewayUnavailable: '主機入口暫時無法連到服務，請檢查主機服務與轉送設定後重試',
   protocol: '遠端 runtime 資料格式不符',
   auth: 'Shell 認證被拒絕',
   tls: 'WSS 憑證驗證失敗',

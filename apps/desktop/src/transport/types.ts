@@ -92,6 +92,7 @@ export type ConnectionErrorKind =
   | 'tls'
   | 'transport'
   | 'timeout'
+  | 'gatewayUnavailable'
   | 'throttled'
   | 'capacity'
   | 'busy'

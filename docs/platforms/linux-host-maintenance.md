@@ -148,7 +148,7 @@ tailscale ping workstation.example-tailnet.ts.net
 curl --connect-timeout 5 --max-time 10 -o /dev/null -w '%{http_code}\n' https://workstation.example-tailnet.ts.net:8443/admin/sessions
 ```
 
-未提供認證時，預期收到 `401`。這只能證明網路／HTTPS／認證入口，還不等於成功操作 Shell。瀏覽器開啟該 URL 收到未授權也是正常；網站不是終端客戶端。
+未提供認證時，預期收到 `401`。若本機 Runtime 回傳 `401`，HTTPS 入口卻回傳 `502`，問題在轉送路徑；先修正入口，不重裝 Runtime 或重設 App 憑證。確認入口可達後，在 App 測試連線，驗證原 HTTPS 網址以既有認證取得清單，再實際開啟 Shell。這只能證明網路／HTTPS／認證入口，還不等於成功操作 Shell。瀏覽器開啟該 URL 收到未授權也是正常；網站不是終端客戶端。
 
 | 現象 | 處理 |
 |---|---|
@@ -156,6 +156,7 @@ curl --connect-timeout 5 --max-time 10 -o /dev/null -w '%{http_code}\n' https://
 | 沒有 `*.ts.net` DNS | 檢查 MagicDNS、HTTPS 與目前登入的 Tailnet |
 | HTTPS／Serve 不可用 | 完成同意網址，核對 policy、`tailscale serve status`，再跑 `--serve` |
 | `8443` 衝突 | 保留既有服務；請管理者規劃不同入口，腳本不替你拆掉它 |
+| HTTPS 入口回傳 502／504 | 先查 `tailscale serve status` 的轉送目標是否仍有服務。502 是入口無法正常轉送，504 是入口等待上游逾時；不據此判定 App 與 Runtime 版本不相容。對照本機 Runtime 與原 HTTPS 網址的 `/admin/sessions` 回應，修正已確認的路由或服務問題。保留其他 handler，不使用 `tailscale serve reset`。 |
 | 本機 runtime 未就緒 | 查看上述 user journal／status；既有服務可自行 `systemctl --user restart art-term-openab-pty.service`，重啟會結束原 session |
 | CLI 指令找不到 | 新 Shell 讀 `.bashrc`；自行確認 PATH／CLI。service 保留 `.local/bin`、`.cargo/bin` 搜尋路徑以相容既有工具，不表示必須安裝 Cargo |
 | credential 遺失／懷疑外洩 | 先停服務／撤除專用入口，再進行明確的重新初始化；不可把 verifier 當密碼，也不能只改 credential 檔 |

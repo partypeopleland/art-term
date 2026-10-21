@@ -10,6 +10,7 @@ const HOST_KIND_TEXT: Record<string, string> = {
   tls: '[TLS] HTTPS 憑證驗證失敗：請確認網址主機名稱與伺服器憑證相符，且裝置日期與時間正確。',
   transport: '[TRANSPORT] 無法連到服務：請確認裝置已連上 Tailnet，且網址使用服務的 HTTPS 主機名稱。',
   timeout: '[TIMEOUT] 主機回應逾時：請確認網路連線後重試。',
+  gatewayUnavailable: '[GATEWAY_UNAVAILABLE] 主機入口暫時無法連到服務：請檢查主機服務與轉送設定後重試。',
   throttled: '[THROTTLED] 主機暫時限制請求：請稍後重試。',
   capacity: '[CAPACITY] 主機或本機資料已達容量限制。',
   sessionMissing: '[SESSION_MISSING] 遠端 Shell 已不存在。',

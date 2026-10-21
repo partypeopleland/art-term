@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { ConnectionError } from '../src/transport/types'
 import { codingCliInput, createAppController } from '../src/state/controller'
 import { FakeTerm, FakeTransport, deferred, makeHost, makeTarget } from './fake'
 
@@ -29,6 +30,20 @@ it('rejects CLI control characters and excessive input before remote write', () 
 })
 
 describe('mobile lifecycle in shared controller', () => {
+  it('uses the gateway fallback when a structured connection failure has no message', async () => {
+    const transport = new FakeTransport()
+    transport.openError = new ConnectionError('gatewayUnavailable', '')
+    const controller = createAppController(transport)
+    try {
+      await controller.loadCatalog()
+      controller.openTarget(group, host.targets[0], false)
+      const tab = controller.tabs[0]
+      controller.attachTerminal(tab, new FakeTerm())
+      await flush()
+      expect(tab.errorMsg).toBe('主機入口暫時無法連到服務，請檢查主機服務與轉送設定後重試')
+      expect(transport.openCalls).toHaveLength(1)
+    } finally { controller.dispose() }
+  })
   it('resumes a background-lost session on its original target once, without replay or launching Codex', async () => {
     const transport = new FakeTransport()
     const controller = createAppController(transport, { backgroundConnection: 'keep' })

@@ -115,6 +115,7 @@ impl From<ApiError> for HostError {
             ApiError::Tls => "HTTPS 憑證驗證失敗，請確認網址與主機憑證。",
             ApiError::Transport => "無法連到主機，請確認網路與服務。",
             ApiError::Timeout => "主機回應逾時。",
+            ApiError::GatewayUnavailable => "主機入口暫時無法連到服務，請檢查主機服務與轉送設定後重試。",
             ApiError::Throttled => "主機暫時限制請求，請稍後重試。",
             ApiError::Capacity => "主機或本機資料已達容量限制。",
             ApiError::SessionMissing => "遠端 Shell 已不存在。",
@@ -351,6 +352,16 @@ pub async fn gui_runtime_test_host(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gateway_failure_serializes_a_fixed_local_message() {
+        let value = serde_json::to_value(HostError::from(ApiError::GatewayUnavailable)).unwrap();
+        assert_eq!(value["kind"], "gatewayUnavailable");
+        assert_eq!(
+            value["message"],
+            "主機入口暫時無法連到服務，請檢查主機服務與轉送設定後重試。"
+        );
+    }
     #[test]
     fn category_update_preserves_local_and_exact_origin_catalog_capabilities() {
         use art_term_core::connections::{Category, CodingCli, Connection, ConnectionMetadata};

@@ -86,6 +86,14 @@ v2 仍要求 auto_discover=false 及空 computers／agents；退役 SSH-only 設
 
 App 使用未修改的官方 openab-pty 管理 API 與 WSS，不要求本專案的相容標記、Runtime process identity 或 Shell identity 擴充。短暫 transport／timeout 最多以原 attach token 與已呈現輸出游標恢復 3 次，不自動續期、建立／重啟 Shell，也不重播輸入。TTL、接管、token 失效或無法確認的工作狀態會停止恢復，讓使用者重新選擇；官方名稱／generation 不提供舊版自訂原子身分比對。ACK 表示已解析輸出的本機確認，Gap 表示輸出缺段；Gap 提示並重置顯示，手機背景暫停恢復，回前景才繼續。
 
+### App 與既有 Host 的版本相容
+
+同一 App 主版本內，Android 與 Windows 升級保留既有受支援 Host 的基本 Shell 通訊，不要求使用者為每次 App 更新升級 Host。新增功能以能力宣告判斷是否可用；舊 Host 缺少新能力時，只停用該功能，保留原有列清單、建立、連線與接續行為。不得因缺少選用能力而要求整個 Host 升級。
+
+若變更無法向後相容，必須提高 App 主版本號，明列受影響的 Host 版本、升級與遷移方式。正式發布前，回歸既有受支援 Runtime 的管理 API 與 WSS，以及缺少新增選用能力的情境。固定來源的官方 Runtime 是目前基本通訊基準；App 與 Host 的版本號不要求相同。
+
+HTTP `502`／`504` 表示主機入口或轉送服務異常，不作為 Runtime 版本不相容的證據。App 在兩平台使用相同錯誤分類，顯示固定訊息，不顯示上游回應內文。
+
 首次準備 Host 見[快速開始](../openab-host-setup.md)，升級見[Host 維護](../platforms/linux-host-maintenance.md)，桌面能力見[桌面預覽](desktop.md)。
 ## 附錄：實作與參考
 

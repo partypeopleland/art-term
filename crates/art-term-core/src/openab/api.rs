@@ -14,6 +14,7 @@ pub enum ApiError {
     Tls,
     Transport,
     Timeout,
+    GatewayUnavailable,
     Throttled,
     Capacity,
     SessionMissing,
@@ -34,6 +35,7 @@ impl fmt::Display for ApiError {
             Self::Throttled => "Request throttled",
             Self::Capacity => "Runtime capacity unavailable",
             Self::SessionMissing => "Session missing",
+            Self::GatewayUnavailable => "Host gateway unavailable",
             Self::Protocol => "Invalid runtime protocol",
             Self::StateChanged => "Host or session state changed",
             Self::Storage => "Protected storage unavailable",
@@ -77,6 +79,7 @@ fn status_error(status: StatusCode) -> ApiError {
         404 => ApiError::SessionMissing,
         409 => ApiError::StateChanged,
         429 => ApiError::Throttled,
+        502 | 504 => ApiError::GatewayUnavailable,
         503 => ApiError::Capacity,
         _ => ApiError::Protocol,
     }

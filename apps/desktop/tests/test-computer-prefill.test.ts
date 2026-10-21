@@ -138,6 +138,15 @@ describe('private test Computer prefill', () => {
     }
   })
 
+  it('shows a fixed gateway failure without exposing upstream text or suggesting a runtime upgrade', () => {
+    const text = hostErrorText({ kind: 'gatewayUnavailable', message: fixture.credential }, 'Generic failure')
+    expect(text).toContain('[GATEWAY_UNAVAILABLE]')
+    expect(text).toContain('轉送')
+    expect(text).not.toContain(fixture.credential)
+    expect(text).not.toContain('版本')
+    expect(hostErrorText({ kind: 'protocol', message: fixture.credential }, 'Generic failure')).toContain('[PROTOCOL]')
+  })
+
   it('keeps prototype-shaped unknown error kinds on the safe generic fallback', () => {
     for (const kind of ['toString', '__proto__', 'constructor']) {
       expect(hostErrorText({ kind, message: fixture.credential }, 'Generic failure')).toBe('Generic failure')

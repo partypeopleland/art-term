@@ -17,6 +17,32 @@ function setup(names: string[] = ['nuc-1', 'nuc-2', 'nuc-3']) {
   return { profile, targets, transport, wrapper }
 }
 describe('inline existing connections', () => {
+  it('shows the structured gateway error on list failure and can refresh successfully', async () => {
+    const { transport, wrapper } = setup(['work-a'])
+    await flushPromises()
+    const list = vi.spyOn(transport, 'runtimeSessions').mockRejectedValueOnce({ kind: 'gatewayUnavailable', message: 'secret upstream HTML' })
+    await wrapper.get('.host-identity').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain('[GATEWAY_UNAVAILABLE]')
+    expect(wrapper.text()).not.toContain('secret upstream HTML')
+    expect(wrapper.text()).not.toContain('回應格式不符')
+    expect(transport.runtimeCreateHistorySession).not.toHaveBeenCalled()
+    expect(list).toHaveBeenCalledOnce()
+    await wrapper.get('.host-identity').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('work-a')
+  })
+  it('keeps an uncertain create result separate from a failed list', async () => {
+    const { transport, wrapper } = setup(['work-a'])
+    await flushPromises()
+    transport.runtimeCreateHistorySession.mockRejectedValueOnce({ kind: 'gatewayUnavailable', message: 'secret' })
+    await wrapper.get('.new-connection').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toBe('建立結果未確認，請先重新整理連線。')
+    expect(wrapper.emitted('open')).toBeUndefined()
+    expect(transport.runtimeCreateHistorySession).toHaveBeenCalledOnce()
+  })
   it.each(['.host-identity', '.connection-summary'])('refreshes a multi-Shell catalog when the user expands using %s', async selector => {
     const { profile, transport, wrapper } = setup(['work-a', 'work-b'])
     await flushPromises()

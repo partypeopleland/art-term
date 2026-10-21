@@ -9,6 +9,8 @@ push v0.1.31 --+--> Windows EXE + ZIP -----------+
 
 一般推送 `main` 不發布版本。在 Actions → Build and release → Run workflow 選擇 `main`，可先建置並從該次執行的 Artifacts 下載；選擇分支試跑不建立 Release。第一次正式發布成功後，可從 repository 的 Releases 下載；若首頁右欄仍未顯示，於首頁 About 的齒輪設定勾選 Releases。
 
+同一 App 主版本的 Android／Windows 發布須維持既有受支援 Host 的基本通訊；新增能力使用向後相容的宣告。破壞相容性的更新須提升主版本並提供遷移說明，詳見[Runtime 契約](../refarch/connections.md#app-與既有-host-的版本相容)。發布檢查須涵蓋既有 Runtime 與缺少選用能力的情境，不以更新 Host 作為每次 App 更新的前置步驟。
+
 ## 首次設定 Android 簽章
 
 在 repository → Settings → Secrets and variables → Actions → New repository secret，設定以下三個 repository secrets。現有腳本使用 PKCS12、alias `art-term`，store 與 key 使用同一密碼。

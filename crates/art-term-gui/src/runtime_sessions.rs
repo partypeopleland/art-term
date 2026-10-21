@@ -228,6 +228,7 @@ impl From<SessionError> for SessionFailure {
         let message = match kind {
             SessionError::Auth => "Shell 認證被拒絕。",
             SessionError::Tls => "WSS 憑證驗證失敗。",
+            SessionError::GatewayUnavailable => "主機入口暫時無法連到服務，請檢查主機服務與轉送設定後重試。",
             SessionError::UpgradeRequired => "主機 runtime 需要升級。",
             SessionError::Replacement => "遠端 runtime 或 Shell 已更換，請重新選擇。",
             SessionError::Missing | SessionError::Exited => "遠端 Shell 已結束或不存在。",
@@ -1362,6 +1363,16 @@ pub async fn gui_runtime_recover(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gateway_failure_serializes_a_fixed_local_message() {
+        let value = serde_json::to_value(SessionFailure::from(SessionError::GatewayUnavailable)).unwrap();
+        assert_eq!(value["kind"], "gatewayUnavailable");
+        assert_eq!(
+            value["message"],
+            "主機入口暫時無法連到服務，請檢查主機服務與轉送設定後重試。"
+        );
+    }
     use art_term_core::openab::profiles::HostProfile;
     fn binding() -> SessionBinding {
         SessionBinding {

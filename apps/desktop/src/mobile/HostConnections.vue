@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { hostErrorText } from '../transport/host-error'
 import type { HostDto, RuntimeHostDto, TargetDto, Transport } from '../transport/types'
 
 const props = defineProps<{
@@ -31,8 +32,8 @@ async function load(): Promise<void> {
       if (result.id === profile.id) group.value = result
       else error.value = '連線設定已變更，請重新整理。'
     }
-  } catch {
-    if (current(ticket, profile)) error.value = '無法讀取連線，點主機名稱重試。'
+  } catch (cause) {
+    if (current(ticket, profile)) error.value = hostErrorText(cause, '無法讀取連線，點主機名稱重試。')
   } finally {
     if (current(ticket, profile)) busy.value = false
   }

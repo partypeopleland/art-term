@@ -109,6 +109,7 @@ pub enum SessionError {
     Tls,
     Transport,
     Timeout,
+    GatewayUnavailable,
     Protocol,
     UpgradeRequired,
     Replacement,
@@ -135,6 +136,7 @@ impl std::fmt::Display for SessionError {
             Self::Tls => "TLS verification failed",
             Self::Transport => "Connection lost",
             Self::Timeout => "Operation timed out",
+            Self::GatewayUnavailable => "Host gateway unavailable",
             Self::Protocol => "Invalid runtime protocol",
             Self::UpgradeRequired => "Runtime upgrade required",
             Self::Replacement => "Runtime or session replaced",
@@ -163,6 +165,7 @@ impl From<ApiError> for SessionError {
             ApiError::Auth => Self::Auth,
             ApiError::Tls => Self::Tls,
             ApiError::Timeout => Self::Timeout,
+            ApiError::GatewayUnavailable => Self::GatewayUnavailable,
             ApiError::Protocol => Self::Protocol,
             ApiError::UpgradeRequired => Self::UpgradeRequired,
             ApiError::Replacement => Self::Replacement,
@@ -752,6 +755,7 @@ fn ws_error(error: tungstenite::Error) -> SessionError {
         tungstenite::Error::Tls(_) => SessionError::Tls,
         tungstenite::Error::Http(response) => match response.status().as_u16() {
             401 | 403 => SessionError::Auth,
+            502 | 504 => SessionError::GatewayUnavailable,
             429 | 503 => SessionError::Capacity,
             _ => SessionError::Protocol,
         },
@@ -929,6 +933,31 @@ impl Recovery {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn gateway_errors_survive_conversion_and_websocket_rejection() {
+        assert_eq!(
+            SessionError::from(ApiError::GatewayUnavailable),
+            SessionError::GatewayUnavailable
+        );
+        assert_eq!(
+            serde_json::to_string(&SessionError::GatewayUnavailable).unwrap(),
+            "\"gatewayUnavailable\""
+        );
+        for (status, expected) in [
+            (502, SessionError::GatewayUnavailable),
+            (504, SessionError::GatewayUnavailable),
+            (503, SessionError::Capacity),
+            (401, SessionError::Auth),
+            (500, SessionError::Protocol),
+        ] {
+            let response = tungstenite::http::Response::builder()
+                .status(status)
+                .body(Some(b"sensitive upstream body".to_vec()))
+                .unwrap();
+            assert_eq!(ws_error(tungstenite::Error::Http(response)), expected);
+        }
+    }
+
     fn profile() -> HostProfile {
         HostProfile {
             id: uuid::Uuid::new_v4().to_string(),

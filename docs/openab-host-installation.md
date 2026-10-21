@@ -88,6 +88,8 @@ tailscale serve status
 bash scripts/init-host.sh --show-info
 ```
 
+驗證必須涵蓋使用端實際使用的 HTTPS 入口，不能只測本機 Runtime。未帶認證時，`/admin/sessions` 預期回傳 `401`；App 測試連線使用原管理憑證，應成功取得清單。若收到 `502`／`504`，核對 Serve 的上游目標及其服務，依 [Host 維護](platforms/linux-host-maintenance.md)排查。這類入口錯誤不代表需要升級 Runtime。移除舊代理前，先確認是否仍有 Serve handler 指向它；不要留下失效入口，也不要覆寫其他服務的路由。
+
 交給使用者的網址須沿用輸出的 `Base URL`，形式如 `https://workstation.example-tailnet.ts.net:8443`。此處為虛構例子；實際交付填入查得的名稱，不以 IP 取代 DNS，也不降低 TLS 驗證。
 
 管理憑證由使用者在自己的互動終端執行以下命令取得，直接填入 App 或自己的密碼管理器。**AI 不執行並收集此輸出，不把憑證帶進聊天、日誌或版本庫。**
