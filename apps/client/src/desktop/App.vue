@@ -16,7 +16,7 @@ import PreviewPanel from '../shared/components/PreviewPanel.vue'
 import PreviewZoom from '../shared/components/PreviewZoom.vue'
 import { useWorkspaceSize } from '../shared/components/workspace-size'
 
-const props = defineProps<{ transport: Transport; terminalFactory?: TerminalFactory; controllerOptions?: ControllerOptions }>()
+const props = withDefaults(defineProps<{ platform?: 'windows' | 'linux'; transport: Transport; terminalFactory?: TerminalFactory; controllerOptions?: ControllerOptions }>(), { platform: 'windows' })
 const controller: AppController = createAppController(props.transport, { ...props.controllerOptions, closeFinishedTabs: true, backgroundConnection: 'keep' })
 defineExpose({ controller })
 const baseFactory = props.terminalFactory ?? createDesktopXtermTerminal
@@ -139,7 +139,7 @@ const statusText = computed(() => !activeTab.value ? '未連線' : activeTab.val
       </section>
       </div>
       <section v-if="page === 'settings'" class="desktop-settings-page" aria-label="全域設定"><ThemeSettings embedded desktop :initial-section="settingsSection" :transport="transport" :hosts="controller.runtimeProfiles.value" @changed="settingsChanged" @picker="transferPicker = $event" /></section>
-      <section v-if="page === 'home'" class="desktop-home-page" aria-label="軟體資訊首頁"><nav class="desktop-section-nav" aria-label="軟體資訊"><span class="desktop-eyebrow">ART-TERM</span><button aria-current="page">軟體資訊與更新</button><button @click="showPage('workspace')">返回工作區</button></nav><div class="desktop-section-content"><AppHomepage platform="windows" /></div></section>
+      <section v-if="page === 'home'" class="desktop-home-page" aria-label="軟體資訊首頁"><nav class="desktop-section-nav" aria-label="軟體資訊"><span class="desktop-eyebrow">ART-TERM</span><button aria-current="page">軟體資訊與更新</button><button @click="showPage('workspace')">返回工作區</button></nav><div class="desktop-section-content"><AppHomepage :platform="props.platform" /></div></section>
     </div>
     <footer class="statusbar"><span class="s-item" :class="activeTab?.status">{{ statusText }}</span><span v-if="activeTab?.remoteSession" class="s-item">{{ activeTab.remoteSession }}</span><span v-if="activeTab?.notice" class="s-item warn">{{ activeTab.notice }}</span><span v-if="controller.uiNotice.value" class="s-item warn">{{ controller.uiNotice.value }}</span><span class="spacer" /><span class="s-item muted">{{ controller.tabs.length }} / 32 分頁</span></footer>
     <PreviewZoom v-if="zoomOpen && page === 'workspace' && activeTab && activeTab.previewVisible && (activeTab.desktopEnabled || activeTab.shot)" :tab="activeTab" :screen-key="`${activeTab.key}:${activeTab.instanceDesktop?.id || 'legacy'}`" mode="windows" @close="zoomOpen = false" />

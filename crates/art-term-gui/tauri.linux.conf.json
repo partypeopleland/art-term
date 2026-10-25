@@ -1,0 +1,20 @@
+{
+  "bundle": {
+    "active": true,
+    "shortDescription": "Remote terminal and desktop client",
+    "category": "Development",
+    "targets": ["deb"],
+    "resources": [],
+    "icon": ["icons/icon.png"],
+    "linux": {
+      "deb": {
+        "depends": ["gnome-keyring | keepassxc"],
+        "recommends": ["fonts-noto-cjk"],
+        "files": {
+          "/usr/share/doc/art-term/LICENSE": "../../LICENSE",
+          "/usr/share/doc/art-term/THIRD-PARTY-NOTICES.md": "../../docs/third-party-notices.md"
+        }
+      }
+    }
+  }
+}

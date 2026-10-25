@@ -4,7 +4,7 @@ import { openPreviewWebUrl } from '../src/shared/terminal/links'
 const { invoke }=vi.hoisted(()=>({invoke:vi.fn(async()=>{})}))
 vi.mock('@tauri-apps/api/core',()=>({invoke}))
 afterEach(()=>{vi.restoreAllMocks();invoke.mockClear()})
-it.each([['windows','gui_open_web_url'],['android','plugin:mobile-history|openUrl']] as const)('uses the %s platform browser command with the unchanged URL',async(platform,command)=>{
+it.each([['windows','gui_open_web_url'],['linux','gui_open_web_url'],['android','plugin:mobile-history|openUrl']] as const)('uses the %s platform browser command with the unchanged URL',async(platform,command)=>{
  const url='https://example.com/中文?q=a%20b#fragment'
  await createNativeWebLinkOpener(platform)(url)
  expect(invoke).toHaveBeenCalledExactlyOnceWith(command,{url})

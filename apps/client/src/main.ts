@@ -19,10 +19,11 @@ async function mountApplication() {
       transport: createMobileTauriTransport(),
       terminalFactory: (el: HTMLElement) => createMobileXtermTerminal(el, createNativeWebLinkOpener('android'))
     }).mount('#app')
-  } else if (platform === 'windows') {
+  } else if (platform === 'windows' || platform === 'linux') {
     createApp(App, {
+      platform,
       transport: createTauriTransport(),
-      terminalFactory: (el: HTMLElement) => createDesktopXtermTerminal(el, createNativeWebLinkOpener('windows'))
+      terminalFactory: (el: HTMLElement) => createDesktopXtermTerminal(el, createNativeWebLinkOpener(platform))
     }).mount('#app')
   } else {
     throw new Error('Unsupported platform')

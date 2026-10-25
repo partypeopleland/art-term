@@ -1,6 +1,6 @@
 # GUI 架構與模組責任
 
-art-term 讓 Windows 與 Android 使用者連接既有 Runtime 的 Shell，並選擇觀看主機的共享桌面。兩平台共用 Vue 介面控制器與 Rust 核心；平台層負責檔案位置、憑證保護和原生操作，共用核心維持遠端連線的身分與恢復規則。
+art-term 讓 Windows、Ubuntu 與 Android 使用者連接既有 Runtime 的 Shell，並選擇觀看主機的共享桌面。三個平台共用 Vue 介面控制器與 Rust 核心；Windows 與 Ubuntu 也共用同一份桌面畫面。平台層負責檔案位置、憑證保護和原生操作，共用核心維持遠端連線的身分與恢復規則。
 
 ## 來源目錄與平台邊界
 
@@ -12,10 +12,11 @@ crates/
   art-term-gui/
     src/
       lib.rs                      Android 原生函式庫入口
-      desktop/main.rs             桌面原生入口，目前支援 Windows
+      desktop/main.rs             Windows 與 Linux 桌面原生入口
       shared/                     共用 Host、session、Screen 與搬移整合
       platform/
         windows/                  DPAPI、Windows 系統瀏覽器
+        linux/                    XDG 路徑、Secret Service、Linux 系統瀏覽器
         android/                  Android IPC 與 operator vault 整合
     gen/android/                  建置工具產生的 Android 工程
   tauri-plugin-mobile-*/          Android 憑證、語音與原生閱讀器
@@ -39,14 +40,14 @@ apps/client/
 
 原生層由桌面入口與 Android 函式庫入口各自註冊模組。`#[path]` 指向共用與平台檔案，維持既有 Rust 模組名稱及呼叫關係。桌面 binary 仍名為 `art-term-gui`，Android 函式庫仍名為 `art_term_mobile`；bundle id、設定檔位置與憑證金鑰身分不因來源目錄搬移而改變。`gen/android` 由既有建置流程準備，不另複製成手工維護的 App。
 
-Ubuntu 桌面版尚未實作。後續可沿用 `desktop/` 畫面與共用核心，再加入 Linux 的憑證保存及系統整合；目前沒有空的 Linux 模組，也沒有額外的 Linux 受控端機制。新增平台仍須遵守共同 Runtime 與 helper 契約。
+Ubuntu 桌面沿用 `desktop/` 畫面、相同 IPC 與 Rust 核心。桌面入口在編譯時選擇 Windows 或 Linux 的平台模組，啟動時先開啟平台憑證儲存，再註冊共用連線狀態。Linux 使用 Secret Service 保存主金鑰，以 AES-256-GCM 保護同一 TOML 的 Host 與 Screen 憑證，設定與 marker 分別放在 XDG config 與 data 目錄。兩個桌面平台共用 HTTP(S) 網址驗證，Windows 使用 ShellExecute，Linux 使用 GIO 開啟系統預設瀏覽器。平台模組不增加 Runtime、helper 或主機安裝項。執行環境與打包見 [Ubuntu](../platforms/linux.md)。
 
 可從 repository 根目錄執行 `git ls-files apps/client/src crates/art-term-gui/src crates/art-term-core/src` 查看受版本管理的實際來源檔。建置、測試與預覽命令使用 `apps/client`，例如 `npm --prefix apps/client run typecheck`；完整流程見[本地建置](../platforms/local-build.md)與[畫面預覽](../platforms/ui-preview.md)。
 
 ## 從畫面到遠端 Shell
 
 ```text
-Windows / Android App                         Runtime Host
+Windows / Ubuntu / Android App                Runtime Host
 +------------------------+                    +---------------------+
 | Vue UI + xterm          |                    | openab-pty          |
 | tabs / input / preview  |                    | admin API / Shell   |
@@ -63,7 +64,7 @@ Windows / Android App                         Runtime Host
 +-------+----------+-----+
         |          |
  connections.toml  platform credential protection
-                   (Windows DPAPI / Android Keystore)
+                   (Windows DPAPI / Linux Secret Service / Android Keystore)
 ```
 
 Vue 管理分類、Shell 選擇、分頁與終端呈現。WebView 透過受存取控制清單（ACL）限制的程序間呼叫（IPC）取得安全資料物件；Runtime 管理憑證、session token 與已保存的 MCP token 留在 native 層；明確配置 AI 工具時，MCP token 經受保護握手送到受控端 adapter 行程記憶體。WebView 沒有 Runtime 外連、憑證讀回或任意遠端命令 API，因此畫面狀態不能直接指定另一個遠端工作。
@@ -78,7 +79,7 @@ Rust 核心讀取唯一 `connections.toml`，透過官方 HTTPS API 列出、建
 
 歷史介面由同一個受控端 helper 提供。原生 viewport 的 `scroll / follow` 控制原工作畫面的閱讀位置，畫面沿既有 PTY 回傳；快照的 `viewport / older / ack / keep / close` 維持原有語意與相容性。共用 Rust 層管理工作身分、能力、通道、輸入排序及回覆驗證；App 只提出中立操作，不自行組合 tmux 指令或操作 socket。
 
-Windows 的 `HostTerminalViewport` 管理捲動事件、保活與生命週期，使用原本的 xterm 呈現所有畫面。Android 的 `HostHistoryWindow` 管理快照、分頁、顯示確認及 1024 行窗口，由原生 View 呈現。共同介面以能力宣告向後相容演進，受控端內部實作保持集中，不另設平台專用 helper 或安裝流程。
+Windows 與 Ubuntu 的 `HostTerminalViewport` 管理捲動事件、保活與生命週期，使用原本的 xterm 呈現所有畫面。Android 的 `HostHistoryWindow` 管理快照、分頁、顯示確認及 1024 行窗口，由原生 View 呈現。共同介面以能力宣告向後相容演進，受控端內部實作保持集中，不另設平台專用 helper 或安裝流程。
 
 ## Android 畫面與原生閱讀器
 
@@ -107,19 +108,19 @@ Android 終端閱讀器是覆蓋在 WebView 終端位置的原生 View，水平�
 
 瀏覽器預覽沿用手機元件，但以獨立入口注入記憶體 transport、假語音與瀏覽器終端；正式入口使用原生 transport、裝置端辨識及原生閱讀器。預覽不接真實 Runtime，不參與 APK 打包，詳見[手機畫面預覽](../platforms/ui-preview.md)。
 
-## Windows 共用工作區與歷史閱讀
+## 桌面共用工作區與歷史閱讀
 
-Windows App 接入同一套分類 Dashboard、全頁 settings、homepage、四主題及 Screen picker，保留 Host 管理、硬體鍵盤與 xterm。設定／首頁遮蓋時終端元件保持掛載並處理輸出，返回後 fit／focus，表單正常輸入不被終端快捷鍵攔截。語音與 Android 原生閱讀／手勢 plugin 不移植。
+Windows 與 Ubuntu App 接入同一套分類 Dashboard、全頁 settings、homepage、四主題及 Screen picker，保留 Host 管理、硬體鍵盤與 xterm。設定／首頁遮蓋時終端元件保持掛載並處理輸出，返回後 fit／focus，表單正常輸入不被終端快捷鍵攔截。語音與 Android 原生閱讀／手勢 plugin 不移植。
 
-Windows 的即時畫面與歷史都使用原本的 xterm 實例。上捲呼叫共同歷史通道的原生 viewport 操作，tmux 沿原 PTY 回傳較早畫面；下捲到底自然接續即時輸出。字型、主題、游標與文字選取維持原終端，沒有另外的閱讀覆蓋層。一般 normal buffer 仍使用 xterm 本機 scrollback；受控工作才使用共同端點的原生閱讀能力。
+兩個桌面平台的即時畫面與歷史都使用原本的 xterm 實例。上捲呼叫共同歷史通道的原生 viewport 操作，tmux 沿原 PTY 回傳較早畫面；下捲到底自然接續即時輸出。字型、主題、游標與文字選取維持原終端，沒有另外的閱讀覆蓋層。一般 normal buffer 仍使用 xterm 本機 scrollback；受控工作才使用共同端點的原生閱讀能力。
 
 ```text
-Windows wheel -> HostTerminalViewport -> shared history channel
+Desktop wheel -> HostTerminalViewport -> shared history channel
                                               | scroll / follow
                                               v
                                          Host helper -> tmux work pane
                                                             |
-Windows xterm <--------------- original PTY -----------------+
+Desktop xterm <--------------- original PTY -----------------+
 
 Android touch -> HostHistoryWindow -> same history channel
                                               | snapshot operations
@@ -128,7 +129,7 @@ Android native View <------------ bounded rows/epoch --------+
 
 共用原生連線層將使用者輸入與 viewport 操作排序，閱讀時先恢復即時位置，再交付輸入；終端自動查詢回覆則直接沿原 PTY 回傳，不改變閱讀位置。控制租期只清理自有閱讀狀態，關閉或程序死亡不終止工作 Shell。
 
-Windows EXE／WebView2 與 Android 原生 View 的操作仍須分別驗證；平台呈現測試不能取代受控端契約測試。
+Windows EXE／WebView2、Ubuntu／WebKitGTK 與 Android 原生 View 的操作仍須分別驗證；平台呈現測試不能取代受控端契約測試。
 
 ## 輸出完成後才確認
 
@@ -188,7 +189,7 @@ App --create--> Runtime work Shell --wrapper--> private tmux work pane
 
 ## 平台層負責什麼
 
-Windows 使用目前使用者的 DPAPI 保護管理憑證，Android 使用既有 operator Keystore；共用 CredentialContext 維持憑證與設定身分的綁定。唯一 TOML 的原子保存、外部修改核對與舊格式相容由 HostStore 負責，見 [設定](connections.md)與 [憑證保存](credential-storage.md)。保留的 bootstrap 模組僅供舊測試相容，正式啟動不呼叫，私有 seed 建置會被拒絕。
+Windows 使用目前使用者的 DPAPI 保護管理憑證，Ubuntu 使用 Secret Service 內的主金鑰，Android 使用既有 operator Keystore；共用 CredentialContext 維持憑證與設定身分的綁定。唯一 TOML 的原子保存、外部修改核對與舊格式相容由 HostStore 負責，見 [設定](connections.md)與 [憑證保存](credential-storage.md)。保留的 bootstrap 模組僅供舊測試相容，正式啟動不呼叫，私有 seed 建置會被拒絕。
 
 Android adapter 處理觸控、輸入法組字、快速鍵與背景生命週期。背景時清除敏感輸入和待送操作，健康終端連線可繼續保留；這些平台差異不改變核心 binding 規則，詳見 [Android](../platforms/android.md)。邊界的決策理由見 [ADR-001](../adr/ADR-001-client-boundaries.md)，尚未實作的候選見 [BDR-002](../bdr/BDR-002-future-directions.md)。
 

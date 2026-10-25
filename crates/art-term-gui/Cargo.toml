@@ -54,3 +54,10 @@ tauri-plugin-mobile-history = { path = "../tauri-plugin-mobile-history" }
 openab-fixture = ["art-term-core/openab-fixture"]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+
+[target.'cfg(target_os = "linux")'.dependencies]
+aes-gcm = { version = "=0.10.3", features = ["zeroize"] }
+getrandom = "=0.3.4"
+gio = "=0.18.4"
+libc = "0.2"
+secret-service = { version = "=5.2.0", default-features = false, features = ["rt-async-io-crypto-rust"] }

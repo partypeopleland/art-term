@@ -1,6 +1,6 @@
 # 憑證、執行時檔案與清理
 
-連線檔案需要能重開使用，也需要避免複製檔案就取得管理憑證。App 因此把可直接讀取的連線 metadata 與平台保護的密文一起存進唯一 TOML，解密能力留在 Windows 使用者環境或 Android Keystore。App identifier、Android user/profile 與自訂路徑會影響實際位置，使用平台 API 為準。
+連線檔案需要能重開使用，也需要避免複製檔案就取得管理憑證。App 因此把可直接讀取的連線 metadata 與平台保護的密文一起存進唯一 TOML，解密能力留在 Windows 使用者環境、Linux 使用者的 Secret Service 或 Android Keystore。App identifier、Android user/profile 與自訂路徑會影響實際位置，使用平台 API 為準。
 
 ```text
 connections.toml
@@ -11,18 +11,20 @@ connections.toml
                     |
        CredentialContext + platform unseal
                     |
-       +------------+--------------------+
-       |                                 |
-Windows current-user DPAPI     Android operator Keystore key
-                                         |
-                              key-used-v1 marker
+       +-------------------+--------------------------+
+       |                   |                          |
+Windows current-user   Linux Secret Service    Android operator
+DPAPI                  master key              Keystore key
+                           |                          |
+                  operator-key-used-v1          key-used-v1
+                  fingerprint marker            marker
 
 unsealed credential -> native memory -> Runtime HTTPS
 session token        -> native memory -> WSS binding
 Screen token         -> native memory -> direct MCP / memory-only adapter
 ```
 
-CredentialContext 是憑證的驗證情境，將密文綁定 schema、id、origin、revision 與 App context；Android 的 AAD 是加密驗證時使用但不另行加密的附加資料。任意更改這些欄位或搬動密文，不能把它變成另一筆有效憑證。session token 是 Runtime 發給該次連線的短期授權，只在 native 記憶體，不持久化或經 IPC 讀回。
+CredentialContext 是憑證的驗證情境，將密文綁定 schema、id、origin、revision 與 App context；Android 與 Linux 的 AAD 是加密驗證時使用但不另行加密的附加資料。任意更改這些欄位或搬動密文，不能把它變成另一筆有效憑證。session token 是 Runtime 發給該次連線的短期授權，只在 native 記憶體，不持久化或經 IPC 讀回。
 
 Android 的 marker 記錄 operator key 曾經使用過，並不保存金鑰。它讓 App 能辨識「全新安裝」與「曾有資料但金鑰遺失」，避免將新的、無法解開舊密文的 key 當成成功復原。資料、憑證、建置產物與 log 不放 docs 或提交 Git。
 
@@ -32,6 +34,9 @@ Android 的 marker 記錄 operator key 曾經使用過，並不保存金鑰。�
 |---|---|
 | Windows exe旁 connections.toml／--config | 唯一 schema 5／6 來源，含 Host／CLI 與獨立 Screens 的 DPAPI 密文；缺檔可正常空清單開啟，需可寫目錄 |
 | Windows `<app_local_data_dir>/runtime-hosts-v1.json` | 0.1.17 舊資料，保留但不再讀取；升級前以舊 App 匯出後在新版匯入 |
+| Linux `$XDG_CONFIG_HOME/<app-id>/connections.toml` | 唯一 schema 5／6 來源，含 AES-256-GCM 保護的 Host／Screen 憑證；XDG 預設根目錄為 `$HOME/.config`，可用 `--config` 指定來源 |
+| Linux `$XDG_DATA_HOME/<app-id>/operator-key-used-v1` | 版本與主金鑰 SHA-256 指紋，不含金鑰；XDG 預設根目錄為 `$HOME/.local/share`，另有短期初始化用的 `operator-key-init.lock` |
+| Linux 使用者 Secret Service 的 persistent default collection | 一把 32-byte 主金鑰，依 App identifier、purpose 與 version 屬性查找，不使用 session collection 或檔案備援 |
 | Android `<noBackupFilesDir>/openab-operator-v1/connections.toml` | 唯一 schema 5／6 來源，含 Host／Screen metadata 與 operator AES-GCM 密文 |
 | Android 同目錄 `runtime-hosts-v1.json` | 舊資料保留但不讀取；不自動遷移 |
 | 同目錄 key-used-v1 | key 已使用的持久 marker，刪全部 Host 仍保留；key 缺失且已有 marker／連線資料時拒絕建立替代 key |
@@ -42,6 +47,8 @@ Android 的 marker 記錄 operator key 曾經使用過，並不保存金鑰。�
 | Android `<app_data_dir>/host-keys.json`、`host-keys.lock` | 歷史 pin 資料，保留但目前 App 不再讀寫 |
 | APK | 不含 connections.toml 預設 asset 或原生嵌入設定 |
 | 使用者在系統選檔器指定的連線 JSON | 含管理憑證時以檔案密碼加密整份內容；不含憑證時為明文設定。自行保管／搬移，不放 Git 或公開文件 |
+
+Linux 的 `<app-id>` 來自編譯後的 Tauri identifier，目前為 `net.missart.artterm.desktop`。`--config` 改變 TOML 位置，但不建立另一個金鑰身分。Linux 專用 App 目錄為 `0700`，設定檔、marker 與初始化鎖為 `0600`。既有檔案須屬於目前使用者，拒絕 symlink、hardlink、非一般檔案與過寬權限；自訂設定檔的父目錄也不得讓其他使用者寫入。
 
 HostStore 使用同目錄暫存檔及原子替換，revision/context保護憑證綁定；讀檔／解密失敗保留原資料。保存／取得 snapshot 前核對載入檔案的指紋；檔案被外部修改或刪除時拒絕過期操作，請重啟。Host revision 與匯入預覽的 store snapshot 核對是程序內 compare-and-swap（CAS，狀態仍符合讀取基線才套用）保護；檔案指紋檢查與原子替換之間沒有跨程序 CAS／鎖，也沒有 watcher，不能支援多個 App 同寫。此版沒有跨App instance鎖或裝置同步，備份前關閉App。
 
@@ -57,9 +64,13 @@ App 原生層解密 token 後直接呼叫 MCP，不經 WebView 讀回。使用�
 
 Android 已有 operator key 時沿用它；初始化若發現 marker 缺少，會補寫 marker。只有 key 缺失，且 key-used marker、connections.toml、舊 runtime-hosts-v1.json 也全部不存在時，才允許建立全新 key。key 缺失但上述任一狀態存在就拒絕建立替代 key；只刪 marker 或 TOML 不能作為修復方式，刪除全部連線也保留 marker。
 
+Linux 在桌面啟動時透過加密 D-Bus session 取得主金鑰，後續 HostStore 操作使用程序記憶體中的金鑰，不在每次保存時重新呼叫 keyring。退出 App 才釋放這份金鑰；執行期間鎖定 keyring 不會撤銷已載入的解密能力。同 UID 的程序仍屬信任邊界。
+
+Linux 只有在找不到 key、沒有 marker，且 TOML 不含任何需解密的 Host 或 Screen 時，才允許建立 key。已有 marker 時，key 缺失、遭替換或重複都會拒絕資料操作。marker 缺少但 key 存在時，須先成功解密所有 Host 與 Screen，才補寫 marker。這也涵蓋只有 Screens 的設定檔，不能因 Host 清單為空就建立新 key。marker 損壞、Secret Service 無法連線、collection 未解鎖或 default 指向 session collection 時同樣拒絕，不寫入明文或替代 key。視窗可保留，但連線設定讀寫失敗，原 TOML 不被覆寫。
+
 DPAPI復原需原Windows帳號／環境；Android的blob與Keystore須配對，單拷blob不是跨機備份。清 data／卸載會破壞 operator 與 SSH identity 連續性，不能當成修復部分遺失／損壞的方法。更新APK必須用原certificate保持app沙盒。Android cloud backup／device-transfer 已禁用；HTTP MCP 僅依原生受限 Tailnet／loopback 規則開放，不因此允許 WebView 任意 cleartext 外連。
 
-跨裝置請使用[連線匯出／匯入](connection-transfer.md)，在新裝置解鎖後重新以本機 DPAPI／Keystore 保存。這條路徑不搬移上述平台金鑰或 session token；檔案密碼不持久化，解密預覽有兩分鐘期限。
+跨裝置請使用[連線匯出／匯入](connection-transfer.md)，在新裝置解鎖後重新以本機 DPAPI、Secret Service 主金鑰或 Keystore 保存。這條路徑不搬移上述平台金鑰或 session token；檔案密碼不持久化，解密預覽有兩分鐘期限。
 
 目前不主動保存 scrollback、密碼或截圖到 log；終端／圖片在記憶體。測試與打包 log 由工具明示建立，分享前去除主機與終端內容。
 
@@ -76,4 +87,4 @@ DPAPI復原需原Windows帳號／環境；Android的blob與Keystore須配對，�
 關閉使用中的程序後才按用途精確清理task-owned暫存／舊build，勿廣泛刪SDK、Owner產物或使用者temp。刪Host profile與關App都不刪遠端Shell；遠端狀態及runtime升級由 [Host 維護](../platforms/linux-host-maintenance.md) 說明。共享桌面／browser可能有私人畫面，不隨client關頁清理。
 ## 附錄：實作與參考
 
-[crates/art-term-core/src/openab/profiles.rs](../../crates/art-term-core/src/openab/profiles.rs)、[crates/art-term-core/src/openab/secret.rs](../../crates/art-term-core/src/openab/secret.rs)、[crates/art-term-gui/src/platform/windows/dpapi.rs](../../crates/art-term-gui/src/platform/windows/dpapi.rs)、[crates/tauri-plugin-mobile-vault/android/src/main/java/net/missart/artterm/vault/MobileVaultPlugin.kt](../../crates/tauri-plugin-mobile-vault/android/src/main/java/net/missart/artterm/vault/MobileVaultPlugin.kt)。
+[crates/art-term-core/src/openab/profiles.rs](../../crates/art-term-core/src/openab/profiles.rs)、[crates/art-term-core/src/openab/secret.rs](../../crates/art-term-core/src/openab/secret.rs)、[Windows DPAPI](../../crates/art-term-gui/src/platform/windows/dpapi.rs)、[Linux 憑證層](../../crates/art-term-gui/src/platform/linux/credentials.rs)、[crates/tauri-plugin-mobile-vault/android/src/main/java/net/missart/artterm/vault/MobileVaultPlugin.kt](../../crates/tauri-plugin-mobile-vault/android/src/main/java/net/missart/artterm/vault/MobileVaultPlugin.kt)。

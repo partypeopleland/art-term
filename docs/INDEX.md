@@ -11,12 +11,13 @@
 | Host／Agent 分類、Shell 選擇、ACK、重連 | [連線與工作生命週期](refarch/sessions.md) |
 | tmux 保存歷史、上捲分頁、主機支援檔 | [終端歷史](refarch/terminal-history.md) |
 | 匯出／匯入、加密格式、新裝置還原 | [連線搬移](refarch/connection-transfer.md) |
-| DPAPI／Keystore、金鑰遺失、保存與清理 | [憑證與檔案](refarch/credential-storage.md) |
+| DPAPI／Keystore／Secret Service、金鑰遺失、保存與清理 | [憑證與檔案](refarch/credential-storage.md) |
 | 獨立 Screens、直接 MCP 預覽與分頁選擇 | [桌面](refarch/desktop.md) |
 | 瀏覽器直接預覽手機 Vue 畫面、假資料與草稿 | [手機畫面預覽](platforms/ui-preview.md) |
 | 受控端 MCP stdio 工具 bridge 與記憶體配置 | [Runtime 桌面 helper](refarch/runtime-desktop.md) |
 | Clone／fork 後本地打包、自有簽章與品牌調整 | [本地建置與自訂版本](platforms/local-build.md) |
 | Windows 工具鏈、操作差異、打包與驗收 | [Windows](platforms/windows.md) |
+| Ubuntu 桌面、Secret Service、設定位置與 Debian 打包 | [Ubuntu](platforms/linux.md) |
 | GitHub Actions、EXE／APK 自動建置、簽章 Secrets 與 Release | [自動發布](platforms/releases.md) |
 | 功能回歸、unit／原生 E2E、測試計畫與本機執行 | [Windows 回歸測試](platforms/windows-regression.md) |
 | 哪些操作受保護、跨平台案例與驗收界線 | [功能測試矩陣](refarch/test-matrix.md) |

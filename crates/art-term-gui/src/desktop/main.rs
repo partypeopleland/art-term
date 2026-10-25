@@ -1,10 +1,13 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-#[path = "../platform/windows/browser.rs"]
+#[path = "../shared/browser.rs"]
 mod browser;
 #[cfg(windows)]
-#[path = "../platform/windows/dpapi.rs"]
-mod dpapi;
+#[path = "../platform/windows/mod.rs"]
+mod desktop_platform;
+#[cfg(target_os = "linux")]
+#[path = "../platform/linux/mod.rs"]
+mod desktop_platform;
 #[path = "../shared/instance_desktops.rs"]
 mod instance_desktops;
 #[path = "../shared/instance_restore.rs"]
@@ -56,7 +59,7 @@ fn error(_err: impl std::fmt::Display) -> GuiError {
 
 #[tauri::command]
 fn gui_platform() -> &'static str {
-    "windows"
+    desktop_platform::NAME
 }
 
 #[tauri::command]
@@ -201,7 +204,7 @@ impl RuntimePreview for NativePreview {
     }
 }
 
-fn initialize() -> anyhow::Result<std::path::PathBuf> {
+fn initialize(application_id: &str) -> anyhow::Result<std::path::PathBuf> {
     let mut config = None;
     let mut args = std::env::args_os().skip(1);
     while let Some(arg) = args.next() {
@@ -222,10 +225,7 @@ fn initialize() -> anyhow::Result<std::path::PathBuf> {
     }
     let config = match config {
         Some(path) => path,
-        None => std::env::current_exe()?
-            .parent()
-            .ok_or_else(|| anyhow::anyhow!("executable directory unavailable"))?
-            .join("connections.toml"),
+        None => desktop_platform::default_config_path(application_id)?,
     };
     Ok(if config.is_absolute() {
         config
@@ -264,14 +264,18 @@ fn gui_open_web_url(url: String) -> Result<(), String> {
 }
 
 fn main() {
-    // Resolve the sole writable source; missing files load as an empty store.
-    let runtime_connections = match initialize() {
+    let context = tauri::generate_context!();
+    let application_id = &context.config().identifier;
+    // Resolve the sole writable source before initializing the desktop runtime.
+    let runtime_connections = match initialize(application_id) {
         Ok(connections) => connections,
         Err(err) => {
             startup_error(&err.to_string());
             return;
         }
     };
+    // Secret Service initialization must run outside the async runtime.
+    let store = desktop_platform::open_store(runtime_connections, application_id);
     let shutting_down = Arc::new(AtomicBool::new(false));
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -280,34 +284,26 @@ fn main() {
         .manage(Arc::new(runtime_transfer::RuntimeTransfer::default()))
         .manage(Arc::new(RuntimeSessions::default()))
         .setup(move |app| {
-            #[cfg(windows)]
-            {
-                // A corrupt operator vault fails closed in Host commands.
-                let store = art_term_core::openab::profiles::HostStore::load(
-                    runtime_connections.clone(),
-                    Arc::new(dpapi::WindowsCredentialCipher),
-                );
+            // A corrupt operator vault fails closed in Host commands.
+            #[cfg(all(debug_assertions, feature = "openab-fixture"))]
+            let fixture_ca = runtime_hosts::load_fixture_ca();
+            #[cfg(all(debug_assertions, feature = "openab-fixture"))]
+            let admin = match &fixture_ca {
+                Ok(Some(ca)) => art_term_core::openab::api::AdminClient::fixture_ca(ca),
+                Ok(None) => art_term_core::openab::api::AdminClient::new(),
+                Err(e) => Err(*e),
+            };
+            #[cfg(not(all(debug_assertions, feature = "openab-fixture")))]
+            let admin = art_term_core::openab::api::AdminClient::new();
+            app.manage(Arc::new(runtime_hosts::RuntimeHosts {
+                store,
+                admin,
+                connections: None,
                 #[cfg(all(debug_assertions, feature = "openab-fixture"))]
-                let fixture_ca = runtime_hosts::load_fixture_ca();
-                #[cfg(all(debug_assertions, feature = "openab-fixture"))]
-                let admin = match &fixture_ca {
-                    Ok(Some(ca)) => art_term_core::openab::api::AdminClient::fixture_ca(ca),
-                    Ok(None) => art_term_core::openab::api::AdminClient::new(),
-                    Err(e) => Err(*e),
-                };
-                #[cfg(not(all(debug_assertions, feature = "openab-fixture")))]
-                let admin = art_term_core::openab::api::AdminClient::new();
-                app.manage(Arc::new(runtime_hosts::RuntimeHosts {
-                    store,
-                    admin,
-                    connections: None,
-                    #[cfg(all(debug_assertions, feature = "openab-fixture"))]
-                    fixture_ca,
-                }));
-                let preview: Arc<dyn RuntimePreview> =
-                    Arc::new(NativePreview { connections: None });
-                app.manage(preview);
-            }
+                fixture_ca,
+            }));
+            let preview: Arc<dyn RuntimePreview> = Arc::new(NativePreview { connections: None });
+            app.manage(preview);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -378,7 +374,7 @@ fn main() {
                 }
             }
         })
-        .build(tauri::generate_context!());
+        .build(context);
     match app {
         Ok(app) => app.run(|_, _| {}),
         Err(err) => startup_error(&err.to_string()),
