@@ -447,7 +447,7 @@ def main():
         result['actualWindowsExe'] = True
         result['exeSha256'] = sha(exe)
         source_files = sorted([*ROOT.glob('crates/art-term-core/src/**/*.rs'), *ROOT.glob('crates/art-term-gui/src/**/*.rs'),
-                               *ROOT.glob('apps/desktop/src/**/*'), *Path(__file__).parent.glob('*')])
+                               *ROOT.glob('apps/client/src/**/*'), *Path(__file__).parent.glob('*')])
         result['sourceHashes'] = {str(p.relative_to(ROOT)).replace('\\', '/'): sha(p) for p in source_files if p.is_file()}
         version = subprocess.run([str(driver), '--version'], capture_output=True, text=True, timeout=10, creationflags=HIDDEN)
         require(version.returncode == 0 and re.search(r'\d+\.\d+\.\d+\.\d+', version.stdout), 'EdgeDriver version unavailable')

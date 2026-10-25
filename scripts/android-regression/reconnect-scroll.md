@@ -33,9 +33,9 @@ target/android-regression/venv/bin/python scripts/android-regression/reconnect_s
 ```bash
 rustup target add x86_64-linux-android
 python3 target/android-tools/prepare-linux.py
-npm --prefix apps/desktop run build
+npm --prefix apps/client run build
 cd crates/art-term-gui
-node ../../apps/desktop/node_modules/@tauri-apps/cli/tauri.js android build --target x86_64 --debug --apk --split-per-abi --ci
+node ../../apps/client/node_modules/@tauri-apps/cli/tauri.js android build --target x86_64 --debug --apk --split-per-abi --ci
 cd ../..
 
 target/android-regression/venv/bin/python scripts/android-regression/reconnect_scroll.py \

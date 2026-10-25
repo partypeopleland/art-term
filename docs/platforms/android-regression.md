@@ -72,7 +72,7 @@ Windows test runner
 
 ## 附錄：實作與參考
 
-[測試入口](../../scripts/test-android-regression.ps1)、[專用 AVD 管理](../../scripts/android-regression/environment.py)、[APK runner](../../scripts/android-regression/run.py)、[Android 憑證與 fixture CA](../../crates/art-term-gui/src/android_operator.rs)。
+[測試入口](../../scripts/test-android-regression.ps1)、[專用 AVD 管理](../../scripts/android-regression/environment.py)、[APK runner](../../scripts/android-regression/run.py)、[Android 憑證與 fixture CA](../../crates/art-term-gui/src/platform/android/android_operator.rs)。
 
 [Android Emulator 命令列](https://developer.android.com/studio/run/emulator-commandline)、[硬體加速](https://developer.android.com/studio/run/emulator-acceleration)、[ADB](https://developer.android.com/tools/adb)、[WebView 遠端除錯](https://developer.chrome.com/docs/devtools/remote-debugging/webviews)。
 

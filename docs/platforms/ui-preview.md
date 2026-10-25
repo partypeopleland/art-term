@@ -7,7 +7,7 @@
 第一次先從 repository 根目錄安裝前端依賴；已安裝者可略過：
 
 ```bash
-npm --prefix apps/desktop ci
+npm --prefix apps/client ci
 ```
 
 在 SSH 中切到 repository 根目錄，執行並保持程序運作：
@@ -38,9 +38,9 @@ npm run preview:ui -- --host 0.0.0.0
 
 情境選單可切換示範連線、空清單和讀取失敗；「重設」還原初始資料。切換畫面或情境也會重設，重新整理不保留新增的連線。四種全站 Theme 及語音操作偏好則保存在瀏覽器本機。
 
-調整既有畫面可直接編輯 `apps/desktop/src/mobile/MobileApp.vue` 或 `apps/desktop/src/components/` 裡的對應元件；儲存後 Vite 會即時更新瀏覽器，正式 APK 也會沿用這份修改。部分 script 修改會使元件重新掛載，回到初始狀態。
+調整既有畫面可直接編輯 `apps/client/src/mobile/MobileApp.vue` 或 `apps/client/src/shared/components/` 裡的對應元件；儲存後 Vite 會即時更新瀏覽器，正式 APK 也會沿用這份修改。部分 script 修改會使元件重新掛載，回到初始狀態。
 
-想自由試新設計時，把畫面選成「我的草稿」，編輯 `apps/desktop/ui-preview/Draft.vue`。這份獨立 Vue 元件可自行改版面、放假資料或加簡單按鈕互動，儲存後立即看到。確認草稿後，再請 AI 整合到正式元件並接上功能；草稿本身不會進入 APK。討論時可提供畫面／情境名稱與想調整的位置，截圖也可以。
+想自由試新設計時，把畫面選成「我的草稿」，編輯 `apps/client/ui-preview/Draft.vue`。這份獨立 Vue 元件可自行改版面、放假資料或加簡單按鈕互動，儲存後立即看到。確認草稿後，再請 AI 整合到正式元件並接上功能；草稿本身不會進入 APK。討論時可提供畫面／情境名稱與想調整的位置，截圖也可以。
 
 ## 假資料與實機界線
 
@@ -63,8 +63,8 @@ npm run preview:ui -> separate Vite root -> browser shell
 normal APK build -> src/main.ts -> real native transport
 ```
 
-預覽使用獨立 Vite 設定與入口，不修改正式 `src/main.ts` 的原生組裝。預覽設定替換 Tauri 與剪貼簿介接；手機元件以可選參數關閉原生閱讀器，改用瀏覽器 xterm，APK 預設仍使用 Android 原生閱讀器。正式 `npm --prefix apps/desktop run build` 不會打包預覽入口或草稿。
+預覽使用獨立 Vite 設定與入口，不修改正式 `src/main.ts` 的原生組裝。預覽設定替換 Tauri 與剪貼簿介接；手機元件以可選參數關閉原生閱讀器，改用瀏覽器 xterm，APK 預設仍使用 Android 原生閱讀器。正式 `npm --prefix apps/client run build` 不會打包預覽入口或草稿。
 
 ## 附錄：實作與參考
 
-[預覽設定](../../apps/desktop/vite.preview.config.ts)、[預覽外框](../../apps/desktop/ui-preview/Preview.vue)、[假資料 transport](../../apps/desktop/ui-preview/transport.ts)、[草稿](../../apps/desktop/ui-preview/Draft.vue)、[Android 實機驗收](android-regression.md)。
+[預覽設定](../../apps/client/vite.preview.config.ts)、[預覽外框](../../apps/client/ui-preview/Preview.vue)、[假資料 transport](../../apps/client/ui-preview/transport.ts)、[草稿](../../apps/client/ui-preview/Draft.vue)、[Android 實機驗收](android-regression.md)。

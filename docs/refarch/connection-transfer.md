@@ -59,4 +59,4 @@ Windows 匯出先在同目錄寫暫存、同步後原子替換。Android 直接�
 檔案成功匯入但不能連線時，先檢查新裝置的網路／Tailnet、Runtime HTTPS 憑證與服務，再確認管理憑證仍有效。匯入不代裝 Runtime、CLI 或桌面服務；初始化見 [Host 指南](../openab-host-setup.md)。平台建置與實機驗收步驟見 [Windows](../platforms/windows.md) 與 [Android](../platforms/android.md)。
 ## 附錄：實作與參考
 
-[crates/art-term-core/src/openab/transfer.rs](../../crates/art-term-core/src/openab/transfer.rs)、[crates/art-term-core/src/openab/profiles.rs](../../crates/art-term-core/src/openab/profiles.rs)、[crates/art-term-gui/src/runtime_transfer.rs](../../crates/art-term-gui/src/runtime_transfer.rs)、[apps/desktop/src/components/RuntimeTransfer.vue](../../apps/desktop/src/components/RuntimeTransfer.vue)。
+[crates/art-term-core/src/openab/transfer.rs](../../crates/art-term-core/src/openab/transfer.rs)、[crates/art-term-core/src/openab/profiles.rs](../../crates/art-term-core/src/openab/profiles.rs)、[crates/art-term-gui/src/shared/runtime_transfer.rs](../../crates/art-term-gui/src/shared/runtime_transfer.rs)、[apps/client/src/shared/components/RuntimeTransfer.vue](../../apps/client/src/shared/components/RuntimeTransfer.vue)。

@@ -2,7 +2,7 @@
 /target/
 /.cargo/
 /dist/
-/apps/desktop/node_modules/
+/apps/client/node_modules/
 /node_modules/
 /.wrangler/
 /nul
@@ -12,8 +12,8 @@
 /crates/tauri-plugin-mobile-vault/android/.tauri/
 /crates/tauri-plugin-mobile-voice/android/build/
 /crates/tauri-plugin-mobile-voice/android/.tauri/
-/apps/desktop/dist/
-/apps/desktop/dist-ui-preview/
+/apps/client/dist/
+/apps/client/dist-ui-preview/
 /crates/art-term-gui/gen/
 
 # Python caches and local environments

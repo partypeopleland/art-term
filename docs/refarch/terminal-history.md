@@ -77,7 +77,7 @@ $HOME/.local/share/art-term/openab-pty/
 在專案 checkout 先建置自帶依賴的 helper；Host 不需要 `node_modules`。建置端需要符合專案要求的 Node 與 npm：
 
 ```bash
-npm --prefix apps/desktop ci
+npm --prefix apps/client ci
 node scripts/openab-runtime/build-tmux-history.mjs --paged
 ```
 
@@ -106,4 +106,4 @@ PY
 
 ## 附錄：實作與參考
 
-[主機 wrapper](../../scripts/openab-runtime/tmux-v2/tmux-shell.py)、[讀頁 helper](../../scripts/openab-runtime/tmux-v2/tmux-history.ts)、[協定驗證](../../crates/art-term-core/src/openab/history.rs)、[App 原生閱讀器](../../apps/desktop/src/components/NativeTerminalReader.vue)、[工作退出與歷史快照回歸](../../scripts/instance-mcp-regression/history_exit.py)。
+[主機 wrapper](../../scripts/openab-runtime/tmux-v2/tmux-shell.py)、[讀頁 helper](../../scripts/openab-runtime/tmux-v2/tmux-history.ts)、[協定驗證](../../crates/art-term-core/src/openab/history.rs)、[App 原生閱讀器](../../apps/client/src/mobile/NativeTerminalReader.vue)、[工作退出與歷史快照回歸](../../scripts/instance-mcp-regression/history_exit.py)。

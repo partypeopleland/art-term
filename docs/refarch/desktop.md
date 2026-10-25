@@ -46,4 +46,4 @@ App 不新增 Codex 專用啟動按鈕，不自動執行 CLI。新 Shell 的 sco
 
 ## 附錄：實作與參考
 
-[預覽元件](../../apps/desktop/src/components/PreviewPanel.vue)、[產品規格](../../.coordination/tasks/instance-mcp-20261015/spec.md)、[憑證保護](credential-storage.md)。
+[預覽元件](../../apps/client/src/shared/components/PreviewPanel.vue)、[憑證保護](credential-storage.md)。

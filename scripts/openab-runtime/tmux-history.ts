@@ -5,8 +5,8 @@ import { homedir } from 'node:os'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { once } from 'node:events'
-import { readStyledLines, type NativeTerminalLine } from '../../apps/desktop/src/terminal/native-buffer'
-import { Terminal } from '../../apps/desktop/node_modules/@xterm/xterm/lib/xterm.js'
+import { readStyledLines, type NativeTerminalLine } from '../../apps/client/src/shared/terminal/native-buffer'
+import { Terminal } from '../../apps/client/node_modules/@xterm/xterm/lib/xterm.js'
 
 const PAGE_BYTES = 256 * 1024, SNAPSHOT_BYTES = 4 * 1024 * 1024
 const LEASE_MS = 120000, CAPTURE_MS = 500

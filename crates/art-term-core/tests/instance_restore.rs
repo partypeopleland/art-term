@@ -1,4 +1,4 @@
-#[path = "../../art-term-gui/src/instance_restore.rs"]
+#[path = "../../art-term-gui/src/shared/instance_restore.rs"]
 mod instance_restore;
 
 use art_term_core::{

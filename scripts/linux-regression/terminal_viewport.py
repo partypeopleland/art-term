@@ -65,7 +65,7 @@ def main():
                 if op==2:data.extend(raw)
                 elif op==8:raise AssertionError('work PTY unexpectedly closed')
             pty.extend(data);return bytes(data)
-        node_projection = """const fs=require('fs');const {Terminal}=require('./apps/desktop/node_modules/@xterm/xterm');const input=JSON.parse(fs.readFileSync(0,'utf8'));const t=new Terminal({cols:80,rows:24,scrollback:5000,allowProposedApi:true});t.write(Buffer.from(input,'base64'),()=>{const b=t.buffer.active;const rows=Array.from({length:24},(_,i)=>{const l=b.getLine(b.viewportY+i),c=l?.getCell(0);return {text:l?.translateToString(true)||'',fg:c?.getFgColor(),fgMode:c?.getFgColorMode()}});console.log(JSON.stringify(rows));t.dispose()});"""
+        node_projection = """const fs=require('fs');const {Terminal}=require('./apps/client/node_modules/@xterm/xterm');const input=JSON.parse(fs.readFileSync(0,'utf8'));const t=new Terminal({cols:80,rows:24,scrollback:5000,allowProposedApi:true});t.write(Buffer.from(input,'base64'),()=>{const b=t.buffer.active;const rows=Array.from({length:24},(_,i)=>{const l=b.getLine(b.viewportY+i),c=l?.getCell(0);return {text:l?.translateToString(true)||'',fg:c?.getFgColor(),fgMode:c?.getFgColorMode()}});console.log(JSON.stringify(rows));t.dispose()});"""
         def rendered():
             raw=subprocess.check_output([str(args.node),'-e',node_projection],input=json.dumps(base64.b64encode(pty).decode()).encode(),cwd=ROOT,timeout=5)
             return json.loads(raw)

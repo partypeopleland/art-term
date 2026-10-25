@@ -82,6 +82,6 @@ ARM64 release原簽章更新、硬體Keystore、各廠牌中文IME／觸控手�
 
 ## 附錄：案例實作
 
-[Windows四流程](../../scripts/windows-regression/run.py)、[Android與跨裝置流程](../../scripts/android-regression/run.py)、[Linux流程](../../scripts/linux-regression/run.py)、[核心協定tests](../../crates/art-term-core/src/openab/tests.rs)、[憑證DPAPI tests](../../crates/art-term-gui/src/dpapi.rs)、[搬移tests](../../crates/art-term-core/src/openab/transfer_tests.rs)、[前端tests](../../apps/desktop/tests)。
+[Windows四流程](../../scripts/windows-regression/run.py)、[Android與跨裝置流程](../../scripts/android-regression/run.py)、[Linux流程](../../scripts/linux-regression/run.py)、[核心協定tests](../../crates/art-term-core/src/openab/tests.rs)、[憑證DPAPI tests](../../crates/art-term-gui/src/platform/windows/dpapi.rs)、[搬移tests](../../crates/art-term-core/src/openab/transfer_tests.rs)、[前端tests](../../apps/client/tests)。
 
 HTTP(S) 網址另由前端 `terminal-links.test.ts`／`web-browser.test.ts`、Windows `browser::tests` 與 Android `web_links.py` 保護：點擊開啟本機瀏覽器、保留 URL、錯誤處理，以及滑動／拖曳／長按不誤開網址。

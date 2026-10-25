@@ -2,6 +2,47 @@
 
 art-term 讓 Windows 與 Android 使用者連接既有 Runtime 的 Shell，並選擇觀看主機的共享桌面。兩平台共用 Vue 介面控制器與 Rust 核心；平台層負責檔案位置、憑證保護和原生操作，共用核心維持遠端連線的身分與恢復規則。
 
+## 來源目錄與平台邊界
+
+Rust 核心、App 的原生整合與 Vue 畫面分開維護。前端放在 `apps/client`，因為同一個前端專案同時建置桌面與 Android App。桌面與手機各有畫面入口，共用的設定、Dashboard、主題、終端與狀態控制只保留一份。
+
+```text
+crates/
+  art-term-core/                  共用連線、設定、認證與工作生命週期
+  art-term-gui/
+    src/
+      lib.rs                      Android 原生函式庫入口
+      desktop/main.rs             桌面原生入口，目前支援 Windows
+      shared/                     共用 Host、session、Screen 與搬移整合
+      platform/
+        windows/                  DPAPI、Windows 系統瀏覽器
+        android/                  Android IPC 與 operator vault 整合
+    gen/android/                  建置工具產生的 Android 工程
+  tauri-plugin-mobile-*/          Android 憑證、語音與原生閱讀器
+
+apps/client/
+  src/
+    main.ts                       選擇平台入口並組合原生 transport
+    shared/
+      components/                 共用畫面元件
+      state/                      共用狀態與控制器
+      terminal/                   終端介面、呈現與歷史控制
+      transport/                  共用通訊契約、剪貼簿與連結操作
+      theme/                      共用主題與配色
+    desktop/                      桌面畫面與桌面 IPC adapter
+    mobile/                       手機畫面、Android IPC、輸入與原生閱讀
+  tests/                          兩種畫面及共用行為測試
+  ui-preview/                     使用假資料的桌面與手機預覽
+```
+
+目錄按責任分組，並不代表每個目錄都能獨立建置。`shared/terminal` 保留現有桌面與手機終端策略，仍會使用 `mobile/` 的觸控捲動；共用 `TerminalPane` 也會依既有條件使用手機原生閱讀器。平台選擇仍集中於入口，這次整理不拆開終端實作，也不改變 IPC 或原生能力的判斷方式。
+
+原生層由桌面入口與 Android 函式庫入口各自註冊模組。`#[path]` 指向共用與平台檔案，維持既有 Rust 模組名稱及呼叫關係。桌面 binary 仍名為 `art-term-gui`，Android 函式庫仍名為 `art_term_mobile`；bundle id、設定檔位置與憑證金鑰身分不因來源目錄搬移而改變。`gen/android` 由既有建置流程準備，不另複製成手工維護的 App。
+
+Ubuntu 桌面版尚未實作。後續可沿用 `desktop/` 畫面與共用核心，再加入 Linux 的憑證保存及系統整合；目前沒有空的 Linux 模組，也沒有額外的 Linux 受控端機制。新增平台仍須遵守共同 Runtime 與 helper 契約。
+
+可從 repository 根目錄執行 `git ls-files apps/client/src crates/art-term-gui/src crates/art-term-core/src` 查看受版本管理的實際來源檔。建置、測試與預覽命令使用 `apps/client`，例如 `npm --prefix apps/client run typecheck`；完整流程見[本地建置](../platforms/local-build.md)與[畫面預覽](../platforms/ui-preview.md)。
+
 ## 從畫面到遠端 Shell
 
 ```text
@@ -153,4 +194,4 @@ Android adapter 處理觸控、輸入法組字、快速鍵與背景生命週期�
 
 ## 附錄：實作與參考
 
-[GUI 註冊與 ACL 入口](../../crates/art-term-gui/src/lib.rs)、[前端控制器](../../apps/desktop/src/state/controller.ts)、[Rust openab 核心](../../crates/art-term-core/src/openab/mod.rs)。
+[GUI 註冊與 ACL 入口](../../crates/art-term-gui/src/lib.rs)、[前端控制器](../../apps/client/src/shared/state/controller.ts)、[Rust openab 核心](../../crates/art-term-core/src/openab/mod.rs)。

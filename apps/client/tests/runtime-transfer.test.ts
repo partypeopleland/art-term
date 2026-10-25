@@ -1,0 +1,192 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
+import RuntimeTransfer from '../src/shared/components/RuntimeTransfer.vue'
+import RuntimeHosts from '../src/shared/components/RuntimeHosts.vue'
+import MobileApp from '../src/mobile/MobileApp.vue'
+import ThemeSettings from '../src/shared/components/ThemeSettings.vue'
+import { ConnectionError } from '../src/shared/transport/types'
+import type { TransferEntry, TransferHostEntry, TransferScreenEntry, TransferChoice, TransferExportInput } from '../src/shared/transport/types'
+import { FakeTerm, FakeTransport, deferred } from './fake'
+const host = { id: 'h', revision: 3, name: 'Fixture', baseUrl: 'https://fixture.test/', credentialPresent: true }
+const entry = (key: string, extra: Partial<TransferHostEntry> = {}): TransferHostEntry => ({ key, name: `Fixture ${key}`, origin: `https://${key}.test/`, metadata: { category: 'agent', desktop_transport: 'runtime-mcp' }, hasCredential: true, matchStatus: 'new', target: null, ...extra })
+const wrappers: ReturnType<typeof mount>[] = []
+function setup(mode: 'import' | 'export' = 'import') {
+  const transport = new FakeTransport([host])
+  const cancel = vi.spyOn(transport, 'transferCancel')
+  const wrapper = mount(RuntimeTransfer, { props: { transport, hosts: [host], mode }, attachTo: document.body })
+  wrappers.push(wrapper)
+  return { wrapper, transport, cancel }
+}
+function visibility(hidden: boolean) {
+  vi.spyOn(document, 'hidden', 'get').mockReturnValue(hidden)
+  vi.spyOn(document, 'visibilityState', 'get').mockReturnValue(hidden ? 'hidden' : 'visible')
+  document.dispatchEvent(new Event('visibilitychange'))
+}
+afterEach(() => { wrappers.splice(0).forEach(w => w.unmount()); vi.restoreAllMocks(); vi.useRealTimers() })
+describe('shared connection transfer', () => {
+  it('exports only chosen revisions with password confirmation and clears fields before native settles', async () => {
+    const { wrapper, transport } = setup('export')
+    const done = deferred<{status:'saved'}>()
+    let captured: TransferExportInput | undefined
+    vi.spyOn(transport, 'transferExport').mockImplementation(input => { captured = structuredClone(input); return done.promise })
+    await wrapper.get('fieldset input[type=checkbox]').setValue(true)
+    await wrapper.get('[data-testid=transfer-password]').setValue(' fictional password ')
+    await wrapper.get('[data-testid=transfer-confirm]').setValue('different')
+    expect(wrapper.get('button[type=submit]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-testid=transfer-confirm]').setValue(' fictional password ')
+    await wrapper.get('form').trigger('submit')
+    expect(captured).toEqual({ selected: [{id:'h',expectedRevision:3}],includeCredentials:true,password:' fictional password ' })
+    expect((wrapper.get('[data-testid=transfer-password]').element as HTMLInputElement).value).toBe('')
+    expect((wrapper.get('[data-testid=transfer-confirm]').element as HTMLInputElement).value).toBe('')
+    done.resolve({status:'saved'}); await flushPromises()
+    expect(wrapper.text()).toContain('連線檔案已儲存')
+  })
+  it('requires public new credentials, defaults duplicates to skip, disables ambiguous entries and sends only selected supplements', async () => {
+    const { wrapper, transport } = setup()
+    vi.spyOn(transport, 'transferPickImport').mockResolvedValue({status:'preview',token:'opaque',entries:[entry('new',{hasCredential:false}),entry('duplicate',{matchStatus:'duplicate',hasCredential:false}),entry('ambiguous',{matchStatus:'ambiguous'})]})
+    let captured: TransferChoice[] | undefined
+    vi.spyOn(transport, 'transferApply').mockImplementation(async (_, choices) => { captured = structuredClone(choices); return {added:1,updated:1,skipped:1,profiles:[]} })
+    await wrapper.get('[data-testid=transfer-pick]').trigger('click'); await flushPromises()
+    expect((wrapper.get('[data-testid=transfer-select-duplicate]').element as HTMLInputElement).checked).toBe(false)
+    expect(wrapper.get('[data-testid=transfer-select-ambiguous]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-testid=transfer-select-new]').setValue(true)
+    expect(wrapper.get('[data-testid=transfer-apply]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-testid=transfer-credential-new]').setValue('fictional')
+    await wrapper.get('[data-testid=transfer-select-new]').setValue(false)
+    await wrapper.get('[data-testid=transfer-select-new]').setValue(true)
+    expect((wrapper.get('[data-testid=transfer-credential-new]').element as HTMLInputElement).value).toBe('')
+    await wrapper.get('[data-testid=transfer-credential-new]').setValue('fictional')
+    await wrapper.get('[data-testid=transfer-select-duplicate]').setValue(true)
+    expect(wrapper.text()).toContain('保留這台裝置現有憑證')
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(captured).toEqual([{key:'new',action:'add',credential:'fictional'},{key:'duplicate',action:'update'},{key:'ambiguous',action:'skip'}])
+    expect(wrapper.find('input[type=password]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('已新增 1 筆、更新 1 筆、略過 1 筆')
+    expect(wrapper.emitted('changed')).toHaveLength(1)
+  })
+  it('clears one-shot unlock on error and discards late unlock after hiding', async () => {
+    const { wrapper, transport, cancel } = setup()
+    vi.spyOn(transport,'transferPickImport').mockResolvedValue({status:'requiresPassword',token:'locked',entries:[]})
+    const unlock = vi.spyOn(transport,'transferUnlock').mockRejectedValueOnce(new ConnectionError('auth','unsafe fictional secret'))
+    await wrapper.get('[data-testid=transfer-pick]').trigger('click'); await flushPromises()
+    await wrapper.get('[data-testid=transfer-password]').setValue('fictional password')
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(wrapper.text()).toContain('密碼錯誤或檔案已損壞')
+    expect(wrapper.text()).not.toContain('unsafe fictional')
+    expect(wrapper.find('input[type=password]').exists()).toBe(false)
+    await wrapper.get('[data-testid=transfer-pick]').trigger('click'); await flushPromises()
+    const done = deferred<Awaited<ReturnType<typeof transport.transferUnlock>>>()
+    unlock.mockReturnValueOnce(done.promise)
+    await wrapper.get('[data-testid=transfer-password]').setValue('another password')
+    await wrapper.get('form').trigger('submit')
+    visibility(true)
+    done.resolve({status:'preview',token:'late',entries:[entry('late')]}); await flushPromises()
+    expect(wrapper.find('.preview-list').exists()).toBe(false)
+    expect(cancel).toHaveBeenCalled()
+  })
+  it('clears the password on Windows focus loss even while the document remains visible', async () => {
+    const {wrapper,transport,cancel} = setup()
+    vi.spyOn(transport,'transferPickImport').mockResolvedValue({status:'requiresPassword',token:'locked',entries:[]})
+    await wrapper.get('[data-testid=transfer-pick]').trigger('click'); await flushPromises()
+    await wrapper.get('[data-testid=transfer-password]').setValue('fictional')
+    window.dispatchEvent(new Event('blur')); await flushPromises()
+    expect(wrapper.find('[data-testid=transfer-password]').exists()).toBe(false)
+    expect(cancel).toHaveBeenCalled()
+  })
+  it('expires preview and clears supplemental input, with native cancellation', async () => {
+    vi.useFakeTimers()
+    const { wrapper, transport, cancel } = setup()
+    vi.spyOn(transport,'transferPickImport').mockResolvedValue({status:'preview',token:'p',entries:[entry('new',{hasCredential:false})]})
+    await wrapper.get('[data-testid=transfer-pick]').trigger('click'); await flushPromises()
+    await wrapper.get('[data-testid=transfer-select-new]').setValue(true)
+    await wrapper.get('[data-testid=transfer-credential-new]').setValue('fictional')
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(wrapper.find('input[type=password]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('預覽已逾時')
+    expect(cancel).toHaveBeenCalled()
+  })
+  it('offers transfer from global settings and preserves Android SAF return while clearing secrets', async () => {
+    vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+    const transport = new FakeTransport([host])
+    const picked = deferred<Awaited<ReturnType<typeof transport.transferPickImport>>>()
+    vi.spyOn(transport,'transferPickImport').mockReturnValue(picked.promise)
+    const wrapper = mount(MobileApp, {props:{transport,terminalFactory:()=>new FakeTerm()}, attachTo:document.body})
+    wrappers.push(wrapper); await flushPromises()
+    const manage = wrapper.find('.settings-trigger')
+    expect(manage.exists()).toBe(true); await manage.trigger('click'); await flushPromises()
+    expect(wrapper.findComponent(RuntimeHosts).exists()).toBe(true)
+    await wrapper.findAll('.transfer-setting-actions button')[0].trigger('click')
+    await wrapper.get('[data-testid=transfer-pick]').trigger('click')
+    visibility(true); await flushPromises()
+    expect(wrapper.findComponent(RuntimeTransfer).exists()).toBe(true)
+    visibility(false)
+    picked.resolve({status:'requiresPassword',token:'locked',entries:[]}); await flushPromises()
+    expect(wrapper.find('[data-testid=transfer-password]').exists()).toBe(true)
+    await wrapper.get('[data-testid=transfer-password]').setValue('fictional')
+    visibility(true); await flushPromises()
+    expect(wrapper.findComponent(RuntimeHosts).exists()).toBe(false)
+  })
+})
+
+const screen = { id: 'h', revision: 4, name: 'Screen fixture', mcpUrl: 'https://screen.fixture.test/mcp', tokenPresent: true }
+const screenEntry = (key: string, hasToken = false): TransferScreenEntry => ({ kind: 'screen', key, name: 'Screen fixture', mcpUrl: screen.mcpUrl, hasToken, matchStatus: 'new', target: null })
+
+it('exports mixed namespaced IDs and Screen revisions without fetching stored tokens', async () => {
+  const transport = Object.assign(new FakeTransport([host]), { instanceDesktops: vi.fn(async () => [screen]) })
+  const exported = vi.spyOn(transport, 'transferExport').mockResolvedValue({ status: 'saved' })
+  const wrapper = mount(RuntimeTransfer, { props: { transport, hosts: [host], mode: 'export' } }); wrappers.push(wrapper)
+  await flushPromises()
+  expect(wrapper.text()).toContain('Computers / Agents'); expect(wrapper.text()).toContain('Screens')
+  await wrapper.get('input[value="host:h"]').setValue(true)
+  await wrapper.get('input[value="screen:h"]').setValue(true)
+  await wrapper.get('[data-testid=transfer-password]').setValue('fictional password')
+  await wrapper.get('[data-testid=transfer-confirm]').setValue('fictional password')
+  await wrapper.get('form').trigger('submit'); await flushPromises()
+  expect(exported).toHaveBeenCalledWith({ selected: [{ id: host.id, expectedRevision: 3 }, { kind: 'screen', id: screen.id, expectedRevision: 4 }], includeCredentials: true, password: 'fictional password' })
+  expect(wrapper.html()).not.toContain('fictional password')
+})
+
+it.each([false, true])('offers Screen-only export through shared settings (desktop=%s)', async desktop => {
+  const transport = Object.assign(new FakeTransport([]), { instanceDesktops: vi.fn(async () => [screen]) })
+  const wrapper = mount(ThemeSettings, { props: { transport, hosts: [], embedded: true, desktop, initialSection: 'connections' } }); wrappers.push(wrapper)
+  await wrapper.get('[data-testid=runtime-export]').trigger('click'); await flushPromises()
+  expect(wrapper.find('input[value="screen:h"]').exists()).toBe(true)
+  expect(wrapper.find('input[value="host:h"]').exists()).toBe(false)
+  await wrapper.get('input[value="screen:h"]').setValue(true)
+  await wrapper.findAll('input[type=checkbox]').find(input => (input.element as HTMLInputElement).value === 'on')!.setValue(false)
+  const exported = vi.spyOn(transport, 'transferExport')
+  await wrapper.get('.runtime-transfer form').trigger('submit'); await flushPromises()
+  expect(exported).toHaveBeenCalledWith({ selected: [{ kind: 'screen', id: 'h', expectedRevision: 4 }], includeCredentials: false, password: '' })
+})
+
+it('requires public Screen token, preserves duplicate token and clears supplements before native apply', async () => {
+  const { wrapper, transport } = setup()
+  vi.spyOn(transport, 'transferPickImport').mockResolvedValue({ status: 'preview', token: 'opaque', entries: [screenEntry('new'), { ...screenEntry('same'), matchStatus: 'duplicate', target: screen }, screenEntry('private', true)] })
+  let captured: TransferChoice[] | undefined
+  vi.spyOn(transport, 'transferApply').mockImplementation(async (_, choices) => { captured = structuredClone(choices); return { added: 2, updated: 1, skipped: 0, profiles: [], desktops: [screen] } })
+  await wrapper.get('[data-testid=transfer-pick]').trigger('click'); await flushPromises()
+  expect((wrapper.get('[data-testid=transfer-select-private]').element as HTMLInputElement).checked).toBe(true)
+  expect((wrapper.get('[data-testid=transfer-select-new]').element as HTMLInputElement).checked).toBe(false)
+  await wrapper.get('[data-testid=transfer-select-new]').setValue(true)
+  await wrapper.get('[data-testid=transfer-select-same]').setValue(true)
+  expect(wrapper.text()).toContain('保留這台裝置現有 Screen token')
+  await wrapper.get('[data-testid=transfer-credential-new]').setValue('non-ascii-秘密')
+  expect(wrapper.get('[data-testid=transfer-apply]').attributes('disabled')).toBeDefined()
+  await wrapper.get('[data-testid=transfer-credential-new]').setValue('fictional-screen-token')
+  await wrapper.get('form').trigger('submit'); await flushPromises()
+  expect(captured).toEqual([{ key: 'new', action: 'add', credential: 'fictional-screen-token' }, { key: 'same', action: 'update' }, { key: 'private', action: 'add' }])
+  expect(wrapper.find('input[type=password]').exists()).toBe(false)
+  expect(wrapper.emitted('changed')).toHaveLength(1)
+})
+
+it('blocks partial export inventory after a Screen read failure until explicit retry succeeds', async () => {
+  const read = vi.fn().mockRejectedValueOnce(new Error('private-backend-detail')).mockResolvedValueOnce([screen])
+  const transport = Object.assign(new FakeTransport([host]), { instanceDesktops: read })
+  const wrapper = mount(RuntimeTransfer, { props: { transport, hosts: [host], mode: 'export' } }); wrappers.push(wrapper)
+  await flushPromises(); expect(wrapper.text()).not.toContain('private-backend-detail')
+  expect(wrapper.get('fieldset').attributes('disabled')).toBeDefined()
+  const retry = wrapper.findAll('button').find(button => button.text() === '重新讀取 Screens')!
+  await retry.trigger('click'); await flushPromises()
+  expect(wrapper.get('fieldset').attributes('disabled')).toBeUndefined()
+  expect(wrapper.find('input[value="screen:h"]').exists()).toBe(true)
+})

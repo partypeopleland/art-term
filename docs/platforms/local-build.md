@@ -33,7 +33,7 @@ npm.cmd --version
 rustc --version
 cargo --version
 rustup show active-toolchain
-npm.cmd --prefix apps/desktop ci
+npm.cmd --prefix apps/client ci
 ```
 
 每一步成功後再繼續。Windows 打包腳本會自行執行 `npm ci`；Android 腳本只執行前端 build，因此首次建置 APK 前仍需上面的依賴安裝。之後更新原始碼、lockfile 有變動時，也要重新執行 `npm ci`。
@@ -150,7 +150,7 @@ Build 完成編譯、ZIP 對齊與簽章；verify 另外核對憑證、package�
 | 想調整的項目 | 需要同步修改的位置與效果 |
 |---|---|
 | App 名稱與視窗標題 | `crates/art-term-gui/tauri.conf.json` 的 `productName`、`app.windows[].title`；Android 設定 `tauri.android.conf.json` 的視窗 title 也要修改（productName 沿用主設定） |
-| 畫面文字 | `apps/desktop/index.html` 的 title、`apps/desktop/src/mobile/MobileApp.vue` 的標題、`apps/desktop/src/main.ts` 的啟動錯誤文字；Windows 包裝 README 文字在 `scripts/package-windows.ps1` |
+| 畫面文字 | `apps/client/index.html` 的 title、`apps/client/src/mobile/MobileApp.vue` 的標題、`apps/client/src/main.ts` 的啟動錯誤文字；Windows 包裝 README 文字在 `scripts/package-windows.ps1` |
 | Windows 識別碼 | 主 Tauri 設定的 `identifier`，例如 `com.example.terminal.desktop` |
 | Android 安裝識別碼 | Android Tauri 設定的 `identifier`，例如 `com.example.terminal`；並將 `scripts/prepare-android.ps1` 內 MainActivity 的 Kotlin `package` 與輸出路徑由 `net/missart/artterm` 改為 `com/example/terminal` |
 | APK 驗證期待值 | `scripts/verify-android.ps1` 的 package metadata 檢查及最後輸出物件的 `applicationId` 必須跟著自己的識別碼更新；保留其他安全檢查 |
@@ -177,9 +177,9 @@ $env:NDK_HOME = $cfg.ndkHome
 $env:PATH = "$env:JAVA_HOME/bin;$env:PATH"
 Push-Location crates/art-term-gui
 try {
-    node ../../apps/desktop/node_modules/@tauri-apps/cli/tauri.js android init --ci --skip-targets-install
+    node ../../apps/client/node_modules/@tauri-apps/cli/tauri.js android init --ci --skip-targets-install
     if ($LASTEXITCODE -ne 0) { throw 'Android init failed.' }
-    node ../../apps/desktop/node_modules/@tauri-apps/cli/tauri.js icon ../../branding/app-icon.png
+    node ../../apps/client/node_modules/@tauri-apps/cli/tauri.js icon ../../branding/app-icon.png
     if ($LASTEXITCODE -ne 0) { throw 'Icon generation failed.' }
 } finally { Pop-Location }
 ```
@@ -197,5 +197,5 @@ try {
 ## 附錄：實作與參考
 
 - 本專案腳本：[Windows package](../../scripts/package-windows.ps1)、[Android setup](../../scripts/setup-android.ps1)、[Android build](../../scripts/build-android.ps1)、[Android prepare](../../scripts/prepare-android.ps1)、[Android sign](../../scripts/sign-android.ps1)、[Android verify](../../scripts/verify-android.ps1)。
-- 設定與依賴：[Windows Tauri](../../crates/art-term-gui/tauri.conf.json)、[Android Tauri](../../crates/art-term-gui/tauri.android.conf.json)、[前端 lockfile](../../apps/desktop/package-lock.json)。
+- 設定與依賴：[Windows Tauri](../../crates/art-term-gui/tauri.conf.json)、[Android Tauri](../../crates/art-term-gui/tauri.android.conf.json)、[前端 lockfile](../../apps/client/package-lock.json)。
 - 官方工具文件：[Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)、[Tauri icons](https://v2.tauri.app/develop/icons/)、[JDK 17 keytool](https://docs.oracle.com/en/java/javase/17/docs/specs/man/keytool.html)、[PowerShell ConvertFrom-SecureString](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/convertfrom-securestring)、[Android app signing](https://developer.android.com/studio/publish/app-signing)。

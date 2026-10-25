@@ -35,7 +35,7 @@ function Invoke-Check {
     Write-Host "[$Name] PASS"
 }
 function Source-Hashes {
-    $files = & git -C $repoRoot ls-files -- apps/desktop crates Cargo.toml Cargo.lock scripts/prepare-android.ps1 scripts/build-paths.ps1
+    $files = & git -C $repoRoot ls-files -- apps/client crates Cargo.toml Cargo.lock scripts/prepare-android.ps1 scripts/build-paths.ps1
     if ($LASTEXITCODE -ne 0) { throw 'Cannot identify APK source inputs.' }
     $hashes = @{}
     foreach ($file in $files) { $hashes[$file] = (Get-FileHash -LiteralPath (Join-Path $repoRoot $file) -Algorithm SHA256).Hash.ToLowerInvariant() }
@@ -74,12 +74,12 @@ try {
         $env:CARGO_ENCODED_RUSTFLAGS = Get-ArtTermBuildRustFlags -ProjectRoot $repoRoot -AndroidTarget 'x86_64'
         $npm = @(Get-Command npm.cmd -CommandType Application)[0].Source
         $node = @(Get-Command node -CommandType Application)[0].Source
-        Invoke-Check 'frontend-build' $npm @('--prefix','apps/desktop','run','build')
+        Invoke-Check 'frontend-build' $npm @('--prefix','apps/client','run','build')
         & "$PSScriptRoot/prepare-android.ps1"
         $sourceHashes = Source-Hashes
         Push-Location (Join-Path $repoRoot 'crates/art-term-gui')
         try {
-            $cli = Join-Path $repoRoot 'apps/desktop/node_modules/@tauri-apps/cli/tauri.js'
+            $cli = Join-Path $repoRoot 'apps/client/node_modules/@tauri-apps/cli/tauri.js'
             try {
                 Invoke-Check 'fixture-apk-build' $node @($cli,'android','build','--target','x86_64','--apk','--ci','--debug','--features','openab-fixture')
             } catch {

@@ -42,7 +42,7 @@ Windows 的即時畫面與歷史使用同一個 xterm 視窗。上捲時，受�
 從 Windows 的 repository 根目錄執行：
 
 ```powershell
-npm.cmd --prefix apps/desktop ci
+npm.cmd --prefix apps/client ci
 .\scripts\test-windows-regression.ps1 -Prepare -EdgeDriverPath C:/tools/msedgedriver.exe
 .\scripts\package-windows.ps1
 ```
@@ -65,4 +65,4 @@ driver 路徑換成實際位置。回歸入口的 suite、失敗判定及隔離�
 
 ## 附錄：實作與參考
 
-[Windows App](../../apps/desktop/src/App.vue)、[打包入口](../../scripts/package-windows.ps1)、[回歸入口](../../scripts/test-windows-regression.ps1)、[工作生命週期](../refarch/sessions.md)。
+[Windows App](../../apps/client/src/desktop/App.vue)、[打包入口](../../scripts/package-windows.ps1)、[回歸入口](../../scripts/test-windows-regression.ps1)、[工作生命週期](../refarch/sessions.md)。

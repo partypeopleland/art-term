@@ -66,7 +66,7 @@ try {
         if (-not $PythonPath) { $PythonPath = Join-Path $artifactRoot 'venv/Scripts/python.exe' }
     }
     if ($Prepare) {
-        Invoke-RegressionCheck 'npm-ci' 'npm.cmd' @('--prefix', 'apps/desktop', 'ci')
+        Invoke-RegressionCheck 'npm-ci' 'npm.cmd' @('--prefix', 'apps/client', 'ci')
         if ($Suite -ne 'Unit') {
             if (-not (Test-Path -LiteralPath $PythonPath -PathType Leaf)) {
                 $defaultPython = Join-Path $artifactRoot 'venv/Scripts/python.exe'
@@ -79,8 +79,8 @@ try {
         }
     }
     if ($Suite -ne 'E2E') {
-        Invoke-RegressionCheck 'frontend-typecheck' 'npm.cmd' @('--prefix', 'apps/desktop', 'run', 'typecheck')
-        Invoke-RegressionCheck 'frontend-tests' 'npm.cmd' @('--prefix', 'apps/desktop', 'test')
+        Invoke-RegressionCheck 'frontend-typecheck' 'npm.cmd' @('--prefix', 'apps/client', 'run', 'typecheck')
+        Invoke-RegressionCheck 'frontend-tests' 'npm.cmd' @('--prefix', 'apps/client', 'test')
         Invoke-RegressionCheck 'rust-format' 'cargo' @('fmt', '--all', '--check')
         Invoke-RegressionCheck 'rust-tests' 'cargo' @('test', '--workspace', '--locked')
         Invoke-RegressionCheck 'gui-check' 'cargo' @('check', '-p', 'art-term-gui', '--locked')
@@ -88,7 +88,7 @@ try {
     if ($Suite -ne 'Unit') {
         $PythonPath = (Resolve-Path -LiteralPath $PythonPath -ErrorAction Stop).Path
         Invoke-RegressionCheck 'python-preflight' $PythonPath @('-c', 'import aiohttp, cryptography, requests, selenium, PIL')
-        Invoke-RegressionCheck 'frontend-build' 'npm.cmd' @('--prefix', 'apps/desktop', 'run', 'build')
+        Invoke-RegressionCheck 'frontend-build' 'npm.cmd' @('--prefix', 'apps/client', 'run', 'build')
         # Debug only: the existing release compile guard forbids openab-fixture.
         Invoke-RegressionCheck 'fixture-build' 'cargo' @('build', '-p', 'art-term-gui', '--locked', '--features', 'openab-fixture')
         Invoke-RegressionCheck 'native-e2e' $PythonPath @(

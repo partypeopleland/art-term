@@ -97,6 +97,6 @@ HTTP `502`／`504` 表示主機入口或轉送服務異常，不作為 Runtime �
 首次準備 Host 見[快速開始](../openab-host-setup.md)，升級見[Host 維護](../platforms/linux-host-maintenance.md)，桌面能力見[桌面預覽](desktop.md)。
 ## 附錄：實作與參考
 
-[crates/art-term-core/src/connections.rs](../../crates/art-term-core/src/connections.rs)、[crates/art-term-core/src/openab/profiles.rs](../../crates/art-term-core/src/openab/profiles.rs)、[crates/art-term-gui/src/runtime_hosts.rs](../../crates/art-term-gui/src/runtime_hosts.rs)。
+[crates/art-term-core/src/connections.rs](../../crates/art-term-core/src/connections.rs)、[crates/art-term-core/src/openab/profiles.rs](../../crates/art-term-core/src/openab/profiles.rs)、[crates/art-term-gui/src/shared/runtime_hosts.rs](../../crates/art-term-gui/src/shared/runtime_hosts.rs)。
 
 [公開空設定](../../config/connections.example.toml)、[虛構設定範例](../../config/examples/connections.toml)。

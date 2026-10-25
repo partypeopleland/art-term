@@ -69,4 +69,4 @@ Android 切到背景時保留健康終端連線，但停止圖片與恢復排程
 
 ## 附錄：實作與參考
 
-[目標選擇](../../apps/desktop/src/state/runtime-entry.ts)、[分頁與輸出控制](../../apps/desktop/src/state/controller.ts)、[核心 session](../../crates/art-term-core/src/openab/session.rs)、[native session gates](../../crates/art-term-gui/src/runtime_sessions.rs)。
+[目標選擇](../../apps/client/src/shared/state/runtime-entry.ts)、[分頁與輸出控制](../../apps/client/src/shared/state/controller.ts)、[核心 session](../../crates/art-term-core/src/openab/session.rs)、[native session gates](../../crates/art-term-gui/src/shared/runtime_sessions.rs)。

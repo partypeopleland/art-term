@@ -4,7 +4,7 @@
   "version": "0.1.32",
   "identifier": "net.missart.artterm.desktop",
   "build": {
-    "frontendDist": "../../apps/desktop/dist",
+    "frontendDist": "../../apps/client/dist",
     "devUrl": "http://localhost:1420"
   },
   "app": {

@@ -19,7 +19,7 @@ $env:CARGO_ENCODED_RUSTFLAGS = Get-ArtTermBuildRustFlags -ProjectRoot $projectRo
 $env:ART_TERM_CONNECTIONS_FILE = $ConfigPath
 try {
     if (-not $SkipBuild) {
-        Push-Location (Join-Path $projectRoot 'apps/desktop')
+        Push-Location (Join-Path $projectRoot 'apps/client')
         try {
             & npm.cmd ci
             if ($LASTEXITCODE -ne 0) { throw 'npm ci failed' }

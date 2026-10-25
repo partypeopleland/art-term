@@ -47,7 +47,7 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-          cache-dependency-path: apps/desktop/package-lock.json
+          cache-dependency-path: apps/client/package-lock.json
 
       - name: Set up Rust
         run: |
@@ -102,7 +102,7 @@ jobs:
       - name: Install Android frontend dependencies
         if: matrix.platform == 'android'
         run: |
-          npm.cmd --prefix apps/desktop ci
+          npm.cmd --prefix apps/client ci
           if ($LASTEXITCODE -ne 0) { throw 'npm ci failed' }
 
       - name: Build and verify signed Android APK

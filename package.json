@@ -2,6 +2,6 @@
   "name": "art-term-workspace",
   "private": true,
   "scripts": {
-    "preview:ui": "npm --prefix apps/desktop run preview:ui --"
+    "preview:ui": "npm --prefix apps/client run preview:ui --"
   }
 }

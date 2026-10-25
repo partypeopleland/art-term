@@ -4,13 +4,13 @@ import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const require = createRequire(path.join(root, 'apps/desktop/package.json'));
+const require = createRequire(path.join(root, 'apps/client/package.json'));
 const paged = process.argv.includes('--paged');
 const outArg = process.argv.slice(2).find(arg => arg !== '--paged');
 const { build } = await import(pathToFileURL(require.resolve('vite')).href);
 await build({
   configFile: false,
-  root: path.join(root, 'apps/desktop'),
+  root: path.join(root, 'apps/client'),
   logLevel: 'warn',
   build: {
     target: 'node22',

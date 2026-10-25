@@ -34,7 +34,7 @@ Vue/controller + test transport     real DPAPI / local TLS-WSS fixtures
 
 ## 準備與執行
 
-若 Owner 正在使用電腦而要求不顯示 App，可先用完全背景的桌面預覽檢查。啟動 `npm.cmd --prefix apps/desktop run preview:ui` 後，以既有 Python 環境執行：
+若 Owner 正在使用電腦而要求不顯示 App，可先用完全背景的桌面預覽檢查。啟動 `npm.cmd --prefix apps/client run preview:ui` 後，以既有 Python 環境執行：
 
 ```powershell
 target/windows-regression/venv/Scripts/python.exe scripts/windows-regression/headless-layout.py --driver target/gui-tools/edge/msedgedriver.exe --output target/windows-regression/layout-check
@@ -141,6 +141,6 @@ Microsoft Edge WebDriver 必須匹配 App 使用的 **WebView2 Runtime**，不�
 
 ## 附錄：實作與參考
 
-[統一測試入口](../../scripts/test-windows-regression.ps1)、[原生 runner](../../scripts/windows-regression/run.py)、[本機協定 fixture](../../scripts/windows-regression/fixture.py)、[Windows DPAPI tests](../../crates/art-term-gui/src/dpapi.rs)、[核心協定 tests](../../crates/art-term-core/src/openab/tests.rs)、[搬移 tests](../../crates/art-term-core/src/openab/transfer_tests.rs)、[截圖 decoder](../../crates/art-term-core/src/openab/screenshot.rs)、[前端 tests](../../apps/desktop/tests)。
+[統一測試入口](../../scripts/test-windows-regression.ps1)、[原生 runner](../../scripts/windows-regression/run.py)、[本機協定 fixture](../../scripts/windows-regression/fixture.py)、[Windows DPAPI tests](../../crates/art-term-gui/src/platform/windows/dpapi.rs)、[核心協定 tests](../../crates/art-term-core/src/openab/tests.rs)、[搬移 tests](../../crates/art-term-core/src/openab/transfer_tests.rs)、[截圖 decoder](../../crates/art-term-core/src/openab/screenshot.rs)、[前端 tests](../../apps/client/tests)。
 
 [Microsoft：以 Edge WebDriver 測試 WebView2](https://learn.microsoft.com/en-us/microsoft-edge/webview2/how-to/webdriver)。

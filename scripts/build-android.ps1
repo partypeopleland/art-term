@@ -29,12 +29,12 @@ $env:NDK_HOME=$cfg.ndkHome
 $env:PATH="$env:JAVA_HOME/bin;$env:ANDROID_HOME/platform-tools;$env:PATH"
 $env:CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS='-C link-arg=-Wl,-z,max-page-size=16384'
 $guiRoot=Join-Path $repoRoot 'crates/art-term-gui'
-$cli=Join-Path $repoRoot 'apps/desktop/node_modules/@tauri-apps/cli/tauri.js'
+$cli=Join-Path $repoRoot 'apps/client/node_modules/@tauri-apps/cli/tauri.js'
 $profile=if($Debug){'debug'}else{'release'}
 $arch=if($Target -eq 'aarch64'){'Arm64'}else{'X86_64'}
 $abi=if($Target -eq 'aarch64'){'arm64-v8a'}else{'x86_64'}
 $nativeTarget=if($Target -eq 'aarch64'){'aarch64-linux-android'}else{'x86_64-linux-android'}
-Push-Location "$repoRoot/apps/desktop"
+Push-Location "$repoRoot/apps/client"
 try { & npm.cmd run build; if($LASTEXITCODE -ne 0){throw 'Frontend build failed'} } finally { Pop-Location }
 Push-Location $guiRoot
 try {

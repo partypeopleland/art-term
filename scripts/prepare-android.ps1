@@ -10,7 +10,7 @@ if ($buildTasks.Count -ne 1) { throw 'Expected exactly one generated Tauri Build
 $buildTaskPath = $buildTasks[0].FullName
 $buildTask = Get-Content -LiteralPath $buildTaskPath -Raw
 $nodePath = (Get-Command node -CommandType Application | Select-Object -First 1).Source.Replace('\', '/')
-$cliPath = (Join-Path $repoRoot 'apps/desktop/node_modules/@tauri-apps/cli/tauri.js').Replace('\', '/')
+$cliPath = (Join-Path $repoRoot 'apps/client/node_modules/@tauri-apps/cli/tauri.js').Replace('\', '/')
 if ($buildTask -notmatch 'val executable = """[^\r\n]+""";' -or $buildTask -notmatch 'val args = listOf\([^\r\n]+\);') {
     throw 'Unexpected Tauri BuildTask template; cannot configure the CLI callback safely'
 }

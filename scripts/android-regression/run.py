@@ -399,7 +399,7 @@ def main():
     try:
         apk = Path(args.apk).resolve(strict=True)
         result['apkSha256'] = sha(apk)
-        source = sorted([*ROOT.glob('crates/art-term-core/src/**/*.rs'), *ROOT.glob('crates/art-term-gui/src/**/*.rs'), *ROOT.glob('apps/desktop/src/**/*'), *Path(__file__).parent.glob('*'),
+        source = sorted([*ROOT.glob('crates/art-term-core/src/**/*.rs'), *ROOT.glob('crates/art-term-gui/src/**/*.rs'), *ROOT.glob('apps/client/src/**/*'), *Path(__file__).parent.glob('*'),
                          *ROOT.glob('scripts/windows-regression/*'), ROOT/'scripts/test-android-regression.ps1',ROOT/'scripts/test-windows-regression.ps1'])
         result['sourceHashes'] = {str(p.relative_to(ROOT)).replace('\\','/'): sha(p) for p in source if p.is_file()}
         device = Device(args.adb, args.serial, args.owner_manifest)
