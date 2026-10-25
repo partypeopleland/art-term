@@ -2,7 +2,7 @@
 
 Windows 版同步 Android 的非平台專屬功能：分類主畫面、全頁設定、四種 Theme、版本與更新紀錄、獨立 Screens 及工作 Shell 的 MCP 選擇。Windows 保留硬體鍵盤、xterm、滑鼠與多分頁；語音留待下一階段，Android 原生閱讀器、觸控滑動與 IME 平台層不移植。
 
-Windows 專屬開發、建置與 GUI 檢查在 Windows 電腦執行；本輪接續 `feat/windows-mobile-parity` 的原生 xterm 修正，保留既有桌面 UI。Owner 授權 AI 完成基本驗收及必要審查後 commit／push 此開發分支，不需再等待 Owner 才提交；不合 main、不 tag、不發布。新版 Windows、真 Codex 與作業系統中文候選選字仍須分別有實際驗證，不能由型別、DOM 或共用核心測試推定。
+Windows 專屬開發、建置與 GUI 檢查在 Windows 電腦執行，共用功能沿用相同的 Rust 核心與受控端契約。每次建置與驗收須核對來源提交、套件 manifest 與 hash。真 Codex 與作業系統中文候選選字仍須分別有實際驗證，不能由型別、DOM 或共用核心測試推定。
 
 ```text
 Windows App
@@ -61,7 +61,7 @@ driver 路徑換成實際位置。回歸入口的 suite、失敗判定及隔離�
 
 本機 fixture 能保護真 IPC、DPAPI 及畫面整合，仍不能代替正式 Runtime／Tailnet／TLS、現場 MCP 或真 AI CLI。接續 AI 應回報 source commit、工具版本、命令與 exit code、result／log 路徑、EXE manifest／hash，明確分開 PASS／FAIL／NOT_RUN。保留既有 App、連線及遠端工作，不以清除資料排錯。
 
-本輪由 AI 完成基本驗收及必要審查後提交／推送開發分支，並保留臨時 `WINDOWS_HANDOFF.md` 的結果與限制；不新增正式版號／release note、不建 APK、不合 main、不發布。Owner 的真 Codex／中文輸入／捲動使用回饋另列，不能把 AI 基本檢查寫成 Owner 已驗收。
+檢查結果、套件來源與未驗證項目記錄於對應 Issue。進行中的臨時交接檔在驗收並合併後移除，持續適用的操作與限制整理到正式主題文件。使用者實機回饋與 AI 基本檢查分開記錄；合併與正式發布依各自門檻處理，不能把 AI 基本檢查寫成使用者已驗收。
 
 ## 附錄：實作與參考
 
