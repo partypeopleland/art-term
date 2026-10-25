@@ -614,10 +614,16 @@ mod tests {
     async fn screen_token_preview_is_sensitive_without_hosts() {
         let dir = tempfile::tempdir().unwrap();
         let store = HostStore::load(dir.path().join("connections.toml"), Arc::new(Cipher)).unwrap();
-        let preview = store.preview_import(transfer::Payload {
-            entries: Vec::new(),
-            desktops: vec![transfer::ScreenEntry { name: "Screen".into(), mcp_url: "https://screen.test/mcp".into(), token: Some(Secret::new("fictional-screen-secret".into()).unwrap()) }],
-        }).unwrap();
+        let preview = store
+            .preview_import(transfer::Payload {
+                entries: Vec::new(),
+                desktops: vec![transfer::ScreenEntry {
+                    name: "Screen".into(),
+                    mcp_url: "https://screen.test/mcp".into(),
+                    token: Some(Secret::new("fictional-screen-secret".into()).unwrap()),
+                }],
+            })
+            .unwrap();
         let json = serde_json::to_string(&preview.entries).unwrap();
         assert!(json.contains("hasToken"));
         assert!(!json.contains("fictional-screen-secret"));
@@ -625,7 +631,13 @@ mod tests {
         let (generation, lease) = state.begin("main").unwrap_or_else(|_| panic!("begin"));
         state.phase("main", generation, Phase::Picker).unwrap();
         state.background("main", false);
-        assert!(state.install("main", generation, Pending::Preview("opaque".into(), preview)).is_err());
+        assert!(state
+            .install(
+                "main",
+                generation,
+                Pending::Preview("opaque".into(), preview)
+            )
+            .is_err());
         drop(lease);
     }
     #[test]

@@ -13,8 +13,8 @@ use art_term_core::{
     runtime_preview::{DesktopRoute, RuntimeMapping},
     session_io::{DesktopStateDto, HostDto, ScreenshotDto, SessionDto, TargetDto},
 };
-use serde::Serialize;
 use base64::{engine::general_purpose::STANDARD, Engine};
+use serde::Serialize;
 use std::{
     collections::{HashMap, HashSet},
     pin::Pin,
@@ -104,7 +104,9 @@ impl Drop for OpeningHistory {
     fn drop(&mut self) {
         if self.armed {
             if let (Ok(key), Ok(mut active)) = (self.registered.lock(), self.active.lock()) {
-                if let Some(key) = key.as_ref() { active.remove(key); }
+                if let Some(key) = key.as_ref() {
+                    active.remove(key);
+                }
             }
         }
     }
@@ -117,22 +119,31 @@ struct HistoryOwnership {
 impl ShellOwnership for HistoryOwnership {
     fn mark(&self, name: &str) -> Result<(), SessionError> {
         let key = format!("{}:{name}", self.owned.profile_id);
-        self.active.lock().map_err(|_| SessionError::Internal)?.insert(key.clone());
+        self.active
+            .lock()
+            .map_err(|_| SessionError::Internal)?
+            .insert(key.clone());
         *self.registered.lock().map_err(|_| SessionError::Internal)? = Some(key.clone());
         if let Err(error) = self.owned.mark(name) {
-            if let Ok(mut active) = self.active.lock() { active.remove(&key); }
+            if let Ok(mut active) = self.active.lock() {
+                active.remove(&key);
+            }
             return Err(error);
         }
         Ok(())
     }
     fn unmark(&self, name: &str) {
         self.owned.unmark(name);
-        if let Ok(mut active) = self.active.lock() { active.remove(&format!("{}:{name}", self.owned.profile_id)); }
+        if let Ok(mut active) = self.active.lock() {
+            active.remove(&format!("{}:{name}", self.owned.profile_id));
+        }
     }
 }
 impl Drop for HistorySlot {
     fn drop(&mut self) {
-        if let Ok(mut active) = self.active.lock() { active.remove(&self.active_key); }
+        if let Ok(mut active) = self.active.lock() {
+            active.remove(&self.active_key);
+        }
     }
 }
 /// Live runtime session connection state. Opaque outside this module —
@@ -185,7 +196,10 @@ struct OwnedShells {
     profile_id: String,
 }
 fn shell_label(name: &str) -> String {
-    match (history::HistoryVersion::from_name(name), history::key_from_name(name)) {
+    match (
+        history::HistoryVersion::from_name(name),
+        history::key_from_name(name),
+    ) {
         (Some(history::HistoryVersion::Paged), Some(key)) => format!("s-{}", &key[..8]),
         _ => name.to_owned(),
     }
@@ -228,7 +242,9 @@ impl From<SessionError> for SessionFailure {
         let message = match kind {
             SessionError::Auth => "Shell 認證被拒絕。",
             SessionError::Tls => "WSS 憑證驗證失敗。",
-            SessionError::GatewayUnavailable => "主機入口暫時無法連到服務，請檢查主機服務與轉送設定後重試。",
+            SessionError::GatewayUnavailable => {
+                "主機入口暫時無法連到服務，請檢查主機服務與轉送設定後重試。"
+            }
             SessionError::UpgradeRequired => "主機 runtime 需要升級。",
             SessionError::Replacement => "遠端 runtime 或 Shell 已更換，請重新選擇。",
             SessionError::Missing | SessionError::Exited => "遠端 Shell 已結束或不存在。",
@@ -411,8 +427,10 @@ impl RuntimeSessions {
         handle.resize(rows, cols)?;
         let history_binding = handle.binding().clone();
         if target.history_bootstrap.swap(false, Ordering::SeqCst) {
-            let key = history::key_from_name(&history_binding.name).ok_or(SessionError::Protocol)?;
-            let version = history::HistoryVersion::from_name(&history_binding.name).ok_or(SessionError::Protocol)?;
+            let key =
+                history::key_from_name(&history_binding.name).ok_or(SessionError::Protocol)?;
+            let version = history::HistoryVersion::from_name(&history_binding.name)
+                .ok_or(SessionError::Protocol)?;
             // Only a target minted by the explicit new-history action can
             // reach this once. Relist/recovery never repeats shell input.
             handle.write(version.bootstrap_command(&key)?.as_bytes())?;
@@ -488,9 +506,18 @@ impl RuntimeSessions {
             .map_err(Into::into)
     }
     fn direct_write(connection: &Connection, bytes: &[u8]) -> Reply<()> {
-        if connection.closed.load(Ordering::SeqCst) { return Err(SessionError::Cancelled.into()); }
-        let guard = connection.handle.lock().map_err(|_| SessionError::Internal)?;
-        guard.as_ref().ok_or(SessionError::Busy)?.write(bytes).map_err(Into::into)
+        if connection.closed.load(Ordering::SeqCst) {
+            return Err(SessionError::Cancelled.into());
+        }
+        let guard = connection
+            .handle
+            .lock()
+            .map_err(|_| SessionError::Internal)?;
+        guard
+            .as_ref()
+            .ok_or(SessionError::Busy)?
+            .write(bytes)
+            .map_err(Into::into)
     }
     pub async fn write(&self, id: &str, bytes: &[u8], terminal_reply: bool) -> Reply<()> {
         let connection = self.connection(id)?;
@@ -501,13 +528,27 @@ impl RuntimeSessions {
         }
         let history_generation = *connection.history_cancel.borrow();
         let _interaction = connection.native_interaction.lock().await;
-        if *connection.history_cancel.borrow() != history_generation { return Err(SessionError::Cancelled.into()); }
-        if connection.closed.load(Ordering::SeqCst) { return Err(SessionError::Cancelled.into()); }
-        if connection.native_uncertain.load(Ordering::SeqCst) { return Err(SessionError::InputUncertain.into()); }
-        if !connection.native_held.load(Ordering::SeqCst) { return Self::direct_write(&connection, bytes); }
-        if bytes.len() > 1024 * 1024 { return Err(SessionError::Capacity.into()); }
+        if *connection.history_cancel.borrow() != history_generation {
+            return Err(SessionError::Cancelled.into());
+        }
+        if connection.closed.load(Ordering::SeqCst) {
+            return Err(SessionError::Cancelled.into());
+        }
+        if connection.native_uncertain.load(Ordering::SeqCst) {
+            return Err(SessionError::InputUncertain.into());
+        }
+        if !connection.native_held.load(Ordering::SeqCst) {
+            return Self::direct_write(&connection, bytes);
+        }
+        if bytes.len() > 1024 * 1024 {
+            return Err(SessionError::Capacity.into());
+        }
         let mut slot = connection.history.lock().await;
-        if connection.closed.load(Ordering::SeqCst) || *connection.history_cancel.borrow() != history_generation { return Err(SessionError::Cancelled.into()); }
+        if connection.closed.load(Ordering::SeqCst)
+            || *connection.history_cancel.borrow() != history_generation
+        {
+            return Err(SessionError::Cancelled.into());
+        }
         let channel = &mut slot.as_mut().ok_or(SessionError::StateChanged)?.channel;
         let mut cancel = connection.cancel.subscribe();
         let mut history_cancel = connection.history_cancel.subscribe();
@@ -519,16 +560,26 @@ impl RuntimeSessions {
             result = channel.request(HistoryRequest::Follow { input: Some(STANDARD.encode(&bytes[..length])) }) => result,
         };
         match result {
-            Ok(HistoryReply::View { held: false, offset: 0, available: true, .. }) => {
+            Ok(HistoryReply::View {
+                held: false,
+                offset: 0,
+                available: true,
+                ..
+            }) => {
                 connection.native_held.store(false, Ordering::SeqCst);
                 connection.native_uncertain.store(false, Ordering::SeqCst);
                 // Long CLI commands still remain one ordered interaction; no second sender.
-                if length < bytes.len() { Self::direct_write(&connection, &bytes[length..])?; }
+                if length < bytes.len() {
+                    Self::direct_write(&connection, &bytes[length..])?;
+                }
                 Ok(())
             }
             _ => {
                 if let Some(mut owned) = slot.take() {
-                    if owned.channel.close().await { connection.native_held.store(false, Ordering::SeqCst); connection.native_uncertain.store(false, Ordering::SeqCst); }
+                    if owned.channel.close().await {
+                        connection.native_held.store(false, Ordering::SeqCst);
+                        connection.native_uncertain.store(false, Ordering::SeqCst);
+                    }
                 }
                 // Atomic remote send may already have happened. No retry or original-PTY fallback.
                 Err(SessionError::InputUncertain.into())
@@ -553,10 +604,15 @@ impl RuntimeSessions {
     /// list so the user can re-select; minting requires explicit open.
     pub async fn recover(&self, hosts: &RuntimeHosts, id: &str) -> Reply<()> {
         let connection = self.connection(id)?;
-        connection.history_cancel.send_modify(|n| *n = n.wrapping_add(1));
+        connection
+            .history_cancel
+            .send_modify(|n| *n = n.wrapping_add(1));
         let _interaction = connection.native_interaction.lock().await;
         if let Some(mut owned) = connection.history.lock().await.take() {
-            if owned.channel.close().await { connection.native_held.store(false, Ordering::SeqCst); connection.native_uncertain.store(false, Ordering::SeqCst); }
+            if owned.channel.close().await {
+                connection.native_held.store(false, Ordering::SeqCst);
+                connection.native_uncertain.store(false, Ordering::SeqCst);
+            }
         }
         let mut old = connection
             .handle
@@ -654,17 +710,34 @@ impl RuntimeSessions {
         }
         let _operation = conn.desktop_operation.lock().await;
         anyhow::ensure!(!conn.closed.load(Ordering::SeqCst), "session closed");
-        let has_direct_selection = conn.selected_desktop.lock().map_err(|_| anyhow::anyhow!("桌面狀態不可用"))?.is_some();
+        let has_direct_selection = conn
+            .selected_desktop
+            .lock()
+            .map_err(|_| anyhow::anyhow!("桌面狀態不可用"))?
+            .is_some();
         if has_direct_selection {
             if enabled {
                 let epoch = *conn.preview_cancel.borrow();
                 let snapshot = Self::direct_snapshot(hosts, &conn)?;
                 let selected = snapshot.profile.clone();
                 art_term_core::instance_mcp::screenshot(snapshot).await?;
-                anyhow::ensure!(!conn.closed.load(Ordering::SeqCst) && *conn.preview_cancel.borrow() == epoch && Self::direct_snapshot(hosts, &conn)?.profile == selected, "桌面已切換");
+                anyhow::ensure!(
+                    !conn.closed.load(Ordering::SeqCst)
+                        && *conn.preview_cancel.borrow() == epoch
+                        && Self::direct_snapshot(hosts, &conn)?.profile == selected,
+                    "桌面已切換"
+                );
             }
             conn.desktop_enabled.store(enabled, Ordering::SeqCst);
-            return Ok(DesktopStateDto { enabled, message: if enabled { "App 直接預覽已啟用" } else { "預覽已停止；桌面工具保留" }.into() });
+            return Ok(DesktopStateDto {
+                enabled,
+                message: if enabled {
+                    "App 直接預覽已啟用"
+                } else {
+                    "預覽已停止；桌面工具保留"
+                }
+                .into(),
+            });
         }
         let route = conn
             .desktop_route
@@ -708,7 +781,11 @@ impl RuntimeSessions {
             .try_lock()
             .map_err(|_| anyhow::anyhow!("screenshot already in progress"))?;
         anyhow::ensure!(!conn.closed.load(Ordering::SeqCst), "session closed");
-        let has_direct_selection = conn.selected_desktop.lock().map_err(|_| anyhow::anyhow!("桌面狀態不可用"))?.is_some();
+        let has_direct_selection = conn
+            .selected_desktop
+            .lock()
+            .map_err(|_| anyhow::anyhow!("桌面狀態不可用"))?
+            .is_some();
         if has_direct_selection {
             return Self::instance_screenshot(hosts, &conn).await;
         }
@@ -868,13 +945,28 @@ impl RuntimeSessions {
                 .unwrap_or(0),
         })
     }
-    pub async fn history_request(&self, hosts: &RuntimeHosts, id: &str, request: HistoryRequest) -> Reply<HistoryReply> {
+    pub async fn history_request(
+        &self,
+        hosts: &RuntimeHosts,
+        id: &str,
+        request: HistoryRequest,
+    ) -> Reply<HistoryReply> {
         let conn = self.connection(id)?;
-        let Some(binding) = conn.history_binding.as_ref() else { return Ok(HistoryReply::Unsupported) };
-        let Some(key) = history::key_from_name(&binding.name) else { return Ok(HistoryReply::Unsupported) };
-        let version = history::HistoryVersion::from_name(&binding.name).ok_or(SessionError::Protocol)?;
-        if matches!(request, HistoryRequest::Follow { input: Some(_) }) { return Err(SessionError::Protocol.into()); }
-        let native = matches!(request, HistoryRequest::Scroll { .. } | HistoryRequest::Follow { .. });
+        let Some(binding) = conn.history_binding.as_ref() else {
+            return Ok(HistoryReply::Unsupported);
+        };
+        let Some(key) = history::key_from_name(&binding.name) else {
+            return Ok(HistoryReply::Unsupported);
+        };
+        let version =
+            history::HistoryVersion::from_name(&binding.name).ok_or(SessionError::Protocol)?;
+        if matches!(request, HistoryRequest::Follow { input: Some(_) }) {
+            return Err(SessionError::Protocol.into());
+        }
+        let native = matches!(
+            request,
+            HistoryRequest::Scroll { .. } | HistoryRequest::Follow { .. }
+        );
         let closing_history = matches!(request, HistoryRequest::Close);
         let was_uncertain = conn.native_uncertain.load(Ordering::SeqCst);
         if native {
@@ -882,28 +974,71 @@ impl RuntimeSessions {
             conn.native_uncertain.store(true, Ordering::SeqCst);
             conn.native_enabled.store(true, Ordering::SeqCst);
         }
-        if closing_history { conn.history_cancel.send_modify(|n| *n = n.wrapping_add(1)); }
+        if closing_history {
+            conn.history_cancel.send_modify(|n| *n = n.wrapping_add(1));
+        }
         let history_generation = *conn.history_cancel.borrow();
-        let _interaction = if native || closing_history || conn.native_enabled.load(Ordering::SeqCst) { Some(conn.native_interaction.lock().await) } else { None };
-        if *conn.history_cancel.borrow() != history_generation { return Err(SessionError::Cancelled.into()); }
-        let mut slot = if closing_history { conn.history.lock().await } else { conn.history.try_lock().map_err(|_| SessionError::Busy)? };
+        let _interaction =
+            if native || closing_history || conn.native_enabled.load(Ordering::SeqCst) {
+                Some(conn.native_interaction.lock().await)
+            } else {
+                None
+            };
+        if *conn.history_cancel.borrow() != history_generation {
+            return Err(SessionError::Cancelled.into());
+        }
+        let mut slot = if closing_history {
+            conn.history.lock().await
+        } else {
+            conn.history.try_lock().map_err(|_| SessionError::Busy)?
+        };
         if closing_history {
             if let Some(mut owned) = slot.take() {
-                if owned.channel.close().await { conn.native_held.store(false, Ordering::SeqCst); conn.native_uncertain.store(false, Ordering::SeqCst); }
+                if owned.channel.close().await {
+                    conn.native_held.store(false, Ordering::SeqCst);
+                    conn.native_uncertain.store(false, Ordering::SeqCst);
+                }
             }
             return Ok(HistoryReply::Unsupported);
         }
-        if conn.closed.load(Ordering::SeqCst) { return Err(SessionError::Cancelled.into()) }
-        if slot.is_none() && !matches!(request, HistoryRequest::Viewport | HistoryRequest::Scroll { .. } | HistoryRequest::Follow { .. }) {
-            return Ok(HistoryReply::Error { error: "expired".into() });
+        if conn.closed.load(Ordering::SeqCst) {
+            return Err(SessionError::Cancelled.into());
+        }
+        if slot.is_none()
+            && !matches!(
+                request,
+                HistoryRequest::Viewport
+                    | HistoryRequest::Scroll { .. }
+                    | HistoryRequest::Follow { .. }
+            )
+        {
+            return Ok(HistoryReply::Error {
+                error: "expired".into(),
+            });
         }
         // The frozen profile stays available while recovery temporarily takes
         // the work handle. Such a pause is retryable, never a new binding.
-        if conn.handle.lock().map_err(|_| SessionError::Internal)?.is_none() { return Err(SessionError::Busy.into()) }
+        if conn
+            .handle
+            .lock()
+            .map_err(|_| SessionError::Internal)?
+            .is_none()
+        {
+            return Err(SessionError::Busy.into());
+        }
         let store = hosts.store().map_err(SessionError::from)?;
-        if !store.is_current(&binding.profile).map_err(SessionError::from)? { return Err(SessionError::StateChanged.into()) }
-        let snapshot = store.snapshot(&binding.profile.id).map_err(SessionError::from)?;
-        if snapshot.profile != binding.profile { return Err(SessionError::StateChanged.into()) }
+        if !store
+            .is_current(&binding.profile)
+            .map_err(SessionError::from)?
+        {
+            return Err(SessionError::StateChanged.into());
+        }
+        let snapshot = store
+            .snapshot(&binding.profile.id)
+            .map_err(SessionError::from)?;
+        if snapshot.profile != binding.profile {
+            return Err(SessionError::StateChanged.into());
+        }
         let mut cancel = conn.cancel.subscribe();
         let mut history_cancel = conn.history_cancel.subscribe();
         let generation = conn.next_generation.load(Ordering::SeqCst);
@@ -911,54 +1046,140 @@ impl RuntimeSessions {
             if slot.is_none() {
                 let host_key = ownership_key(&binding.profile);
                 let semaphore = {
-                    let mut slots = self.history_slots.lock().map_err(|_| SessionError::Internal)?;
-                    if slots.len() >= 512 && !slots.contains_key(&host_key) { return Err(SessionError::Capacity) }
-                    slots.entry(host_key.clone()).or_insert_with(|| Arc::new(tokio::sync::Semaphore::new(2))).clone()
+                    let mut slots = self
+                        .history_slots
+                        .lock()
+                        .map_err(|_| SessionError::Internal)?;
+                    if slots.len() >= 512 && !slots.contains_key(&host_key) {
+                        return Err(SessionError::Capacity);
+                    }
+                    slots
+                        .entry(host_key.clone())
+                        .or_insert_with(|| Arc::new(tokio::sync::Semaphore::new(2)))
+                        .clone()
                 };
-                let permit = semaphore.try_acquire_owned().map_err(|_| SessionError::Capacity)?;
-                let mut opening = OpeningHistory { active: self.history_active.clone(), registered: Arc::new(Mutex::new(None)), armed: true };
+                let permit = semaphore
+                    .try_acquire_owned()
+                    .map_err(|_| SessionError::Capacity)?;
+                let mut opening = OpeningHistory {
+                    active: self.history_active.clone(),
+                    registered: Arc::new(Mutex::new(None)),
+                    armed: true,
+                };
                 let ownership = Arc::new(HistoryOwnership {
-                    owned: OwnedShells { shells: self.history_owned.clone(), profile_id: host_key.clone() },
-                    active: self.history_active.clone(), registered: opening.registered.clone(),
+                    owned: OwnedShells {
+                        shells: self.history_owned.clone(),
+                        profile_id: host_key.clone(),
+                    },
+                    active: self.history_active.clone(),
+                    registered: opening.registered.clone(),
                 });
-                let pending = self.history_owned.lock().map_err(|_| SessionError::Internal)?.get(&host_key).cloned().unwrap_or_default();
-                let active = self.history_active.lock().map_err(|_| SessionError::Internal)?.clone();
+                let pending = self
+                    .history_owned
+                    .lock()
+                    .map_err(|_| SessionError::Internal)?
+                    .get(&host_key)
+                    .cloned()
+                    .unwrap_or_default();
+                let active = self
+                    .history_active
+                    .lock()
+                    .map_err(|_| SessionError::Internal)?
+                    .clone();
                 let api = hosts.admin().map_err(SessionError::from)?;
-                for name in pending.into_iter().filter(|name| !active.contains(&format!("{host_key}:{name}"))).take(4) {
-                    if matches!(tokio::time::timeout(std::time::Duration::from_secs(2), api.delete(&snapshot, &name)).await,
-                        Ok(Ok(())) | Ok(Err(ApiError::SessionMissing))) { ownership.unmark(&name); }
+                for name in pending
+                    .into_iter()
+                    .filter(|name| !active.contains(&format!("{host_key}:{name}")))
+                    .take(4)
+                {
+                    if matches!(
+                        tokio::time::timeout(
+                            std::time::Duration::from_secs(2),
+                            api.delete(&snapshot, &name)
+                        )
+                        .await,
+                        Ok(Ok(())) | Ok(Err(ApiError::SessionMissing))
+                    ) {
+                        ownership.unmark(&name);
+                    }
                 }
-                let channel = HistoryChannel::open(api, snapshot, &key, version, ownership, |binding, token, since, generation| {
-                    hosts.attach_token(binding, token, since, generation)
-                }).await?;
+                let channel = HistoryChannel::open(
+                    api,
+                    snapshot,
+                    &key,
+                    version,
+                    ownership,
+                    |binding, token, since, generation| {
+                        hosts.attach_token(binding, token, since, generation)
+                    },
+                )
+                .await?;
                 let active_key = format!("{host_key}:{}", channel.helper_name());
-                self.history_active.lock().map_err(|_| SessionError::Internal)?.insert(active_key.clone());
-                *slot = Some(HistorySlot { channel, _permit: permit, active: self.history_active.clone(), active_key });
+                self.history_active
+                    .lock()
+                    .map_err(|_| SessionError::Internal)?
+                    .insert(active_key.clone());
+                *slot = Some(HistorySlot {
+                    channel,
+                    _permit: permit,
+                    active: self.history_active.clone(),
+                    active_key,
+                });
                 opening.armed = false;
             }
-            slot.as_mut().ok_or(SessionError::Internal)?.channel.request(request).await
+            slot.as_mut()
+                .ok_or(SessionError::Internal)?
+                .channel
+                .request(request)
+                .await
         };
         let result = tokio::select! { biased;
             _ = cancel.changed() => Err(SessionError::Cancelled),
             _ = history_cancel.changed() => Err(SessionError::Cancelled),
             result = operation => result,
         };
-        let current = !conn.closed.load(Ordering::SeqCst) && generation == conn.next_generation.load(Ordering::SeqCst) && *conn.history_cancel.borrow() == history_generation && store.is_current(&binding.profile).map_err(SessionError::from)?;
+        let current = !conn.closed.load(Ordering::SeqCst)
+            && generation == conn.next_generation.load(Ordering::SeqCst)
+            && *conn.history_cancel.borrow() == history_generation
+            && store
+                .is_current(&binding.profile)
+                .map_err(SessionError::from)?;
         if result.is_err() || !current {
             if let Some(mut owned) = slot.take() {
-                if owned.channel.close().await { conn.native_held.store(false, Ordering::SeqCst); conn.native_uncertain.store(false, Ordering::SeqCst); }
+                if owned.channel.close().await {
+                    conn.native_held.store(false, Ordering::SeqCst);
+                    conn.native_uncertain.store(false, Ordering::SeqCst);
+                }
             }
         }
-        if !current { return Err(SessionError::StateChanged.into()) }
-        if let Ok(HistoryReply::View { held, .. }) = &result { conn.native_held.store(*held, Ordering::SeqCst); conn.native_uncertain.store(false, Ordering::SeqCst); }
+        if !current {
+            return Err(SessionError::StateChanged.into());
+        }
+        if let Ok(HistoryReply::View { held, .. }) = &result {
+            conn.native_held.store(*held, Ordering::SeqCst);
+            conn.native_uncertain.store(false, Ordering::SeqCst);
+        }
         match result {
             Ok(HistoryReply::Unsupported) => {
                 // An old helper never entered native mode; retain any earlier ambiguous lease fence.
-                if native && !was_uncertain && slot.as_ref().is_some_and(|owned| !owned.channel.native_supported()) { conn.native_uncertain.store(false, Ordering::SeqCst); }
-                Ok(HistoryReply::Error { error: "unsupported".into() })
-            },
-            Err(SessionError::Missing) => Ok(HistoryReply::Error { error: "unavailable".into() }),
-            Err(SessionError::UpgradeRequired) => Ok(HistoryReply::Error { error: "unsupported".into() }),
+                if native
+                    && !was_uncertain
+                    && slot
+                        .as_ref()
+                        .is_some_and(|owned| !owned.channel.native_supported())
+                {
+                    conn.native_uncertain.store(false, Ordering::SeqCst);
+                }
+                Ok(HistoryReply::Error {
+                    error: "unsupported".into(),
+                })
+            }
+            Err(SessionError::Missing) => Ok(HistoryReply::Error {
+                error: "unavailable".into(),
+            }),
+            Err(SessionError::UpgradeRequired) => Ok(HistoryReply::Error {
+                error: "unsupported".into(),
+            }),
             other => other.map_err(Into::into),
         }
     }
@@ -1011,7 +1232,10 @@ impl RuntimeSessions {
         Ok(snapshot)
     }
 
-    async fn instance_screenshot(hosts: &RuntimeHosts, conn: &Arc<Connection>) -> anyhow::Result<ScreenshotDto> {
+    async fn instance_screenshot(
+        hosts: &RuntimeHosts,
+        conn: &Arc<Connection>,
+    ) -> anyhow::Result<ScreenshotDto> {
         let epoch = *conn.preview_cancel.borrow();
         let mut cancel = conn.preview_cancel.subscribe();
         let snapshot = Self::direct_snapshot(hosts, conn)?;
@@ -1020,71 +1244,169 @@ impl RuntimeSessions {
             _ = cancel.changed() => anyhow::bail!("桌面預覽已取消"),
             result = art_term_core::instance_mcp::screenshot(snapshot) => result?,
         };
-        anyhow::ensure!(!conn.closed.load(Ordering::SeqCst) && conn.desktop_enabled.load(Ordering::SeqCst)
-            && *conn.preview_cancel.borrow() == epoch && Self::direct_snapshot(hosts, conn)?.profile == selected,
-            "桌面或連線已變更");
-        Ok(ScreenshotDto { mime: shot.mime, base64: shot.image_base64, source: selected.name,
-            desktop_id: Some(selected.id), desktop_revision: Some(selected.revision),
-            captured_at: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis() as u64 })
+        anyhow::ensure!(
+            !conn.closed.load(Ordering::SeqCst)
+                && conn.desktop_enabled.load(Ordering::SeqCst)
+                && *conn.preview_cancel.borrow() == epoch
+                && Self::direct_snapshot(hosts, conn)?.profile == selected,
+            "桌面或連線已變更"
+        );
+        Ok(ScreenshotDto {
+            mime: shot.mime,
+            base64: shot.image_base64,
+            source: selected.name,
+            desktop_id: Some(selected.id),
+            desktop_revision: Some(selected.revision),
+            captured_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_millis() as u64,
+        })
     }
-    fn tools_confirmed(result: &serde_json::Value, profile: &art_term_core::instance_mcp::DesktopProfile) -> bool {
-        let Some(count) = result["adapters"].as_u64().filter(|n| *n > 0) else { return false; };
-        result["ok"] == true && result["targets"].as_array().is_some_and(|targets| targets.len() as u64 == count
-            && targets.iter().all(|target| target["id"] == profile.id && target["revision"] == profile.revision
-                && target["generation"].as_u64().is_some_and(|n| n > 0)))
+    fn tools_confirmed(
+        result: &serde_json::Value,
+        profile: &art_term_core::instance_mcp::DesktopProfile,
+    ) -> bool {
+        let Some(count) = result["adapters"].as_u64().filter(|n| *n > 0) else {
+            return false;
+        };
+        result["ok"] == true
+            && result["targets"].as_array().is_some_and(|targets| {
+                targets.len() as u64 == count
+                    && targets.iter().all(|target| {
+                        target["id"] == profile.id
+                            && target["revision"] == profile.revision
+                            && target["generation"].as_u64().is_some_and(|n| n > 0)
+                    })
+            })
     }
-    async fn configure_selected(hosts: &RuntimeHosts, conn: &Arc<Connection>, profile: &art_term_core::instance_mcp::DesktopProfile) -> anyhow::Result<bool> {
-        let snapshot = hosts.store().map_err(|_| anyhow::anyhow!("設定不可用"))?.desktop(&profile.id)
+    async fn configure_selected(
+        hosts: &RuntimeHosts,
+        conn: &Arc<Connection>,
+        profile: &art_term_core::instance_mcp::DesktopProfile,
+    ) -> anyhow::Result<bool> {
+        let snapshot = hosts
+            .store()
+            .map_err(|_| anyhow::anyhow!("設定不可用"))?
+            .desktop(&profile.id)
             .map_err(|_| anyhow::anyhow!("桌面已變更"))?;
         anyhow::ensure!(snapshot.profile == *profile, "桌面已變更");
         let payload = zeroize::Zeroizing::new(serde_json::json!({"op":"configure","id":profile.id,"revision":profile.revision,"name":profile.name,"url":profile.mcp_url,"token":snapshot.token.expose()}).to_string());
         // Preview is independent of an installed/running adapter. No false tool-ready claim.
-        Ok(Self::configure_tools(hosts, conn, payload).await.map(|result| Self::tools_confirmed(&result, profile)).unwrap_or(false))
+        Ok(Self::configure_tools(hosts, conn, payload)
+            .await
+            .map(|result| Self::tools_confirmed(&result, profile))
+            .unwrap_or(false))
     }
-    pub async fn restore_instance(&self, hosts: &RuntimeHosts, id: &str) -> anyhow::Result<Option<InstanceSelection>> {
-        let conn = self.connection(id).map_err(|_| anyhow::anyhow!("連線已結束"))?;
+    pub async fn restore_instance(
+        &self,
+        hosts: &RuntimeHosts,
+        id: &str,
+    ) -> anyhow::Result<Option<InstanceSelection>> {
+        let conn = self
+            .connection(id)
+            .map_err(|_| anyhow::anyhow!("連線已結束"))?;
         let _guard = conn.desktop_operation.lock().await;
         let epoch = *conn.preview_cancel.borrow();
         let mut cancel = conn.preview_cancel.subscribe();
-        let status = Self::configure_tools(hosts, &conn, zeroize::Zeroizing::new("{\"op\":\"current\"}".into()))
-            .await.context("Shell broker 查詢失敗")?;
+        let status = Self::configure_tools(
+            hosts,
+            &conn,
+            zeroize::Zeroizing::new("{\"op\":\"current\"}".into()),
+        )
+        .await
+        .context("Shell broker 查詢失敗")?;
         let store = hosts.store().map_err(|_| anyhow::anyhow!("設定不可用"))?;
         let desktops = store.desktops().context("桌面清單讀取失敗")?;
-        let Some(selection) = crate::instance_restore::resolve(&status, &desktops)? else { return Ok(None) };
-        let snapshot = store.desktop(&selection.profile.id).context("桌面憑證讀取失敗")?;
+        let Some(selection) = crate::instance_restore::resolve(&status, &desktops)? else {
+            return Ok(None);
+        };
+        let snapshot = store
+            .desktop(&selection.profile.id)
+            .context("桌面憑證讀取失敗")?;
         anyhow::ensure!(snapshot.profile == selection.profile, "桌面設定已變更");
         tokio::select! {
             _ = cancel.changed() => anyhow::bail!("桌面恢復已取消"),
             result = art_term_core::instance_mcp::screenshot(snapshot) => { result.context("桌面預覽重新驗證失敗")?; }
         }
-        anyhow::ensure!(!conn.closed.load(Ordering::SeqCst) && *conn.preview_cancel.borrow() == epoch, "桌面恢復已取消");
+        anyhow::ensure!(
+            !conn.closed.load(Ordering::SeqCst) && *conn.preview_cancel.borrow() == epoch,
+            "桌面恢復已取消"
+        );
         // Restoring a local preview must not change the live Shell's identity,
         // credentials or generation, including an assignment from another App.
-        let probe = zeroize::Zeroizing::new(serde_json::json!({"op":"verify","expected_targets":selection.broker_targets}).to_string());
-        let tool_ready = Self::configure_tools(hosts, &conn, probe).await
+        let probe = zeroize::Zeroizing::new(
+            serde_json::json!({"op":"verify","expected_targets":selection.broker_targets})
+                .to_string(),
+        );
+        let tool_ready = Self::configure_tools(hosts, &conn, probe)
+            .await
             .is_ok_and(|result| result["targets"] == status["targets"]);
-        let current = Self::configure_tools(hosts, &conn, zeroize::Zeroizing::new("{\"op\":\"current\"}".into()))
-            .await.context("Shell broker 重新核對失敗")?;
-        let latest = store.desktop(&selection.profile.id).context("桌面憑證讀取失敗")?.profile;
-        let profile = selection.confirm(&current, &latest, epoch, *conn.preview_cancel.borrow(), conn.closed.load(Ordering::SeqCst))?;
-        *conn.selected_desktop.lock().map_err(|_| anyhow::anyhow!("桌面狀態不可用"))? = Some(profile.clone());
+        let current = Self::configure_tools(
+            hosts,
+            &conn,
+            zeroize::Zeroizing::new("{\"op\":\"current\"}".into()),
+        )
+        .await
+        .context("Shell broker 重新核對失敗")?;
+        let latest = store
+            .desktop(&selection.profile.id)
+            .context("桌面憑證讀取失敗")?
+            .profile;
+        let profile = selection.confirm(
+            &current,
+            &latest,
+            epoch,
+            *conn.preview_cancel.borrow(),
+            conn.closed.load(Ordering::SeqCst),
+        )?;
+        *conn
+            .selected_desktop
+            .lock()
+            .map_err(|_| anyhow::anyhow!("桌面狀態不可用"))? = Some(profile.clone());
         conn.desktop_enabled.store(true, Ordering::SeqCst);
-        Ok(Some(InstanceSelection { desktop: profile, tool_ready }))
+        Ok(Some(InstanceSelection {
+            desktop: profile,
+            tool_ready,
+        }))
     }
-    pub async fn select_instance(&self, hosts: &RuntimeHosts, id: &str, desktop_id: &str, revision: u64) -> anyhow::Result<InstanceSelection> {
-        let conn = self.connection(id).map_err(|_| anyhow::anyhow!("連線已結束"))?;
+    pub async fn select_instance(
+        &self,
+        hosts: &RuntimeHosts,
+        id: &str,
+        desktop_id: &str,
+        revision: u64,
+    ) -> anyhow::Result<InstanceSelection> {
+        let conn = self
+            .connection(id)
+            .map_err(|_| anyhow::anyhow!("連線已結束"))?;
         conn.desktop_enabled.store(false, Ordering::SeqCst);
         conn.preview_cancel.send_modify(|n| *n = n.wrapping_add(1));
         let epoch = *conn.preview_cancel.borrow();
         let _guard = conn.desktop_operation.lock().await;
-        anyhow::ensure!(!conn.closed.load(Ordering::SeqCst) && *conn.preview_cancel.borrow() == epoch, "桌面選擇已取消");
+        anyhow::ensure!(
+            !conn.closed.load(Ordering::SeqCst) && *conn.preview_cancel.borrow() == epoch,
+            "桌面選擇已取消"
+        );
         // A live binding, rather than a saved Host capability, authorizes this per-tab selection.
         Self::native_binding(hosts, &conn)?;
-        let previous = conn.selected_desktop.lock().map_err(|_| anyhow::anyhow!("桌面狀態不可用"))?.take();
+        let previous = conn
+            .selected_desktop
+            .lock()
+            .map_err(|_| anyhow::anyhow!("桌面狀態不可用"))?
+            .take();
         if previous.is_some() {
-            let _ = Self::configure_tools(hosts, &conn, zeroize::Zeroizing::new("{\"op\":\"clear\"}".into())).await;
+            let _ = Self::configure_tools(
+                hosts,
+                &conn,
+                zeroize::Zeroizing::new("{\"op\":\"clear\"}".into()),
+            )
+            .await;
         }
-        let snapshot = hosts.store().map_err(|_| anyhow::anyhow!("設定不可用"))?.desktop(desktop_id).map_err(|_| anyhow::anyhow!("桌面已變更"))?;
+        let snapshot = hosts
+            .store()
+            .map_err(|_| anyhow::anyhow!("設定不可用"))?
+            .desktop(desktop_id)
+            .map_err(|_| anyhow::anyhow!("桌面已變更"))?;
         anyhow::ensure!(snapshot.profile.revision == revision, "桌面已變更");
         let profile = snapshot.profile.clone();
         let mut cancel = conn.preview_cancel.subscribe();
@@ -1094,44 +1416,116 @@ impl RuntimeSessions {
         }
         anyhow::ensure!(*conn.preview_cancel.borrow() == epoch, "桌面選擇已取消");
         let tool_ready = Self::configure_selected(hosts, &conn, &profile).await?;
-        anyhow::ensure!(!conn.closed.load(Ordering::SeqCst) && *conn.preview_cancel.borrow() == epoch
-            && hosts.store().map_err(|_| anyhow::anyhow!("設定不可用"))?.desktop(desktop_id).map_err(|_| anyhow::anyhow!("桌面已變更"))?.profile == profile,
-            "桌面或連線已變更");
-        *conn.selected_desktop.lock().map_err(|_| anyhow::anyhow!("桌面狀態不可用"))? = Some(profile.clone());
+        anyhow::ensure!(
+            !conn.closed.load(Ordering::SeqCst)
+                && *conn.preview_cancel.borrow() == epoch
+                && hosts
+                    .store()
+                    .map_err(|_| anyhow::anyhow!("設定不可用"))?
+                    .desktop(desktop_id)
+                    .map_err(|_| anyhow::anyhow!("桌面已變更"))?
+                    .profile
+                    == profile,
+            "桌面或連線已變更"
+        );
+        *conn
+            .selected_desktop
+            .lock()
+            .map_err(|_| anyhow::anyhow!("桌面狀態不可用"))? = Some(profile.clone());
         conn.desktop_enabled.store(true, Ordering::SeqCst);
-        Ok(InstanceSelection { desktop: profile, tool_ready })
+        Ok(InstanceSelection {
+            desktop: profile,
+            tool_ready,
+        })
     }
     pub async fn clear_instance(&self, hosts: &RuntimeHosts, id: &str) -> anyhow::Result<()> {
-        let conn = self.connection(id).map_err(|_| anyhow::anyhow!("連線已結束"))?;
+        let conn = self
+            .connection(id)
+            .map_err(|_| anyhow::anyhow!("連線已結束"))?;
         conn.desktop_enabled.store(false, Ordering::SeqCst);
         conn.preview_cancel.send_modify(|n| *n = n.wrapping_add(1));
         let _guard = conn.desktop_operation.lock().await;
-        *conn.selected_desktop.lock().map_err(|_| anyhow::anyhow!("桌面狀態不可用"))? = None;
-        Self::configure_tools(hosts, &conn, zeroize::Zeroizing::new("{\"op\":\"clear\"}".into())).await?;
+        *conn
+            .selected_desktop
+            .lock()
+            .map_err(|_| anyhow::anyhow!("桌面狀態不可用"))? = None;
+        Self::configure_tools(
+            hosts,
+            &conn,
+            zeroize::Zeroizing::new("{\"op\":\"clear\"}".into()),
+        )
+        .await?;
         Ok(())
     }
-    pub async fn launch_instance(&self, hosts: &RuntimeHosts, id: &str) -> anyhow::Result<InstanceSelection> {
-        let conn = self.connection(id).map_err(|_| anyhow::anyhow!("連線已結束"))?;
-        let _guard = conn.desktop_operation.try_lock().map_err(|_| anyhow::anyhow!("桌面操作進行中"))?;
+    pub async fn launch_instance(
+        &self,
+        hosts: &RuntimeHosts,
+        id: &str,
+    ) -> anyhow::Result<InstanceSelection> {
+        let conn = self
+            .connection(id)
+            .map_err(|_| anyhow::anyhow!("連線已結束"))?;
+        let _guard = conn
+            .desktop_operation
+            .try_lock()
+            .map_err(|_| anyhow::anyhow!("桌面操作進行中"))?;
         let profile = Self::direct_snapshot(hosts, &conn)?.profile;
         let epoch = *conn.preview_cancel.borrow();
         if Self::configure_selected(hosts, &conn, &profile).await? {
-            return Ok(InstanceSelection { desktop: profile, tool_ready: true });
+            return Ok(InstanceSelection {
+                desktop: profile,
+                tool_ready: true,
+            });
         }
         let (binding, _) = Self::native_binding(hosts, &conn)?;
-        let cli = binding.profile.metadata.as_ref().and_then(|m| m.coding_cli.clone())
-            .unwrap_or(art_term_core::connections::CodingCli { id:"codex".into(), name:"Codex".into(), command:"codex".into(), args:vec![] });
-        anyhow::ensure!(std::path::Path::new(&cli.command).file_name().and_then(|name| name.to_str()) == Some("codex"), "此 CLI 尚未支援桌面工具入口；本輪支援 Codex");
+        let cli = binding
+            .profile
+            .metadata
+            .as_ref()
+            .and_then(|m| m.coding_cli.clone())
+            .unwrap_or(art_term_core::connections::CodingCli {
+                id: "codex".into(),
+                name: "Codex".into(),
+                command: "codex".into(),
+                args: vec![],
+            });
+        anyhow::ensure!(
+            std::path::Path::new(&cli.command)
+                .file_name()
+                .and_then(|name| name.to_str())
+                == Some("codex"),
+            "此 CLI 尚未支援桌面工具入口；本輪支援 Codex"
+        );
         let quote = |word: &str| format!("'{}'", word.replace('\'', "'\\''"));
-        let words = std::iter::once(cli.command.as_str()).chain(cli.args.iter().map(String::as_str)).map(quote).collect::<Vec<_>>().join(" ");
+        let words = std::iter::once(cli.command.as_str())
+            .chain(cli.args.iter().map(String::as_str))
+            .map(quote)
+            .collect::<Vec<_>>()
+            .join(" ");
         let command = format!("python3 \"$HOME/.local/share/art-term/tools/instance_bridge.py\" launch --binding {} -- {}\r", binding.name, words);
-        anyhow::ensure!(*conn.preview_cancel.borrow() == epoch && Self::direct_snapshot(hosts, &conn)?.profile == profile, "桌面已切換");
-        self.write(id, command.as_bytes(), false).await.map_err(|_| anyhow::anyhow!("無法啟動 CLI"))?;
+        anyhow::ensure!(
+            *conn.preview_cancel.borrow() == epoch
+                && Self::direct_snapshot(hosts, &conn)?.profile == profile,
+            "桌面已切換"
+        );
+        self.write(id, command.as_bytes(), false)
+            .await
+            .map_err(|_| anyhow::anyhow!("無法啟動 CLI"))?;
         // Exactly one explicit launch. Only configuration is retried while Codex starts stdio.
         for _ in 0..10 {
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            anyhow::ensure!(!conn.closed.load(Ordering::SeqCst) && *conn.preview_cancel.borrow() == epoch && Self::direct_snapshot(hosts, &conn)?.profile == profile, "桌面已切換");
-            if Self::configure_selected(hosts, &conn, &profile).await? { return Ok(InstanceSelection { desktop: profile, tool_ready: true }); }
+            anyhow::ensure!(
+                !conn.closed.load(Ordering::SeqCst)
+                    && *conn.preview_cancel.borrow() == epoch
+                    && Self::direct_snapshot(hosts, &conn)?.profile == profile,
+                "桌面已切換"
+            );
+            if Self::configure_selected(hosts, &conn, &profile).await? {
+                return Ok(InstanceSelection {
+                    desktop: profile,
+                    tool_ready: true,
+                });
+            }
         }
         anyhow::bail!("Codex 工具入口尚未確認啟動；請查看終端，桌面預覽仍可使用")
     }
@@ -1151,9 +1545,13 @@ impl RuntimeSessions {
                 .preview_cancel
                 .send_modify(|n| *n = n.wrapping_add(1));
             connection.cancel.send_replace(true);
-            connection.history_cancel.send_modify(|n| *n = n.wrapping_add(1));
+            connection
+                .history_cancel
+                .send_modify(|n| *n = n.wrapping_add(1));
             let _interaction = connection.native_interaction.lock().await;
-            if let Some(mut history) = connection.history.lock().await.take() { history.channel.close().await; }
+            if let Some(mut history) = connection.history.lock().await.take() {
+                history.channel.close().await;
+            }
             let handle = connection
                 .handle
                 .lock()
@@ -1186,9 +1584,13 @@ impl RuntimeSessions {
                 .preview_cancel
                 .send_modify(|n| *n = n.wrapping_add(1));
             connection.cancel.send_replace(true);
-            connection.history_cancel.send_modify(|n| *n = n.wrapping_add(1));
+            connection
+                .history_cancel
+                .send_modify(|n| *n = n.wrapping_add(1));
             let _interaction = connection.native_interaction.lock().await;
-            if let Some(mut history) = connection.history.lock().await.take() { history.channel.close().await; }
+            if let Some(mut history) = connection.history.lock().await.take() {
+                history.channel.close().await;
+            }
             let handle = connection.handle.lock().ok().and_then(|mut h| h.take());
             if let Some(handle) = handle {
                 tasks.spawn(handle.shutdown());
@@ -1266,8 +1668,12 @@ pub async fn gui_runtime_sessions(
                 .map_err(|_| ApiError::Storage)?
                 .get(&ownership_key(&snapshot.profile))
                 .is_some_and(|names| names.contains(&item.name))
-            && !sessions.history_owned.lock().map_err(|_| ApiError::Storage)?
-                .get(&ownership_key(&snapshot.profile)).is_some_and(|names| names.contains(&item.name))
+            && !sessions
+                .history_owned
+                .lock()
+                .map_err(|_| ApiError::Storage)?
+                .get(&ownership_key(&snapshot.profile))
+                .is_some_and(|names| names.contains(&item.name))
         {
             let binding = SessionBinding::from_list(snapshot.profile.clone(), &list, &item.name)?;
             targets.push(sessions.issue(binding, None, item.attached, mapping.clone())?);
@@ -1328,9 +1734,17 @@ pub async fn gui_runtime_create_history_session(
     let native_sessions = sessions.inner().clone();
     let raw = uuid::Uuid::new_v4().simple().to_string();
     let name = format!("th2-{}", &raw[..24]);
-    let target = gui_runtime_create_session(hosts, sessions, preview, id, expected_revision, name).await?;
-    let targets = native_sessions.targets.lock().map_err(|_| ApiError::Storage)?;
-    targets.get(&target.id).ok_or(ApiError::StateChanged)?.history_bootstrap.store(true, Ordering::SeqCst);
+    let target =
+        gui_runtime_create_session(hosts, sessions, preview, id, expected_revision, name).await?;
+    let targets = native_sessions
+        .targets
+        .lock()
+        .map_err(|_| ApiError::Storage)?;
+    targets
+        .get(&target.id)
+        .ok_or(ApiError::StateChanged)?
+        .history_bootstrap
+        .store(true, Ordering::SeqCst);
     Ok(target)
 }
 #[tauri::command]
@@ -1366,7 +1780,8 @@ mod tests {
 
     #[test]
     fn gateway_failure_serializes_a_fixed_local_message() {
-        let value = serde_json::to_value(SessionFailure::from(SessionError::GatewayUnavailable)).unwrap();
+        let value =
+            serde_json::to_value(SessionFailure::from(SessionError::GatewayUnavailable)).unwrap();
         assert_eq!(value["kind"], "gatewayUnavailable");
         assert_eq!(
             value["message"],
@@ -1537,38 +1952,61 @@ mod tests {
                 desktop_operation: tokio::sync::Mutex::new(()),
                 history_binding: None,
                 history: tokio::sync::Mutex::new(None),
-                    history_cancel: watch::channel(0).0,
-                    native_interaction: tokio::sync::Mutex::new(()),
-                    native_enabled: AtomicBool::new(false),
-                    native_held: AtomicBool::new(false),
-                    native_uncertain: AtomicBool::new(false),
+                history_cancel: watch::channel(0).0,
+                native_interaction: tokio::sync::Mutex::new(()),
+                native_enabled: AtomicBool::new(false),
+                native_held: AtomicBool::new(false),
+                native_uncertain: AtomicBool::new(false),
             }),
         );
         id
     }
     #[tokio::test]
     async fn native_uncertain_without_helper_blocks_successive_user_input_but_not_protocol_route() {
-        let sessions=RuntimeSessions::default();
-        let id=fake_connection(&sessions,None);
-        let connection=sessions.connection(&id).unwrap();
-        connection.native_enabled.store(true,Ordering::SeqCst);
-        connection.native_uncertain.store(true,Ordering::SeqCst);
+        let sessions = RuntimeSessions::default();
+        let id = fake_connection(&sessions, None);
+        let connection = sessions.connection(&id).unwrap();
+        connection.native_enabled.store(true, Ordering::SeqCst);
+        connection.native_uncertain.store(true, Ordering::SeqCst);
         for _ in 0..2 {
-            let error=sessions.write(&id,b"echo must-not-send\n",false).await.unwrap_err();
-            assert_eq!(error.kind,SessionError::InputUncertain);
+            let error = sessions
+                .write(&id, b"echo must-not-send\n", false)
+                .await
+                .unwrap_err();
+            assert_eq!(error.kind, SessionError::InputUncertain);
         }
         // With no handle, reaching the original protocol path yields Busy rather than uncertainty.
-        assert_eq!(sessions.write(&id,b"\x1b[1;1R",true).await.unwrap_err().kind,SessionError::Busy);
+        assert_eq!(
+            sessions
+                .write(&id, b"\x1b[1;1R", true)
+                .await
+                .unwrap_err()
+                .kind,
+            SessionError::Busy
+        );
     }
     #[tokio::test]
     async fn legacy_non_history_session_does_not_enable_native_input_fence() {
-        let sessions=RuntimeSessions::default();
-        let id=fake_connection(&sessions,None);
-        assert!(matches!(sessions.history_request(&fake_hosts(),&id,HistoryRequest::Scroll {lines:0}).await.unwrap(),HistoryReply::Unsupported));
-        let connection=sessions.connection(&id).unwrap();
+        let sessions = RuntimeSessions::default();
+        let id = fake_connection(&sessions, None);
+        assert!(matches!(
+            sessions
+                .history_request(&fake_hosts(), &id, HistoryRequest::Scroll { lines: 0 })
+                .await
+                .unwrap(),
+            HistoryReply::Unsupported
+        ));
+        let connection = sessions.connection(&id).unwrap();
         assert!(!connection.native_enabled.load(Ordering::SeqCst));
         assert!(!connection.native_uncertain.load(Ordering::SeqCst));
-        assert_eq!(sessions.write(&id,b"echo legacy\n",false).await.unwrap_err().kind,SessionError::Busy);
+        assert_eq!(
+            sessions
+                .write(&id, b"echo legacy\n", false)
+                .await
+                .unwrap_err()
+                .kind,
+            SessionError::Busy
+        );
     }
     /// Failed-store stub: preview-seam tests never touch it, and a real
     /// native route on it fails closed through the store error.

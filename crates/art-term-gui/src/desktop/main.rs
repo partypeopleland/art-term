@@ -1,29 +1,30 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[path = "../platform/windows/browser.rs"]
+mod browser;
 #[cfg(windows)]
 #[path = "../platform/windows/dpapi.rs"]
 mod dpapi;
-#[path = "../shared/runtime_bootstrap.rs"]
-mod runtime_bootstrap;
-#[path = "../shared/runtime_hosts.rs"]
-mod runtime_hosts;
 #[path = "../shared/instance_desktops.rs"]
 mod instance_desktops;
 #[path = "../shared/instance_restore.rs"]
 mod instance_restore;
+#[path = "../shared/runtime_bootstrap.rs"]
+mod runtime_bootstrap;
+#[path = "../shared/runtime_hosts.rs"]
+mod runtime_hosts;
 #[path = "../shared/runtime_sessions.rs"]
 mod runtime_sessions;
 #[path = "../shared/runtime_transfer.rs"]
 mod runtime_transfer;
-#[path = "../platform/windows/browser.rs"]
-mod browser;
 use art_term_core::connections::Connections;
 use runtime_hosts::{
     gui_runtime_delete_host, gui_runtime_hosts, gui_runtime_save_host, gui_runtime_test_host,
 };
 use runtime_sessions::{
-    gui_runtime_ack, gui_runtime_create_session, gui_runtime_create_history_session, gui_runtime_history, gui_runtime_recover, gui_runtime_sessions,
-    GuiOutput, RuntimePreview, RuntimeSessions, SessionFailure,
+    gui_runtime_ack, gui_runtime_create_history_session, gui_runtime_create_session,
+    gui_runtime_history, gui_runtime_recover, gui_runtime_sessions, GuiOutput, RuntimePreview,
+    RuntimeSessions, SessionFailure,
 };
 
 use art_term_core::runtime_preview::RuntimeMapping;
@@ -102,7 +103,10 @@ async fn gui_write(
             art_term_core::openab::session::SessionError::StateChanged.into(),
         ));
     }
-    runtime.write(&session_id, &bytes, terminal_reply.unwrap_or(false)).await.map_err(Into::into)
+    runtime
+        .write(&session_id, &bytes, terminal_reply.unwrap_or(false))
+        .await
+        .map_err(Into::into)
 }
 #[tauri::command]
 async fn gui_resize(
@@ -364,7 +368,11 @@ fn main() {
                 if !shutting_down.swap(true, Ordering::SeqCst) {
                     let app = window.app_handle().clone();
                     tauri::async_runtime::spawn(async move {
-                        let _ = tokio::time::timeout(std::time::Duration::from_secs(8), app.state::<Arc<RuntimeSessions>>().shutdown()).await;
+                        let _ = tokio::time::timeout(
+                            std::time::Duration::from_secs(8),
+                            app.state::<Arc<RuntimeSessions>>().shutdown(),
+                        )
+                        .await;
                         app.exit(0);
                     });
                 }

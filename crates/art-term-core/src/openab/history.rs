@@ -6,8 +6,8 @@ use super::{
     secret::Secret,
     session::{SessionBinding, SessionError, SessionHandle},
 };
-use serde::{Deserialize, Serialize};
 use base64::{engine::general_purpose::STANDARD, Engine};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -28,8 +28,13 @@ pub enum HistoryRequest {
         instance: String,
         epoch: u64,
     },
-    Scroll { lines: i16 },
-    Follow { #[serde(default, skip_serializing_if = "Option::is_none")] input: Option<String> },
+    Scroll {
+        lines: i16,
+    },
+    Follow {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        input: Option<String>,
+    },
     Close,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -65,14 +70,22 @@ pub enum HistoryReply {
         #[serde(skip_serializing_if = "Option::is_none")]
         epoch: Option<u64>,
     },
-    View { op: String, instance: String, held: bool, offset: usize, available: bool },
+    View {
+        op: String,
+        instance: String,
+        held: bool,
+        offset: usize,
+        available: bool,
+    },
     Unsupported,
     Error {
         error: String,
     },
 }
 pub fn key_from_name(name: &str) -> Option<String> {
-    let k = name.strip_prefix("th2-").or_else(|| name.strip_prefix("th-"))?;
+    let k = name
+        .strip_prefix("th2-")
+        .or_else(|| name.strip_prefix("th-"))?;
     (k.len() == 24
         && k.bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
@@ -86,7 +99,11 @@ pub enum HistoryVersion {
 impl HistoryVersion {
     pub fn from_name(name: &str) -> Option<Self> {
         key_from_name(name)?;
-        Some(if name.starts_with("th2-") { Self::Paged } else { Self::Legacy })
+        Some(if name.starts_with("th2-") {
+            Self::Paged
+        } else {
+            Self::Legacy
+        })
     }
     pub fn wrapper_script(self) -> &'static str {
         match self {
@@ -99,7 +116,10 @@ impl HistoryVersion {
         if !hex(key, 24) {
             return Err(SessionError::Protocol);
         }
-        let fallback = format!("exec python3 \"$HOME/.local/share/art-term/openab-pty/{}\" {key}", self.wrapper_script());
+        let fallback = format!(
+            "exec python3 \"$HOME/.local/share/art-term/openab-pty/{}\" {key}",
+            self.wrapper_script()
+        );
         Ok(if self == Self::Paged {
             format!("if [ -f \"$HOME/.local/share/art-term/tools/tmux-shell.py\" ]; then exec python3 \"$HOME/.local/share/art-term/tools/tmux-shell.py\" {key}; else {fallback}; fi\n")
         } else {
@@ -181,9 +201,15 @@ impl HistoryChannel {
     pub fn helper_name(&self) -> &str {
         &self.cleanup.name
     }
-    pub fn native_held(&self) -> bool { self.native_held }
-    pub fn native_uncertain(&self) -> bool { !self.native_known }
-    pub fn native_supported(&self) -> bool { self.native_viewport }
+    pub fn native_held(&self) -> bool {
+        self.native_held
+    }
+    pub fn native_uncertain(&self) -> bool {
+        !self.native_known
+    }
+    pub fn native_supported(&self) -> bool {
+        self.native_viewport
+    }
     pub fn key(&self) -> &str {
         &self.key
     }
@@ -328,17 +354,27 @@ impl HistoryChannel {
                 ("keep", Some(*epoch))
             }
             HistoryRequest::Scroll { lines } => {
-                if !(-256..=256).contains(lines) { return Err(SessionError::Protocol); }
-                if !self.native_viewport { return Ok(HistoryReply::Unsupported); }
+                if !(-256..=256).contains(lines) {
+                    return Err(SessionError::Protocol);
+                }
+                if !self.native_viewport {
+                    return Ok(HistoryReply::Unsupported);
+                }
                 ("scroll", None)
             }
             HistoryRequest::Follow { input } => {
                 if let Some(input) = input {
-                    if input.len() > 5464 { return Err(SessionError::Capacity); }
+                    if input.len() > 5464 {
+                        return Err(SessionError::Capacity);
+                    }
                     let bytes = STANDARD.decode(input).map_err(|_| SessionError::Protocol)?;
-                    if bytes.len() > 4096 || STANDARD.encode(&bytes) != *input { return Err(SessionError::Protocol); }
+                    if bytes.len() > 4096 || STANDARD.encode(&bytes) != *input {
+                        return Err(SessionError::Protocol);
+                    }
                 }
-                if !self.native_viewport { return Ok(HistoryReply::Unsupported); }
+                if !self.native_viewport {
+                    return Ok(HistoryReply::Unsupported);
+                }
                 ("follow", None)
             }
             HistoryRequest::Close => ("close", None),
@@ -358,7 +394,12 @@ impl HistoryChannel {
         if bytes.len() > 8192 {
             return Err(SessionError::Capacity);
         }
-        if matches!(request, HistoryRequest::Scroll { .. } | HistoryRequest::Follow { .. }) { self.native_known = false; }
+        if matches!(
+            request,
+            HistoryRequest::Scroll { .. } | HistoryRequest::Follow { .. }
+        ) {
+            self.native_known = false;
+        }
         self.in_flight = true;
         let result = tokio::time::timeout(DEADLINE, async {
             self.handle
@@ -371,7 +412,10 @@ impl HistoryChannel {
         .await
         .unwrap_or(Err(SessionError::Timeout));
         self.in_flight = false;
-        if let Ok(HistoryReply::View { held, .. }) = &result { self.native_held = *held; self.native_known = true; }
+        if let Ok(HistoryReply::View { held, .. }) = &result {
+            self.native_held = *held;
+            self.native_known = true;
+        }
         // A close ACK confirms only this helper released its tag, never a foreign/manual mode.
         if result.is_err() || matches!(request, HistoryRequest::Close) {
             self.hard_close().await;
@@ -389,17 +433,44 @@ impl HistoryChannel {
     pub async fn close(&mut self) -> bool {
         // A close ACK only confirms our tag cleanup. An authoritative follow View is
         // required to clear an unknown/held native state; foreign/manual Busy stays fenced.
-        if self.native_viewport && (!self.native_known || self.native_held) && !self.in_flight && self.handle.is_some() {
+        if self.native_viewport
+            && (!self.native_known || self.native_held)
+            && !self.in_flight
+            && self.handle.is_some()
+        {
             let id = self.next_id;
             self.next_id = self.next_id.saturating_add(1);
             self.in_flight = true;
-            let wire = format!("{}\n", serde_json::json!({"v":1,"nonce":self.nonce,"requestId":id,"op":"follow"}));
+            let wire = format!(
+                "{}\n",
+                serde_json::json!({"v":1,"nonce":self.nonce,"requestId":id,"op":"follow"})
+            );
             let confirmed = tokio::time::timeout(std::time::Duration::from_secs(2), async {
-                self.handle.as_ref().ok_or(SessionError::Cancelled)?.write(wire.as_bytes())?;
+                self.handle
+                    .as_ref()
+                    .ok_or(SessionError::Cancelled)?
+                    .write(wire.as_bytes())?;
                 let reply = self.receive(false).await?;
-                self.validate_reply(reply, &HistoryRequest::Follow {input:None}, "follow", None, id)
-            }).await;
-            if matches!(confirmed, Ok(Ok(HistoryReply::View {held:false,offset:0,..}))) { self.native_known = true; self.native_held = false; }
+                self.validate_reply(
+                    reply,
+                    &HistoryRequest::Follow { input: None },
+                    "follow",
+                    None,
+                    id,
+                )
+            })
+            .await;
+            if matches!(
+                confirmed,
+                Ok(Ok(HistoryReply::View {
+                    held: false,
+                    offset: 0,
+                    ..
+                }))
+            ) {
+                self.native_known = true;
+                self.native_held = false;
+            }
             self.in_flight = false;
         }
         // An abandoned in-flight operation is never replayed. Pipe guard owns crash cleanup.
@@ -407,12 +478,19 @@ impl HistoryChannel {
             let id = self.next_id;
             self.next_id = self.next_id.saturating_add(1);
             self.in_flight = true;
-            let wire = format!("{}\n", serde_json::json!({"v":1,"nonce":self.nonce,"requestId":id,"op":"close"}));
+            let wire = format!(
+                "{}\n",
+                serde_json::json!({"v":1,"nonce":self.nonce,"requestId":id,"op":"close"})
+            );
             let confirmed = tokio::time::timeout(std::time::Duration::from_secs(2), async {
-                self.handle.as_ref().ok_or(SessionError::Cancelled)?.write(wire.as_bytes())?;
+                self.handle
+                    .as_ref()
+                    .ok_or(SessionError::Cancelled)?
+                    .write(wire.as_bytes())?;
                 let reply = self.receive(false).await?;
                 self.validate_reply(reply, &HistoryRequest::Close, "close", None, id)
-            }).await;
+            })
+            .await;
             let _ = confirmed; // ACK alone is not a no-foreign-mode assertion.
             self.in_flight = false;
         }
@@ -537,12 +615,28 @@ impl HistoryChannel {
                 })
             }
             Some("view") => {
-                if !matches!(op, "scroll" | "follow") || v["op"].as_str() != Some(op) { return Err(SessionError::Protocol); }
+                if !matches!(op, "scroll" | "follow") || v["op"].as_str() != Some(op) {
+                    return Err(SessionError::Protocol);
+                }
                 let held = v["held"].as_bool().ok_or(SessionError::Protocol)?;
                 let available = v["available"].as_bool().ok_or(SessionError::Protocol)?;
-                let offset = v["offset"].as_u64().filter(|n| *n <= 6000).ok_or(SessionError::Protocol)? as usize;
-                if (!held && offset != 0) || (!available && (held || offset != 0)) || (op == "follow" && (held || offset != 0)) { return Err(SessionError::Protocol); }
-                Ok(HistoryReply::View { op: op.into(), instance: self.instance.clone(), held, offset, available })
+                let offset = v["offset"]
+                    .as_u64()
+                    .filter(|n| *n <= 6000)
+                    .ok_or(SessionError::Protocol)? as usize;
+                if (!held && offset != 0)
+                    || (!available && (held || offset != 0))
+                    || (op == "follow" && (held || offset != 0))
+                {
+                    return Err(SessionError::Protocol);
+                }
+                Ok(HistoryReply::View {
+                    op: op.into(),
+                    instance: self.instance.clone(),
+                    held,
+                    offset,
+                    available,
+                })
             }
             Some("page") => {
                 if !matches!(op, "viewport" | "older") || v["op"].as_str() != Some(op) {
@@ -587,7 +681,10 @@ impl HistoryChannel {
                 }
                 match request {
                     HistoryRequest::Viewport => {
-                        if end != row_count || start < row_count.saturating_sub(rows) || start >= row_count {
+                        if end != row_count
+                            || start < row_count.saturating_sub(rows)
+                            || start >= row_count
+                        {
                             return Err(SessionError::Protocol);
                         }
                     }

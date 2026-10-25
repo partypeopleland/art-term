@@ -133,7 +133,10 @@ impl Mcp {
             .header("Accept", "application/json, text/event-stream")
             .header("MCP-Protocol-Version", &self.protocol)
             .json(&body)
-            .timeout(self.deadline.saturating_duration_since(tokio::time::Instant::now()));
+            .timeout(
+                self.deadline
+                    .saturating_duration_since(tokio::time::Instant::now()),
+            );
         if let Some(s) = &self.session {
             req = req.header("Mcp-Session-Id", s);
         }
@@ -141,14 +144,28 @@ impl Mcp {
         anyhow::ensure!(res.status().is_success(), "MCP 認證或服務請求失敗");
         if let Some(s) = res.headers().get("Mcp-Session-Id") {
             let s = s.to_str()?;
-            anyhow::ensure!(s.len() <= 1024 && !s.is_empty() && s.bytes().all(|b| (33..=126).contains(&b)), "MCP session 格式不符");
+            anyhow::ensure!(
+                s.len() <= 1024 && !s.is_empty() && s.bytes().all(|b| (33..=126).contains(&b)),
+                "MCP session 格式不符"
+            );
             self.session = Some(s.into());
         }
         if id.is_none() && res.status() == reqwest::StatusCode::ACCEPTED {
             return Ok(Value::Null);
         }
-        let content_type = res.headers().get("content-type").and_then(|value| value.to_str().ok()).unwrap_or("").split(';').next().unwrap_or("").trim();
-        anyhow::ensure!(id.is_none() || matches!(content_type, "application/json" | "text/event-stream"), "MCP 回應類型不符");
+        let content_type = res
+            .headers()
+            .get("content-type")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("")
+            .split(';')
+            .next()
+            .unwrap_or("")
+            .trim();
+        anyhow::ensure!(
+            id.is_none() || matches!(content_type, "application/json" | "text/event-stream"),
+            "MCP 回應類型不符"
+        );
         let sse = content_type == "text/event-stream";
         let mut bytes = Vec::new();
         let mut stream = res.bytes_stream();
@@ -241,15 +258,27 @@ impl Mcp {
 }
 impl Drop for Mcp {
     fn drop(&mut self) {
-        let Some(session) = self.session.take() else { return; };
-        let Ok(runtime) = tokio::runtime::Handle::try_current() else { return; };
+        let Some(session) = self.session.take() else {
+            return;
+        };
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
         let http = self.http.clone();
         let url = self.url.clone();
         let protocol = self.protocol.clone();
-        let Ok(token) = Secret::new(self.token.expose().to_owned()) else { return; };
+        let Ok(token) = Secret::new(self.token.expose().to_owned()) else {
+            return;
+        };
         runtime.spawn(async move {
-            let _ = http.delete(url).bearer_auth(token.expose()).header("Mcp-Session-Id", session)
-                .header("MCP-Protocol-Version", protocol).timeout(Duration::from_secs(2)).send().await;
+            let _ = http
+                .delete(url)
+                .bearer_auth(token.expose())
+                .header("Mcp-Session-Id", session)
+                .header("MCP-Protocol-Version", protocol)
+                .timeout(Duration::from_secs(2))
+                .send()
+                .await;
         });
     }
 }
@@ -289,46 +318,94 @@ mod tests {
     use base64::Engine;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     fn snapshot(url: String) -> DesktopSnapshot {
-        DesktopSnapshot { profile: DesktopProfile { id: "fixture-desktop".into(), revision: 1,
-            name: "Fixture".into(), mcp_url: url, token_present: true }, token: Secret::new("fixture-native-token".into()).unwrap() }
+        DesktopSnapshot {
+            profile: DesktopProfile {
+                id: "fixture-desktop".into(),
+                revision: 1,
+                name: "Fixture".into(),
+                mcp_url: url,
+                token_present: true,
+            },
+            token: Secret::new("fixture-native-token".into()).unwrap(),
+        }
     }
     fn image() -> String {
         use image::ImageEncoder;
         let mut bytes = Vec::new();
-        image::codecs::png::PngEncoder::new(&mut bytes).write_image(&[25, 50, 75], 1, 1, image::ExtendedColorType::Rgb8).unwrap();
+        image::codecs::png::PngEncoder::new(&mut bytes)
+            .write_image(&[25, 50, 75], 1, 1, image::ExtendedColorType::Rgb8)
+            .unwrap();
         base64::engine::general_purpose::STANDARD.encode(bytes)
     }
-    async fn fixture(sse: bool, bad_id: bool, is_error: bool) -> (String, tokio::task::JoinHandle<Vec<String>>) {
+    async fn fixture(
+        sse: bool,
+        bad_id: bool,
+        is_error: bool,
+    ) -> (String, tokio::task::JoinHandle<Vec<String>>) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}/mcp", listener.local_addr().unwrap());
         let task = tokio::spawn(async move {
             let mut methods = Vec::new();
             loop {
                 let (mut stream, _) = listener.accept().await.unwrap();
-                let mut raw = Vec::new(); let mut byte = [0u8; 1];
-                while !raw.ends_with(b"\r\n\r\n") { stream.read_exact(&mut byte).await.unwrap(); raw.push(byte[0]); }
+                let mut raw = Vec::new();
+                let mut byte = [0u8; 1];
+                while !raw.ends_with(b"\r\n\r\n") {
+                    stream.read_exact(&mut byte).await.unwrap();
+                    raw.push(byte[0]);
+                }
                 let header = String::from_utf8(raw).unwrap();
-                assert!(header.to_lowercase().contains("authorization: bearer fixture-native-token"));
+                assert!(header
+                    .to_lowercase()
+                    .contains("authorization: bearer fixture-native-token"));
                 if header.starts_with("DELETE") {
                     methods.push("DELETE".into());
-                    stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await.unwrap();
+                    stream
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                        )
+                        .await
+                        .unwrap();
                     return methods;
                 }
-                let length: usize = header.lines().find_map(|line| line.to_lowercase().strip_prefix("content-length:").map(|n| n.trim().parse().unwrap())).unwrap();
-                let mut body = vec![0; length]; stream.read_exact(&mut body).await.unwrap();
+                let length: usize = header
+                    .lines()
+                    .find_map(|line| {
+                        line.to_lowercase()
+                            .strip_prefix("content-length:")
+                            .map(|n| n.trim().parse().unwrap())
+                    })
+                    .unwrap();
+                let mut body = vec![0; length];
+                stream.read_exact(&mut body).await.unwrap();
                 let request: Value = serde_json::from_slice(&body).unwrap();
-                let method = request["method"].as_str().unwrap(); methods.push(method.into());
+                let method = request["method"].as_str().unwrap();
+                methods.push(method.into());
                 if method == "notifications/initialized" {
-                    assert!(header.to_lowercase().contains("mcp-session-id: native-fixture-session"));
-                    stream.write_all(b"HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await.unwrap(); continue;
+                    assert!(header
+                        .to_lowercase()
+                        .contains("mcp-session-id: native-fixture-session"));
+                    stream.write_all(b"HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await.unwrap();
+                    continue;
                 }
-                let result = if method == "initialize" { json!({"protocolVersion":"2025-03-26","capabilities":{},"serverInfo":{"name":"fixture","version":"1"}}) } else {
-                    assert_eq!(method, "tools/call"); assert_eq!(request["params"]["name"], "screenshot");
+                let result = if method == "initialize" {
+                    json!({"protocolVersion":"2025-03-26","capabilities":{},"serverInfo":{"name":"fixture","version":"1"}})
+                } else {
+                    assert_eq!(method, "tools/call");
+                    assert_eq!(request["params"]["name"], "screenshot");
                     json!({"isError":is_error,"content":[{"type":"image","mimeType":"image/png","data":image()}]})
                 };
                 let reply = json!({"jsonrpc":"2.0","id":if bad_id && method != "initialize" {json!(999)} else {request["id"].clone()},"result":result});
-                let body = if sse { format!("event: message\r\ndata: {reply}\r\n\r\n") } else { reply.to_string() };
-                let content_type = if sse { "text/event-stream" } else { "application/json" };
+                let body = if sse {
+                    format!("event: message\r\ndata: {reply}\r\n\r\n")
+                } else {
+                    reply.to_string()
+                };
+                let content_type = if sse {
+                    "text/event-stream"
+                } else {
+                    "application/json"
+                };
                 let response = format!("HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nMcp-Session-Id: native-fixture-session\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len());
                 stream.write_all(response.as_bytes()).await.unwrap();
             }
@@ -337,16 +414,24 @@ mod tests {
     }
     #[tokio::test]
     async fn direct_screenshot_negotiates_json_and_sse_without_tools_list() {
-        for sse in [false,true] {
+        for sse in [false, true] {
             let (url, task) = fixture(sse, false, false).await;
             let shot = screenshot(snapshot(url)).await.unwrap();
             assert_eq!(shot.mime, "image/png");
-            assert_eq!(task.await.unwrap(), ["initialize","notifications/initialized","tools/call","DELETE"]);
+            assert_eq!(
+                task.await.unwrap(),
+                [
+                    "initialize",
+                    "notifications/initialized",
+                    "tools/call",
+                    "DELETE"
+                ]
+            );
         }
     }
     #[tokio::test]
     async fn direct_screenshot_rejects_wrong_rpc_identity_and_tool_error_and_deletes_session() {
-        for (bad_id, is_error) in [(true,false),(false,true)] {
+        for (bad_id, is_error) in [(true, false), (false, true)] {
             let (url, task) = fixture(true, bad_id, is_error).await;
             assert!(screenshot(snapshot(url)).await.is_err());
             assert_eq!(task.await.unwrap().last().unwrap(), "DELETE");
@@ -354,9 +439,35 @@ mod tests {
     }
     #[tokio::test]
     async fn direct_http_is_limited_to_tailnet_or_loopback() {
-        assert!(Mcp::connect(snapshot("http://192.168.1.1/mcp".into())).await.is_err());
-        for ip in ["127.0.0.1", "::1", "100.64.0.1", "100.127.255.255", "fd7a:115c:a1e0::1"] { assert!(trusted_http(ip.parse().unwrap())); }
-        for ip in ["192.168.1.1", "10.0.0.1", "100.63.255.255", "100.128.0.1", "fd7a:115c:a1e1::1"] { assert!(!trusted_http(ip.parse().unwrap())); }
-        for url in ["http://user@127.0.0.1/mcp", "http://@127.0.0.1/mcp", "http://127.0.0.1/mcp?token=x", "http://127.0.0.1/mcp#fragment", "ftp://127.0.0.1/mcp"] { assert!(canonical_url(url).is_err()); }
+        assert!(Mcp::connect(snapshot("http://192.168.1.1/mcp".into()))
+            .await
+            .is_err());
+        for ip in [
+            "127.0.0.1",
+            "::1",
+            "100.64.0.1",
+            "100.127.255.255",
+            "fd7a:115c:a1e0::1",
+        ] {
+            assert!(trusted_http(ip.parse().unwrap()));
+        }
+        for ip in [
+            "192.168.1.1",
+            "10.0.0.1",
+            "100.63.255.255",
+            "100.128.0.1",
+            "fd7a:115c:a1e1::1",
+        ] {
+            assert!(!trusted_http(ip.parse().unwrap()));
+        }
+        for url in [
+            "http://user@127.0.0.1/mcp",
+            "http://@127.0.0.1/mcp",
+            "http://127.0.0.1/mcp?token=x",
+            "http://127.0.0.1/mcp#fragment",
+            "ftp://127.0.0.1/mcp",
+        ] {
+            assert!(canonical_url(url).is_err());
+        }
     }
 }
