@@ -1,8 +1,18 @@
 # 獨立 Screens 與直接 MCP 桌面預覽
 
-Screen 是保存在 App 的獨立 instance-mcp 桌面入口，與 Computers／Agents 的 Runtime Host 分開。App 原生層直接向選定的 instance-mcp 呼叫 `screenshot`，圖片不經工作 PTY、Runtime 截圖 Shell 或 coding AI 轉送。純終端不需要任何 Screen；同一 Screen 可供多個分頁及其他使用者共同觀看，不提供獨占、租約或桌面重設。
+Screen 是保存在 App 的獨立 instance-mcp 桌面入口，與 Computers／Agents 的 Runtime Host 分開。App 原生層直接向選定的 instance-mcp 呼叫 `screenshot`，圖片不經工作 PTY、Runtime 截圖 Shell 或 coding AI 轉送。僅使用遠端 Shell 時不需要設定 Screen；同一 Screen 可供多個分頁及其他使用者共同觀看，不提供獨占、租約或桌面重設。
 
-## 兩條路徑指向同一桌面
+## Ubuntu 終端機預覽
+
+TUI 的左上連線區管理 Host／Agent／Shell 與 Screens，左下顯示桌面圖片，右側保留分頁與終端。連線區按 `g` 切換 Hosts／Screens，Screens 中以 `n`／`e`／`d` 新增／編輯／刪除。token 輸入遮罩，保留 token 的空白編輯仍須符合核心的 URL 與 revision 規則。
+
+每個分頁以 `Ctrl-] c` 明確選擇 Screen，選單第一列可停止。選擇只屬於目前本機分頁，不會配置遠端 Shell 的 AI 工具 broker，也不會在重開程式時自動恢復。未選擇或背景分頁不擷取。
+
+預覽沿用核心直接 MCP `screenshot` 與相同的 URL、token、TLS、圖片驗證規則。PNG／JPEG 解碼後，以 Halfblocks 的字元前景與背景色呈現真實截圖，保留圖片比例。固定使用 Halfblocks，不發出能力查詢或啟用 Kitty、Sixel、iTerm2 原生圖片協定；不需要本機圖形桌面。圖片不提供遠端桌面輸入。
+
+網路與圖片處理在背景依序完成，同時最多一個擷取請求與一個有界處理工作。目標變更先清除舊圖，既有請求仍正常完成 MCP session 清理；TabId、generation、Screen id／revision 與預覽尺寸共同排除晚到結果。解碼受 PNG／JPEG、8 MiB 圖片、4096 像素邊長與 64 MiB 配置上限限制，預覽區最多 160×80 字元。錯誤清除舊圖並顯示安全訊息。操作見 [Ubuntu 終端機版](../platforms/linux.md)。
+
+## Windows／Android 的預覽與工具路徑
 
 ```text
 App native -- direct screenshot ---------------------> instance-mcp -> desktop
@@ -14,7 +24,7 @@ App -- temporary raw/no-echo configure Shell -+
 
 預覽與 AI 工具入口是兩個狀態。預覽成功只代表 App 可擷取圖片，不能當成 AI 已載入 MCP。Shell client 與 coding CLI 的標準 MCP stdio proxy 經此 Shell 的記憶體 broker 探索與呼叫同一上游；它完整回傳 MCP `content`、`isError` 與 `structuredContent`，另外帶來源 metadata。App 避開 PTY 傳圖，不表示過濾 AI 工具的圖片結果或只讓 AI 收到文字提示。
 
-## 建立、選擇與停止
+## Windows／Android 建立、選擇與停止
 
 Main 的 Screens 列出實際儲存的桌面與數量，可像其他分類收合。全站齒輪的新增連線分類可選 Screen，另有獨立 Screen 編輯／刪除區。名稱、MCP URL 與 token 保存規則見[連線設定](connections.md)，不預填私人入口或憑證。
 
@@ -30,7 +40,7 @@ URL 不允許帳密、query 或 fragment。HTTPS 使用正常憑證驗證；HTTP
 
 工具取消依逾時／關閉連線收尾；協定可用時 best-effort 發送 `notifications/cancelled`。取消不能保證撤銷上游已開始的操作。錯誤訊息不回顯 token 或完整私人設定。
 
-## 選擇供本連線 Shell 與 coding CLI 使用
+## Windows／Android 選擇供 Shell 與 coding CLI 使用
 
 Owner 最新範圍是 App 連入的工作 Shell，以及它裡面的 coding CLI；Discord Agent 暫不接入，整台 Host 共用的 broker 也不在範圍。新工作 Shell 在 Bash／CLI 啟動前就持有未配置的 supervisor broker，因此可先選 Screen，再由 Shell 命令或稍後啟動的 coding CLI 使用相同選擇。CLI 結束不清除 Shell 選擇，明確取消工具或 Shell 結束才拒絕新工具呼叫。
 
@@ -46,4 +56,4 @@ App 不新增 Codex 專用啟動按鈕，不自動執行 CLI。新 Shell 的 sco
 
 ## 附錄：實作與參考
 
-[預覽元件](../../apps/client/src/shared/components/PreviewPanel.vue)、[憑證保護](credential-storage.md)。
+[預覽元件](../../apps/client/src/shared/components/PreviewPanel.vue)、[TUI 預覽](../../crates/art-term-tui/src/preview.rs)、[憑證保護](credential-storage.md)。

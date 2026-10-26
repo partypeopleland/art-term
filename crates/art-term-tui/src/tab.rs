@@ -86,6 +86,7 @@ struct Action {
 }
 
 pub(crate) struct TabClient {
+    id: TabId,
     label: String,
     host: String,
     actions: mpsc::Sender<Action>,
@@ -96,6 +97,9 @@ pub(crate) struct TabClient {
     budget: Arc<AtomicUsize>,
 }
 impl TabClient {
+    pub(crate) fn id(&self) -> TabId {
+        self.id
+    }
     pub(crate) fn label(&self) -> &str {
         &self.label
     }
@@ -193,6 +197,7 @@ struct Tab {
 }
 
 pub(super) fn spawn(
+    id: TabId,
     label: String,
     handle: SessionHandle,
     size: TerminalSize,
@@ -252,6 +257,7 @@ pub(super) fn spawn(
     });
     (
         TabClient {
+            id,
             label,
             host: host.clone(),
             actions,
@@ -765,6 +771,7 @@ mod tests {
         }));
         (
             TabClient {
+                id: TabId(0),
                 label: "Fixture".into(),
                 host: "host".into(),
                 actions,

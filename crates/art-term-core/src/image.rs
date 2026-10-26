@@ -1,4 +1,4 @@
-//! Screenshot image validation for non-terminal frontends. PNG/JPEG only;
+//! Screenshot image validation shared by graphical and terminal clients. PNG/JPEG only;
 //! byte-size, dimension, and allocation caps are enforced before and during
 //! a full decode. Returns the validated *original* bytes (never a
 //! re-encoded thumbnail) so a GUI can render the real image.

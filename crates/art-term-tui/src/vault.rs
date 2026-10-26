@@ -2,7 +2,6 @@ use aes_gcm::{
     aead::{Aead, KeyInit, Payload},
     Aes256Gcm, Nonce,
 };
-use argon2::{Algorithm, Argon2, Params, Version};
 use art_term_core::openab::{
     api::ApiError,
     profiles::HostStore,
@@ -19,7 +18,8 @@ use std::{
 use zeroize::Zeroizing;
 
 const VAULT_MAGIC: &[u8; 8] = b"ARTTVLT\x01";
-const VAULT_AAD: &[u8] = b"art-term/tui/wrapped-master/v1\0";
+const ACCOUNT_MAGIC: &[u8; 7] = b"ARTTAK\x01";
+const ACCOUNT_BYTES: usize = ACCOUNT_MAGIC.len() + KEY_BYTES;
 const RECORD_MAGIC: &[u8; 6] = b"ATTUI\x01";
 const RECORD_AAD: &[u8] = b"art-term/tui/credential/v1\0";
 const SALT_BYTES: usize = 16;
@@ -34,12 +34,8 @@ const CONFIG_LIMIT: u64 = 1024 * 1024;
 pub(crate) struct VaultPaths {
     config: PathBuf,
     metadata: PathBuf,
+    account_key: PathBuf,
     lock: PathBuf,
-}
-
-pub(crate) enum VaultState {
-    Fresh,
-    Existing,
 }
 
 impl VaultPaths {
@@ -69,7 +65,7 @@ impl VaultPaths {
                     .create(&directory)
                     .map_err(|_| ApiError::Storage)?;
                 let metadata = fs::symlink_metadata(&directory).map_err(|_| ApiError::Storage)?;
-                if !metadata.is_dir() || !owned(&metadata) || metadata.mode() & 0o077 != 0 {
+                if !metadata.is_dir() || !owned(&metadata) || metadata.mode() & 0o777 != 0o700 {
                     return Err(ApiError::Storage);
                 }
                 directory.join("connections.toml")
@@ -84,31 +80,25 @@ impl VaultPaths {
         let name = config.file_name().ok_or(ApiError::Storage)?;
         let mut metadata = name.to_os_string();
         metadata.push(".vault-v1");
+        let mut account_key = name.to_os_string();
+        account_key.push(".account-key-v1");
         let mut lock = name.to_os_string();
         lock.push(".vault-lock");
         let parent = config.parent().ok_or(ApiError::Storage)?;
         Ok(Self {
             metadata: parent.join(metadata),
+            account_key: parent.join(account_key),
             lock: parent.join(lock),
             config,
         })
     }
 
-    pub(crate) fn state(&self) -> Result<VaultState, ApiError> {
-        writable_parent(&self.config)?;
-        let config_exists = inspect_optional_file(&self.config, CONFIG_LIMIT)?;
-        if inspect_optional_file(&self.metadata, METADATA_BYTES as u64)? {
-            Ok(VaultState::Existing)
-        } else if config_exists {
-            Err(ApiError::Storage)
-        } else {
-            Ok(VaultState::Fresh)
-        }
-    }
-
     fn acquire(&self) -> Result<Arc<File>, ApiError> {
         writable_parent(&self.config)?;
         let lock = private_file(&self.lock, true)?;
+        if lock.metadata().map_err(|_| ApiError::Storage)?.len() != 0 {
+            return Err(ApiError::Storage);
+        }
         lock.try_lock().map_err(|_| ApiError::Storage)?;
         Ok(Arc::new(lock))
     }
@@ -161,7 +151,7 @@ fn writable_parent(path: &Path) -> Result<(), ApiError> {
     safe_components(path)?;
     let parent = path.parent().ok_or(ApiError::Storage)?;
     let metadata = fs::symlink_metadata(parent).map_err(|_| ApiError::Storage)?;
-    if !metadata.is_dir() || !owned(&metadata) || metadata.mode() & 0o022 != 0 {
+    if !metadata.is_dir() || !owned(&metadata) || metadata.mode() & 0o777 != 0o700 {
         return Err(ApiError::Storage);
     }
     Ok(())
@@ -181,7 +171,7 @@ fn private_file(path: &Path, create: bool) -> Result<File, ApiError> {
     let metadata = file.metadata().map_err(|_| ApiError::Storage)?;
     if !metadata.is_file()
         || !owned(&metadata)
-        || metadata.mode() & 0o077 != 0
+        || metadata.mode() & 0o777 != 0o600
         || metadata.nlink() != 1
     {
         return Err(ApiError::Storage);
@@ -207,73 +197,16 @@ fn inspect_optional_file(path: &Path, limit: u64) -> Result<bool, ApiError> {
     }
 }
 
-fn derive_key(password: &str, salt: &[u8]) -> Result<Zeroizing<[u8; KEY_BYTES]>, ApiError> {
-    if password.is_empty() || password.len() > 1024 || salt.len() != SALT_BYTES {
+fn read_exact_private(path: &Path, length: usize) -> Result<Zeroizing<Vec<u8>>, ApiError> {
+    let mut bytes = Zeroizing::new(Vec::with_capacity(length + 1));
+    private_file(path, false)?
+        .take(length as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| ApiError::Storage)?;
+    if bytes.len() != length {
         return Err(ApiError::Storage);
     }
-    let params = Params::new(64 * 1024, 3, 1, Some(KEY_BYTES)).map_err(|_| ApiError::Storage)?;
-    let kdf = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
-    let mut key = Zeroizing::new([0; KEY_BYTES]);
-    kdf.hash_password_into(password.as_bytes(), salt, key.as_mut())
-        .map_err(|_| ApiError::Storage)?;
-    Ok(key)
-}
-
-fn metadata_aad(header: &[u8]) -> Vec<u8> {
-    let mut aad = VAULT_AAD.to_vec();
-    aad.extend_from_slice(header);
-    aad
-}
-
-fn wrap_master(password: &str, master: &[u8; KEY_BYTES]) -> Result<Vec<u8>, ApiError> {
-    let mut header = [0; METADATA_HEADER];
-    header[..VAULT_MAGIC.len()].copy_from_slice(VAULT_MAGIC);
-    getrandom::fill(&mut header[VAULT_MAGIC.len()..]).map_err(|_| ApiError::Storage)?;
-    let key = derive_key(
-        password,
-        &header[VAULT_MAGIC.len()..VAULT_MAGIC.len() + SALT_BYTES],
-    )?;
-    let cipher = Aes256Gcm::new_from_slice(key.as_ref()).map_err(|_| ApiError::Storage)?;
-    let ciphertext = cipher
-        .encrypt(
-            Nonce::from_slice(&header[METADATA_HEADER - NONCE_BYTES..]),
-            Payload {
-                msg: master,
-                aad: &metadata_aad(&header),
-            },
-        )
-        .map_err(|_| ApiError::Storage)?;
-    let mut bytes = header.to_vec();
-    bytes.extend_from_slice(&ciphertext);
     Ok(bytes)
-}
-
-fn unwrap_master(bytes: &[u8], password: &str) -> Result<Zeroizing<[u8; KEY_BYTES]>, ApiError> {
-    if bytes.len() != METADATA_BYTES || &bytes[..VAULT_MAGIC.len()] != VAULT_MAGIC {
-        return Err(ApiError::Storage);
-    }
-    let key = derive_key(
-        password,
-        &bytes[VAULT_MAGIC.len()..VAULT_MAGIC.len() + SALT_BYTES],
-    )?;
-    let cipher = Aes256Gcm::new_from_slice(key.as_ref()).map_err(|_| ApiError::Storage)?;
-    let master = Zeroizing::new(
-        cipher
-            .decrypt(
-                Nonce::from_slice(&bytes[METADATA_HEADER - NONCE_BYTES..METADATA_HEADER]),
-                Payload {
-                    msg: &bytes[METADATA_HEADER..],
-                    aad: &metadata_aad(&bytes[..METADATA_HEADER]),
-                },
-            )
-            .map_err(|_| ApiError::Storage)?,
-    );
-    let mut key = Zeroizing::new([0; KEY_BYTES]);
-    if master.len() != KEY_BYTES {
-        return Err(ApiError::Storage);
-    }
-    key.copy_from_slice(&master);
-    Ok(key)
 }
 
 fn install_metadata(path: &Path, bytes: &[u8]) -> Result<(), ApiError> {
@@ -352,32 +285,35 @@ pub(crate) struct Vault {
 }
 
 impl Vault {
-    pub(crate) fn initialize(
-        paths: VaultPaths,
-        password: Zeroizing<String>,
-    ) -> Result<Self, ApiError> {
+    pub(crate) fn open_account(paths: VaultPaths) -> Result<Self, ApiError> {
         let lock = paths.acquire()?;
-        if !matches!(paths.state()?, VaultState::Fresh) {
-            return Err(ApiError::Storage);
+        let config_exists = inspect_optional_file(&paths.config, CONFIG_LIMIT)?;
+        let legacy_exists = inspect_optional_file(&paths.metadata, METADATA_BYTES as u64)?;
+        if legacy_exists {
+            let legacy = read_exact_private(&paths.metadata, METADATA_BYTES)?;
+            if !legacy.starts_with(VAULT_MAGIC) {
+                return Err(ApiError::Storage);
+            }
         }
+        let account_exists = inspect_optional_file(&paths.account_key, ACCOUNT_BYTES as u64)?;
         let mut key = Zeroizing::new([0; KEY_BYTES]);
-        getrandom::fill(key.as_mut()).map_err(|_| ApiError::Storage)?;
-        let metadata = wrap_master(&password, &key)?;
-        install_metadata(&paths.metadata, &metadata)?;
-        Self::load(paths, key, lock)
-    }
-
-    pub(crate) fn unlock(paths: VaultPaths, password: Zeroizing<String>) -> Result<Self, ApiError> {
-        let lock = paths.acquire()?;
-        if !matches!(paths.state()?, VaultState::Existing) {
-            return Err(ApiError::Storage);
+        if account_exists {
+            let bytes = read_exact_private(&paths.account_key, ACCOUNT_BYTES)?;
+            if !bytes.starts_with(ACCOUNT_MAGIC) {
+                return Err(ApiError::Storage);
+            }
+            key.copy_from_slice(&bytes[ACCOUNT_MAGIC.len()..]);
+        } else {
+            // An absent profile file is the only automatic legacy migration.
+            // Its original password metadata remains untouched as a backup.
+            if config_exists {
+                return Err(ApiError::Storage);
+            }
+            getrandom::fill(key.as_mut()).map_err(|_| ApiError::Storage)?;
+            let mut bytes = Zeroizing::new(ACCOUNT_MAGIC.to_vec());
+            bytes.extend_from_slice(key.as_ref());
+            install_metadata(&paths.account_key, &bytes)?;
         }
-        let mut bytes = Vec::new();
-        private_file(&paths.metadata, false)?
-            .take(METADATA_BYTES as u64 + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|_| ApiError::Storage)?;
-        let key = unwrap_master(&bytes, &password)?;
         Self::load(paths, key, lock)
     }
 
@@ -408,7 +344,7 @@ mod tests {
 
     fn directory() -> tempfile::TempDir {
         tempfile::Builder::new()
-            .prefix("art-term-tui-vault-")
+            .prefix("art-term-vault-")
             .permissions(fs::Permissions::from_mode(0o700))
             .tempdir_in("/tmp")
             .unwrap()
@@ -416,10 +352,6 @@ mod tests {
 
     fn paths(root: &Path) -> VaultPaths {
         VaultPaths::resolve(Some(root.join("connections.toml"))).unwrap()
-    }
-
-    fn password() -> Zeroizing<String> {
-        Zeroizing::new("fixture vault password 測試".into())
     }
 
     fn secret(value: &str) -> Secret {
@@ -488,12 +420,12 @@ mod tests {
     }
 
     #[test]
-    fn host_and_screen_survive_unlock_while_refusals_keep_original_bytes() {
+    fn host_and_screen_survive_restart_while_refusals_keep_original_bytes() {
         let root = directory();
         let original_paths = paths(root.path());
-        let metadata_path = original_paths.metadata.clone();
+        let metadata_path = original_paths.account_key.clone();
         let config_path = original_paths.config.clone();
-        let vault = Vault::initialize(original_paths, password()).unwrap();
+        let vault = Vault::open_account(original_paths).unwrap();
         let store = vault.store();
         let host = store
             .add(
@@ -522,15 +454,11 @@ mod tests {
         assert_eq!(fs::metadata(&config_path).unwrap().mode() & 0o777, 0o600);
         assert_eq!(fs::metadata(&metadata_path).unwrap().mode() & 0o777, 0o600);
         drop(vault);
-        assert!(Vault::unlock(paths(root.path()), password()).is_err());
+        assert!(Vault::open_account(paths(root.path())).is_err());
         drop(store);
-        assert!(Vault::initialize(paths(root.path()), password()).is_err());
-        assert!(
-            Vault::unlock(paths(root.path()), Zeroizing::new("wrong password".into())).is_err()
-        );
         assert_eq!(fs::read(&config_path).unwrap(), config_bytes);
         assert_eq!(fs::read(&metadata_path).unwrap(), metadata_bytes);
-        let unlocked = Vault::unlock(paths(root.path()), password()).unwrap();
+        let unlocked = Vault::open_account(paths(root.path())).unwrap();
         assert_eq!(
             unlocked
                 .store()
@@ -548,7 +476,7 @@ mod tests {
         let mut damaged = metadata_bytes.clone();
         *damaged.last_mut().unwrap() ^= 1;
         fs::write(&metadata_path, &damaged).unwrap();
-        assert!(Vault::unlock(paths(root.path()), password()).is_err());
+        assert!(Vault::open_account(paths(root.path())).is_err());
         assert_eq!(fs::read(&metadata_path).unwrap(), damaged);
         assert_eq!(fs::read(&config_path).unwrap(), config_bytes);
     }
@@ -557,9 +485,9 @@ mod tests {
     fn screen_only_missing_key_never_creates_a_replacement() {
         let root = directory();
         let original_paths = paths(root.path());
-        let metadata_path = original_paths.metadata.clone();
+        let metadata_path = original_paths.account_key.clone();
         let config_path = original_paths.config.clone();
-        let vault = Vault::initialize(original_paths, password()).unwrap();
+        let vault = Vault::open_account(original_paths).unwrap();
         vault
             .store()
             .save_desktop(
@@ -574,9 +502,7 @@ mod tests {
         drop(vault);
         fs::remove_file(&metadata_path).unwrap();
         let original = fs::read(&config_path).unwrap();
-        assert!(paths(root.path()).state().is_err());
-        assert!(Vault::initialize(paths(root.path()), password()).is_err());
-        assert!(Vault::unlock(paths(root.path()), password()).is_err());
+        assert!(Vault::open_account(paths(root.path())).is_err());
         assert!(!metadata_path.exists());
         assert_eq!(fs::read(&config_path).unwrap(), original);
     }
@@ -585,29 +511,24 @@ mod tests {
     fn interrupted_initialization_preserves_installed_key_and_unlocks_empty_store() {
         let root = directory();
         let original_paths = paths(root.path());
-        let metadata_path = original_paths.metadata.clone();
+        let metadata_path = original_paths.account_key.clone();
         let config_path = original_paths.config.clone();
-        let vault = Vault::initialize(original_paths, password()).unwrap();
+        let vault = Vault::open_account(original_paths).unwrap();
         assert!(!config_path.exists());
         let original = fs::read(&metadata_path).unwrap();
         assert!(install_metadata(&metadata_path, &[1; METADATA_BYTES]).is_err());
         drop(vault);
-        assert!(matches!(
-            paths(root.path()).state().unwrap(),
-            VaultState::Existing
-        ));
-        assert!(Vault::initialize(paths(root.path()), password()).is_err());
-        let reopened = Vault::unlock(paths(root.path()), password()).unwrap();
+        let reopened = Vault::open_account(paths(root.path())).unwrap();
         assert!(reopened.store().list().unwrap().is_empty());
         assert_eq!(fs::read(&metadata_path).unwrap(), original);
     }
 
     #[test]
-    fn unlocking_checks_screen_ciphertext_even_when_host_list_is_empty() {
+    fn reopening_checks_screen_ciphertext_even_when_host_list_is_empty() {
         let root = directory();
         let original_paths = paths(root.path());
         let config_path = original_paths.config.clone();
-        let vault = Vault::initialize(original_paths, password()).unwrap();
+        let vault = Vault::open_account(original_paths).unwrap();
         vault
             .store()
             .save_desktop(
@@ -624,8 +545,105 @@ mod tests {
         let end = text[start..].find(']').unwrap() + start;
         let changed = format!("{}1{}", &text[..start], &text[end..]);
         fs::write(&config_path, &changed).unwrap();
-        assert!(Vault::unlock(paths(root.path()), password()).is_err());
+        assert!(Vault::open_account(paths(root.path())).is_err());
         assert_eq!(fs::read_to_string(&config_path).unwrap(), changed);
+    }
+
+    fn write_private(path: &Path, bytes: &[u8]) {
+        fs::write(path, bytes).unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).unwrap();
+    }
+
+    fn legacy_fixture() -> Vec<u8> {
+        let mut bytes = vec![17; METADATA_BYTES];
+        bytes[..VAULT_MAGIC.len()].copy_from_slice(VAULT_MAGIC);
+        bytes
+    }
+
+    #[test]
+    fn empty_legacy_preserves_backup_and_resumes_with_new_profiles() {
+        let root = directory();
+        let original_paths = paths(root.path());
+        let metadata = original_paths.metadata.clone();
+        let account = original_paths.account_key.clone();
+        let legacy = legacy_fixture();
+        write_private(&metadata, &legacy);
+        let vault = Vault::open_account(original_paths).unwrap();
+        assert_eq!(fs::read(&metadata).unwrap(), legacy);
+        assert!(account.exists());
+        drop(vault);
+        let vault = Vault::open_account(paths(root.path())).unwrap();
+        let host = vault
+            .store()
+            .add(
+                "Host".into(),
+                "https://fixture.example".into(),
+                secret("token"),
+            )
+            .unwrap();
+        drop(vault);
+        let vault = Vault::open_account(paths(root.path())).unwrap();
+        assert_eq!(
+            vault
+                .store()
+                .snapshot(&host.id)
+                .unwrap()
+                .credential
+                .expose(),
+            "token"
+        );
+        assert_eq!(fs::read(&metadata).unwrap(), legacy);
+    }
+
+    #[test]
+    fn nonempty_legacy_and_malformed_states_are_preserved_without_rekeying() {
+        let root = directory();
+        let original_paths = paths(root.path());
+        let legacy = legacy_fixture();
+        write_private(&original_paths.metadata, &legacy);
+        write_private(&original_paths.config, b"existing legacy profile bytes");
+        assert!(Vault::open_account(paths(root.path())).is_err());
+        assert!(!original_paths.account_key.exists());
+        assert_eq!(fs::read(&original_paths.metadata).unwrap(), legacy);
+        assert_eq!(
+            fs::read(&original_paths.config).unwrap(),
+            b"existing legacy profile bytes"
+        );
+        fs::remove_file(&original_paths.config).unwrap();
+        for malformed in [vec![], vec![0; METADATA_BYTES], vec![0; METADATA_BYTES + 1]] {
+            write_private(&original_paths.metadata, &malformed);
+            assert!(Vault::open_account(paths(root.path())).is_err());
+            assert!(!original_paths.account_key.exists());
+            assert_eq!(fs::read(&original_paths.metadata).unwrap(), malformed);
+        }
+    }
+
+    #[test]
+    fn account_key_requires_exact_versioned_bytes_and_private_permissions() {
+        let root = directory();
+        let original_paths = paths(root.path());
+        let account = original_paths.account_key.clone();
+        for malformed in [vec![], vec![0; ACCOUNT_BYTES], vec![0; ACCOUNT_BYTES + 1]] {
+            write_private(&account, &malformed);
+            assert!(Vault::open_account(paths(root.path())).is_err());
+            assert_eq!(fs::read(&account).unwrap(), malformed);
+        }
+        fs::remove_file(&account).unwrap();
+        drop(Vault::open_account(paths(root.path())).unwrap());
+        let original = fs::read(&account).unwrap();
+        assert_eq!(original.len(), ACCOUNT_BYTES);
+        assert!(original.starts_with(ACCOUNT_MAGIC));
+        fs::set_permissions(&account, fs::Permissions::from_mode(0o640)).unwrap();
+        assert!(Vault::open_account(paths(root.path())).is_err());
+        fs::set_permissions(&account, fs::Permissions::from_mode(0o600)).unwrap();
+        let hard = root.path().join("linked-key");
+        fs::hard_link(&account, &hard).unwrap();
+        assert!(Vault::open_account(paths(root.path())).is_err());
+        fs::remove_file(&hard).unwrap();
+        fs::rename(&account, &hard).unwrap();
+        symlink(&hard, &account).unwrap();
+        assert!(Vault::open_account(paths(root.path())).is_err());
+        assert_eq!(fs::read(&hard).unwrap(), original);
     }
 
     #[test]
@@ -650,7 +668,7 @@ mod tests {
         assert!(private_file(&fifo, false).is_err());
         let nested = root.path().join("nested");
         fs::create_dir(&nested).unwrap();
-        fs::set_permissions(&nested, fs::Permissions::from_mode(0o777)).unwrap();
+        fs::set_permissions(&nested, fs::Permissions::from_mode(0o755)).unwrap();
         assert!(VaultPaths::resolve(Some(nested.join("connections.toml"))).is_err());
         let directory_link = root.path().join("directory-link");
         symlink(root.path(), &directory_link).unwrap();
@@ -673,6 +691,7 @@ mod tests {
         let first = paths(root.path());
         let second = VaultPaths::resolve(Some(root.path().join("other.toml"))).unwrap();
         assert_ne!(first.metadata, second.metadata);
+        assert_ne!(first.account_key, second.account_key);
         assert_ne!(first.lock, second.lock);
     }
 
@@ -709,7 +728,7 @@ mod tests {
     #[ignore = "Invoked by the cross-process lock test with its private path"]
     fn lock_probe() {
         let path = PathBuf::from(std::env::var_os("ART_TERM_TEST_VAULT_LOCK_PROBE").unwrap());
-        assert!(path.starts_with("/tmp") && path.to_string_lossy().contains("art-term-tui-vault-"));
+        assert!(path.starts_with("/tmp") && path.to_string_lossy().contains("art-term-vault-"));
         assert!(private_file(&path, false).unwrap().try_lock().is_err());
     }
 }

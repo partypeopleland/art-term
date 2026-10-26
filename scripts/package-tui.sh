@@ -53,11 +53,13 @@ with tempfile.TemporaryDirectory(prefix="art-term-package-") as directory:
         "# art-term Ubuntu 終端機版\n\n"
         "候選目標 Ubuntu 24.04 x86_64，可在 Server、Desktop 或 SSH 終端執行 ./art-term，不需要圖形桌面。\n"
         "可將 art-term 複製至自己的 ~/.local/bin，勿以 sudo 啟動。\n"
-        "首次啟動設定解鎖密碼，之後每次輸入相同密碼。密碼無法重設，請保留加密匯出備份。\n"
-        "預設設定在 ${XDG_CONFIG_HOME:-$HOME/.config}/art-term-tui；請保留整個目錄與 vault metadata。\n"
+        "登入目前 Linux 帳號後即可直接使用，不需另外設定或輸入解鎖密碼。\n"
+        "預設設定在 ${XDG_CONFIG_HOME:-$HOME/.config}/art-term-tui；請保留整個目錄，尤其是 connections.toml.account-key-v1 帳號金鑰；請勿公開或分開搬移。\n"
         "使用 --config /path/connections.toml 可指定其他檔案，相關金鑰與鎖定資料與它同目錄。\n"
         "使用 --help 查看選項，畫面內的 Help 查看快捷鍵。主機仍使用既有 art-term Runtime/helper。\n"
-        "關閉本機分頁只會脫離，不刪除遠端 Shell。本版不提供圖形桌面預覽。\n",
+        "畫面分為左上連線、左下桌面預覽及右側分頁終端。Ctrl-] c 可選擇目前分頁的 Screen。\n"
+        "預覽以彩色方塊顯示真實截圖，可在 SSH 終端使用。Ctrl-] h / t / v 切換三區焦點。\n"
+        "關閉本機分頁只會脫離，不刪除遠端 Shell。可攜式加密匯入／匯出仍使用檔案密碼。\n",
         encoding="utf-8",
     )
     for path in [bundle, *bundle.rglob("*")]:

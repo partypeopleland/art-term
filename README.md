@@ -4,7 +4,7 @@
 
 Use your Linux terminal and coding CLIs from a Windows PC or Android phone. Your commands keep running on the Linux host; art-term gives you Shell tabs, terminal history, and an optional view of the remote desktop.
 
-For Ubuntu 24.04 Server, Desktop, or SSH sessions, the `art-term` terminal client manages the same remote Hosts and Shells without a graphical desktop. See [Ubuntu terminal client](docs/platforms/linux.md) for building, password-protected configuration, and keyboard controls. Candidate builds are tracked in the development issue; this does not add a published release asset.
+For Ubuntu 24.04 Server, Desktop, or SSH sessions, the `art-term` terminal client manages the same remote Hosts and Shells without a graphical desktop. Its workspace has a Host/Shell sidebar, a live Screen screenshot pane, and tabbed terminals. Startup uses a private account key without an extra password. See [Ubuntu terminal client](docs/platforms/linux.md) for building, storage, and keyboard controls. Candidate builds are tracked in the development issue; this does not add a published release asset.
 
 ## Preview
 

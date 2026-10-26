@@ -1,6 +1,6 @@
 # 憑證、執行時檔案與清理
 
-連線檔案需要能重開使用，也需要避免複製檔案就取得管理憑證。App 因此把可直接讀取的連線 metadata 與保護後的密文一起存進唯一 TOML。Windows 使用 DPAPI，Android 使用 Keystore，Ubuntu 終端機版則以使用者輸入的密碼解鎖本機主金鑰。各客戶端的資料位置與解鎖方式分開，搬移使用加密匯出／匯入。
+連線檔案需要能重開使用，也需要避免複製檔案就取得管理憑證。App 因此把可直接讀取的連線 metadata 與保護後的密文一起存進唯一 TOML。Windows 使用 DPAPI，Android 使用 Keystore，Ubuntu 終端機版使用 Unix 帳號權限保護的本機金鑰。各客戶端的資料位置與金鑰保護方式分開，搬移使用加密匯出／匯入。
 
 ```text
 connections.toml
@@ -42,19 +42,22 @@ Android 的 marker 記錄 operator key 曾經使用過，並不保存金鑰。�
 | Android `<app_data_dir>/host-keys.json`、`host-keys.lock` | 歷史 pin 資料，保留但目前 App 不再讀寫 |
 | APK | 不含 connections.toml 預設 asset 或原生嵌入設定 |
 | TUI `${XDG_CONFIG_HOME:-$HOME/.config}/art-term-tui/connections.toml` | 唯一 Host／Screen TOML，含 TUI 主金鑰保護的密文 |
-| TUI TOML 同目錄 `<filename>.vault-v1` | Argon2id 與 AES-GCM 保護的隨機主金鑰，需保留並以啟動密碼解鎖 |
+| TUI TOML 同目錄 `<filename>.account-key-v1` | `0600` 的隨機帳號金鑰，直接啟動，無額外密碼包裝 |
+| TUI TOML 同目錄 `<filename>.vault-v1` | 舊版密碼 metadata；安全空狀態升級時保留原檔作備份，不用於新啟動 |
 | TUI TOML 同目錄 `<filename>.vault-lock` | 程序間互斥；儲存及其 cipher 的所有持有者離開後才釋放 |
 | 使用者在系統選檔器指定的連線 JSON | 含管理憑證時以檔案密碼加密整份內容；不含憑證時為明文設定。自行保管／搬移，不放 Git 或公開文件 |
 
 HostStore 使用同目錄暫存檔及原子替換，revision/context 保護憑證綁定；讀檔／解密失敗保留原資料。保存／取得 snapshot 前核對載入檔案的指紋；檔案被外部修改或刪除時拒絕過期操作，請重啟。Host revision 與匯入預覽的 store snapshot 核對是程序內 compare-and-swap（CAS，狀態仍符合讀取基線才套用）保護；HostStore 本身沒有跨程序 CAS／鎖或 watcher。Windows／Android 仍不能多個 App 同寫；TUI 另以 vault lock 拒絕第二個寫入者。備份前關閉所有使用該設定的程序。
 
-## 純終端的密碼解鎖
+## 純終端的帳號金鑰
 
-TUI 首次啟動時要求確認新密碼，之後從控制終端讀取密碼。密碼不經命令列參數或環境變數，輸入時不回顯。固定成本的 Argon2id 從密碼與隨機 salt 衍生 wrapping key，再以 AES-256-GCM 解開隨機主金鑰；每筆憑證使用主金鑰、全新 nonce 及完整 CredentialContext 加密。主金鑰和密碼只保留在受保護的程序記憶體，磁碟沒有明文金鑰。
+TUI 不要求啟動或解鎖密碼，也不依賴桌面 keyring 或 D-Bus。首次安全初始化建立隨機 32-byte 帳號金鑰。`<filename>.account-key-v1` 是 7-byte `ARTTAK\x01` header 加上原始金鑰，共 39 bytes，沒有密碼包裝。Unix 帳號與檔案權限是保護邊界；同帳號程序能讀取金鑰。每筆憑證仍以 AES-256-GCM、全新 nonce 與完整 CredentialContext 加密，沿用 `ATTUI` 記錄格式。
 
-設定目錄預設為 `0700`，TOML、key metadata 及鎖檔為 `0600`，要求目前使用者持有且不是 symlink、hardlink 或特殊檔案。自訂 `--config` 的父目錄必須已存在並可安全寫入。metadata 先以不覆蓋既有檔案的原子方式保存；若初始化在 TOML 建立前中斷，下次仍解鎖原主金鑰。
+設定目錄必須屬於目前使用者且為 `0700`，TOML、帳號金鑰與鎖檔為 `0600`。程式拒絕 symlink、hardlink、特殊檔案與不符格式或長度的金鑰。鎖檔必須為空檔，儲存及 cipher 的所有持有者離開後才釋放程序鎖。自訂 `--config` 的父目錄必須先存在且符合相同權限。
 
-已存在 TOML 卻缺少 key metadata 時拒絕建立新金鑰，即使設定只含 Screen。密碼錯誤、metadata 損壞或 Host／Screen 無法解密時保留原檔。刪除最後一筆連線仍保留主金鑰，不能以刪除 key metadata 重設密碼。備份需保留整個設定目錄，跨裝置則使用 App 的加密搬移檔。TUI 不讀取 GUI 的平台金鑰，詳細操作見 [Ubuntu 終端機版](../platforms/linux.md)。
+只有 TOML 不存在，且既有 `.vault-v1` 是正確的 84-byte `ARTTVLT\x01` metadata 時，才允許自動初始化新帳號金鑰；舊 metadata 原樣保留。已有 TOML 的舊密碼 vault 不會自動轉換，須另行安排遷移或使用原版加密匯出。已有設定卻缺少金鑰、格式損壞或憑證無法解密時，程式拒絕開啟並保留原資料，不提示啟動密碼或建立替代金鑰。
+
+刪除最後一筆連線仍保留帳號金鑰。備份需保留整個設定目錄；跨裝置使用加密搬移檔，不直接複製 GUI 平台密文。搬移檔的檔案密碼及核心 Argon2id 加密仍保留，與 TUI 啟動無關。詳細操作見 [Ubuntu 終端機版](../platforms/linux.md)。
 
 ## Screen token 的保存與傳送
 
@@ -70,7 +73,7 @@ Android 已有 operator key 時沿用它；初始化若發現 marker 缺少，�
 
 DPAPI復原需原Windows帳號／環境；Android的blob與Keystore須配對，單拷blob不是跨機備份。清 data／卸載會破壞 operator 與 SSH identity 連續性，不能當成修復部分遺失／損壞的方法。更新APK必須用原certificate保持app沙盒。Android cloud backup／device-transfer 已禁用；HTTP MCP 僅依原生受限 Tailnet／loopback 規則開放，不因此允許 WebView 任意 cleartext 外連。
 
-跨裝置請使用[連線匯出／匯入](connection-transfer.md)，在新裝置解鎖後重新以本機 DPAPI／Keystore 保存。這條路徑不搬移上述平台金鑰或 session token；檔案密碼不持久化，解密預覽有兩分鐘期限。
+跨裝置請使用[連線匯出／匯入](connection-transfer.md)，在新裝置匯入後重新以本機 DPAPI、Keystore 或 TUI 帳號金鑰保存。這條路徑不搬移上述平台金鑰或 session token；檔案密碼不持久化，解密預覽有兩分鐘期限。
 
 目前不主動保存 scrollback、密碼或截圖到 log；終端／圖片在記憶體。測試與打包 log 由工具明示建立，分享前去除主機與終端內容。
 

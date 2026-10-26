@@ -19,17 +19,17 @@ sha2.workspace = true
 ratatui = { version = "=0.30.2", default-features = false, features = ["crossterm"] }
 crossterm = { version = "=0.29.0", features = ["event-stream"] }
 tui-term = "=0.3.4"
+ratatui-image = { version = "=11.1.0", default-features = false, features = ["crossterm"] }
+image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg"] }
 vt100 = "=0.16.2"
 futures-util = "0.3"
 aes-gcm = { version = "=0.10.3", features = ["zeroize"] }
-argon2 = { version = "=0.5.3", features = ["zeroize"] }
 getrandom = "=0.3.4"
 zeroize = "1.8"
 base64 = "0.22"
 uuid = { version = "1", features = ["v4"] }
 tempfile = "3"
 libc = "0.2"
-rpassword = "=7.5.4"
 
 [features]
 default = []

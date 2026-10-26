@@ -17,7 +17,7 @@
 | 受控端 MCP stdio 工具 bridge 與記憶體配置 | [Runtime 桌面 helper](refarch/runtime-desktop.md) |
 | Clone／fork 後本地打包、自有簽章與品牌調整 | [本地建置與自訂版本](platforms/local-build.md) |
 | Windows 工具鏈、操作差異、打包與驗收 | [Windows](platforms/windows.md) |
-| Ubuntu Server／Desktop 的純終端客戶端、密碼解鎖與打包 | [Ubuntu 終端機版](platforms/linux.md) |
+| Ubuntu Server／Desktop 的三區終端客戶端、帳號金鑰與打包 | [Ubuntu 終端機版](platforms/linux.md) |
 | GitHub Actions、EXE／APK 自動建置、簽章 Secrets 與 Release | [自動發布](platforms/releases.md) |
 | 功能回歸、unit／原生 E2E、測試計畫與本機執行 | [Windows 回歸測試](platforms/windows-regression.md) |
 | 哪些操作受保護、跨平台案例與驗收界線 | [功能測試矩陣](refarch/test-matrix.md) |

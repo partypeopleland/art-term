@@ -18,7 +18,7 @@ Android UI ----+                         +--> Android Keystore
 
 UI 透過 Tauri IPC（受權限限制的程序間呼叫）發出操作。共用核心保存連線身分、持有憑證並連接 Runtime；Windows DPAPI 與 Android Keystore 則負責裝置上的憑證保護。UI 可以顯示與操作分頁，但不能讀回已保存的管理憑證或 session token。
 
-Ubuntu 的 `art-term` 是直接在 TTY／SSH 執行的 Rust 程式，文字 UI 透過程序內的有界命令與不可變畫面溝通，不使用 WebView 或 Tauri IPC。每個分頁 actor 直接組合既有 core session／history API，vault 以密碼保護本機主金鑰。文字 UI 不取得已保存憑證，也不新增受控端協定。第一版保留既有 GUI 整合，避免為新增終端客戶端同時改動穩定的 Windows／Android。
+Ubuntu 的 `art-term` 是直接在 TTY／SSH 執行的 Rust 程式，文字 UI 透過程序內的有界命令與不可變畫面溝通，不使用 WebView 或 Tauri IPC。每個分頁 actor 直接組合既有 core session／history API，vault 以 Unix 帳號權限及私有檔案保護本機隨機金鑰，啟動不另設密碼。文字 UI 不取得已保存憑證，也不新增受控端協定。三區工作區的桌面預覽直接沿用核心 MCP 截圖，以 Halfblocks 顯示彩色圖片；不需要 GUI 或原生圖片協定偵測。第一版保留既有 GUI 整合，避免為新增終端客戶端同時改動穩定的 Windows／Android。
 
 ## 共用核心擁有連線生命週期
 

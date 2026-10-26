@@ -3,7 +3,7 @@ use crate::{
     vault::Vault,
 };
 use art_term_core::{
-    instance_mcp::DesktopProfile,
+    instance_mcp::{DesktopProfile, DesktopSnapshot},
     openab::{
         api::{AdminClient, ApiError, SessionGrant},
         history::{self, HistoryVersion},
@@ -85,6 +85,17 @@ pub(crate) struct HostEdit {
     pub base_url: String,
     pub credential: Zeroizing<String>,
 }
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ScreenSelection {
+    pub id: String,
+    pub revision: u64,
+}
+pub(crate) struct ScreenEdit {
+    pub previous: Option<ScreenSelection>,
+    pub name: String,
+    pub mcp_url: String,
+    pub credential: Zeroizing<String>,
+}
 #[derive(Clone)]
 pub(crate) struct ProfileView {
     pub hosts: Vec<HostProfile>,
@@ -101,6 +112,7 @@ pub(crate) struct ShellView {
     pub attached: bool,
     pub selection: ShellSelection,
 }
+#[derive(Clone)]
 pub(crate) struct ShellListView {
     pub host: HostSelection,
     pub shells: Vec<ShellView>,
@@ -292,6 +304,51 @@ impl Backend {
             screens: self.inner.store.desktops()?,
         })
     }
+    pub(crate) fn screen_snapshot(&self, selected: &ScreenSelection) -> Result<DesktopSnapshot> {
+        self.check_open()?;
+        let snapshot = self.inner.store.desktop(&selected.id)?;
+        if snapshot.profile.revision != selected.revision {
+            return Err(ApiError::StateChanged.into());
+        }
+        Ok(snapshot)
+    }
+    pub(crate) fn screen_is_current(&self, selected: &ScreenSelection) -> Result<bool> {
+        self.check_open()?;
+        Ok(self
+            .inner
+            .store
+            .desktops()?
+            .iter()
+            .any(|p| p.id == selected.id && p.revision == selected.revision))
+    }
+    pub(crate) async fn save_screen(&self, edit: ScreenEdit) -> Result<ScreenSelection> {
+        let _operation = self.inner.operations.lock().await;
+        self.check_open()?;
+        let credential = if edit.credential.is_empty() {
+            None
+        } else {
+            Some(Secret::new(edit.credential.to_string())?)
+        };
+        let profile = self.inner.store.save_desktop(
+            edit.previous.as_ref().map(|p| p.id.as_str()),
+            edit.previous.as_ref().map(|p| p.revision),
+            edit.name,
+            edit.mcp_url,
+            credential,
+        )?;
+        Ok(ScreenSelection {
+            id: profile.id,
+            revision: profile.revision,
+        })
+    }
+    pub(crate) async fn delete_screen(&self, screen: ScreenSelection) -> Result<()> {
+        let _operation = self.inner.operations.lock().await;
+        self.check_open()?;
+        self.inner
+            .store
+            .delete_desktop(&screen.id, screen.revision)?;
+        Ok(())
+    }
     pub(crate) async fn save_host(&self, edit: HostEdit) -> Result<HostSelection> {
         let _operation = self.inner.operations.lock().await;
         self.check_open()?;
@@ -433,6 +490,7 @@ impl Backend {
             names: self.inner.owned.clone(),
         });
         let (client, registration) = tab::spawn(
+            id,
             label,
             handle,
             size,
@@ -660,8 +718,7 @@ mod tests {
             .tempdir_in("/tmp")
             .unwrap();
         let paths = VaultPaths::resolve(Some(root.path().join("connections.toml"))).unwrap();
-        let vault =
-            Vault::initialize(paths, Zeroizing::new("backend fixture password".into())).unwrap();
+        let vault = Vault::open_account(paths).unwrap();
         (root, Backend::start(vault).unwrap())
     }
 
@@ -675,6 +732,44 @@ mod tests {
             })
             .await
             .unwrap()
+    }
+
+    #[tokio::test]
+    async fn screen_edits_require_current_revision_and_preserve_secret_on_blank_edit() {
+        let (_root, backend) = backend();
+        let first = backend
+            .save_screen(ScreenEdit {
+                previous: None,
+                name: "Screen fixture".into(),
+                mcp_url: "https://screen.example/mcp".into(),
+                credential: Zeroizing::new("fixture-screen-token".into()),
+            })
+            .await
+            .unwrap();
+        assert!(backend.screen_is_current(&first).unwrap());
+        let second = backend
+            .save_screen(ScreenEdit {
+                previous: Some(first.clone()),
+                name: "Updated fixture".into(),
+                mcp_url: "https://screen.example/mcp".into(),
+                credential: Zeroizing::new(String::new()),
+            })
+            .await
+            .unwrap();
+        assert!(!backend.screen_is_current(&first).unwrap());
+        assert!(backend.screen_snapshot(&first).is_err());
+        assert!(
+            backend
+                .screen_snapshot(&second)
+                .unwrap()
+                .profile
+                .token_present
+        );
+        assert!(backend.delete_screen(first).await.is_err());
+        backend.delete_screen(second.clone()).await.unwrap();
+        assert!(!backend.screen_is_current(&second).unwrap());
+        assert!(backend.screen_snapshot(&second).is_err());
+        backend.shutdown().await;
     }
 
     #[tokio::test]

@@ -10,13 +10,15 @@ Rust 核心、App 的原生整合與 Vue 畫面分開維護。前端放在 `apps
 crates/
   art-term-core/                  共用連線、設定、認證與工作生命週期
   art-term-tui/                   Ubuntu Server／Desktop 終端客戶端
-    src/main.rs                  art-term 命令與密碼解鎖入口
+    src/main.rs                  art-term 命令與帳號金鑰入口
     src/backend.rs               Host、Shell 管理與分頁建立
     src/tab.rs                   每個分頁的連線、歷史及恢復
     src/terminal.rs              VT 終端模型、鍵盤編碼及查詢回覆
-    src/ui.rs                    文字畫面、表單與分頁選擇
+    src/ui.rs                    三區工作區、焦點、表單與分頁選擇
+    src/layout.rs                共同區域尺寸與窄視窗配置
+    src/preview.rs               直接 MCP 截圖與彩色圖片處理
     src/tty.rs                   本機終端模式與退出還原
-    src/vault.rs                 密碼保護的本機主金鑰與儲存鎖
+    src/vault.rs                 私有帳號金鑰與儲存鎖
   art-term-gui/
     src/
       lib.rs                      Android 原生函式庫入口
@@ -49,7 +51,7 @@ apps/client/
 
 Ubuntu 的交付目標是獨立 `art-term` 執行檔，可在 Server、Desktop 或 SSH 的終端機使用。它直接依賴 `art-term-core`，不載入 GUI crate、WebKit、GTK、D-Bus keyring 或本機網頁伺服器。受控端繼續使用相同 Runtime／helper，準備方式不因這個客戶端改變。用法見 [Ubuntu 終端機版](../platforms/linux.md)。
 
-可從 repository 根目錄執行 `git ls-files apps/client/src crates/art-term-gui/src crates/art-term-core/src` 查看受版本管理的實際來源檔。建置、測試與預覽命令使用 `apps/client`，例如 `npm --prefix apps/client run typecheck`；完整流程見[本地建置](../platforms/local-build.md)與[畫面預覽](../platforms/ui-preview.md)。
+可從 repository 根目錄執行 `git ls-files apps/client/src crates/art-term-gui/src crates/art-term-core/src crates/art-term-tui/src` 查看受版本管理的實際來源檔。建置、測試與預覽命令使用 `apps/client`，例如 `npm --prefix apps/client run typecheck`；完整流程見[本地建置](../platforms/local-build.md)與[畫面預覽](../platforms/ui-preview.md)。
 
 ## 從畫面到遠端 Shell
 
@@ -95,7 +97,11 @@ SSH / local TTY -> text UI -> backend -> shared HostStore / AdminClient
 
 歷史捲動與使用者輸入依同一分頁排序。閱讀歷史時，輸入透過共同 helper 的 follow 操作回到即時畫面；結果不確定時拒絕重送。終端協定回覆仍直接回到原 PTY，不觸發 follow。歷史請求進行時仍處理輸出，避免遠端等待終端查詢回覆而互相卡住。重連沿用原 binding、token 及已解析游標，不建立新工作或重播輸入。關閉本機分頁只脫離連線，並清理該分頁自有的短命 helper。
 
-文字介面讀取不可變畫面，透過有界命令入口發出操作。網路工作與密碼雜湊不在畫面繪製迴圈執行。Host 及加密搬移沿用核心交易規則；密碼解鎖儲存另外持有程序間的寫入鎖，避免兩個 TUI 同時修改同一份設定。
+文字介面讀取不可變畫面，透過有界命令入口發出操作。網路、搬移檔密碼雜湊與圖片處理不在畫面繪製迴圈執行。Host 及加密搬移沿用核心交易規則；帳號金鑰儲存持有程序間寫入鎖，避免兩個 TUI 同時修改同一份設定。啟動不要求密碼，金鑰由私有檔案與 Unix 帳號權限保護，見[憑證保存](credential-storage.md)。
+
+工作區固定分成左上 Host／Agent／Shell 與 Screens、左下實際桌面圖片、右側分頁終端。單一 layout 計算繪製與 PTY 內容尺寸；窄視窗顯示焦點區域。只有終端焦點且沒有 modal 時送出一般按鍵與貼上。
+
+每個穩定 TabId 各自選擇或停止 Screen，只有當前可見分頁擷取。preview worker 沿用核心 `instance_mcp::screenshot`，在背景逐次完成 MCP 請求與有界圖片處理，以保留比例的 Halfblocks 彩色字元呈現 PNG／JPEG。沒有原生圖片協定偵測。切換、停止或錯誤立即清圖；TabId、generation、Screen id／revision 與區域尺寸共同拒絕晚到圖片。最多一個擷取與一個圖片處理工作，取消時等待既有請求正常清理，不累積佇列。
 
 ## 受控端提供固定介面
 

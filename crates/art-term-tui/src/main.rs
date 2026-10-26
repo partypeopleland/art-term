@@ -1,6 +1,10 @@
 #[cfg(unix)]
 mod backend;
 #[cfg(unix)]
+mod layout;
+#[cfg(unix)]
+mod preview;
+#[cfg(unix)]
 mod tab;
 #[cfg(unix)]
 mod terminal;
@@ -13,8 +17,6 @@ mod vault;
 
 #[cfg(unix)]
 use std::{io::IsTerminal, path::PathBuf, process::ExitCode};
-#[cfg(unix)]
-use zeroize::Zeroizing;
 
 #[cfg(unix)]
 #[derive(Debug, PartialEq, Eq)]
@@ -75,7 +77,7 @@ async fn main() -> ExitCode {
 async fn run() -> anyhow::Result<()> {
     let config = match command(std::env::args_os().skip(1))? {
         Command::Help => {
-            println!("art-term {}\n\nRemote Host/Shell terminal client for Ubuntu Server and Desktop.\n\nUsage: art-term [--config PATH]\n       art-term --help\n       art-term --version\n\nRuns directly in your terminal or SSH session. No graphical desktop is required.\nThe credential vault asks for its password on the controlling terminal.\n\nInside the app: Ctrl-] then ? opens help; Ctrl-] then q quits.\nCtrl-C and Ctrl-D are sent to the selected remote Shell.\n", env!("CARGO_PKG_VERSION"));
+            println!("art-term {}\n\nRemote Host/Shell terminal client for Ubuntu Server and Desktop.\n\nUsage: art-term [--config PATH]\n       art-term --help\n       art-term --version\n\nRuns directly in your terminal or SSH session. No graphical desktop is required.\nCredentials are encrypted using a private key belonging to your Unix account. No unlock password is required.\n\nInside the app: Ctrl-] then ? opens help; Ctrl-] then q quits.\nCtrl-C and Ctrl-D are sent to the selected remote Shell.\n", env!("CARGO_PKG_VERSION"));
             return Ok(());
         }
         Command::Version => {
@@ -94,30 +96,9 @@ async fn run() -> anyhow::Result<()> {
     );
     let paths = vault::VaultPaths::resolve(config)?;
     let startup_signals = tty::StartupSignals::install()?;
-    let vault = match paths.state()? {
-        vault::VaultState::Fresh => {
-            eprintln!(
-                "建立 art-term 加密憑證庫。請記住解鎖密碼。\nNew encrypted credential vault."
-            );
-            let password = Zeroizing::new(rpassword::prompt_password(
-                "設定解鎖密碼 / New vault password: ",
-            )?);
-            let confirmation = Zeroizing::new(rpassword::prompt_password(
-                "再次輸入密碼 / Confirm password: ",
-            )?);
-            anyhow::ensure!(
-                !password.is_empty() && *password == *confirmation,
-                "Passwords do not match or are empty. No vault was created."
-            );
-            drop(confirmation);
-            vault::Vault::initialize(paths, password)?
-        }
-        vault::VaultState::Existing => {
-            let password =
-                Zeroizing::new(rpassword::prompt_password("解鎖密碼 / Vault password: ")?);
-            vault::Vault::unlock(paths, password).map_err(|_| anyhow::anyhow!("Unable to unlock protected storage. Check the password and vault files; existing data was preserved."))?
-        }
-    };
+    let vault = vault::Vault::open_account(paths).map_err(|_| anyhow::anyhow!(
+        "Unable to open account-protected storage. Check private directory/key permissions and concurrent sessions. Existing profiles without an account key require explicit migration; files were preserved."
+    ))?;
     let backend = backend::Backend::start(vault)?;
     let result = ui::run(backend.clone(), startup_signals).await;
     backend.shutdown().await;

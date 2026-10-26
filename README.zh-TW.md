@@ -4,7 +4,7 @@
 
 用 Windows 電腦或 Android 手機，接著操作 Linux 上的終端與 coding CLI。指令和工具都在 Linux 主機執行；art-term 提供 Shell 分頁、歷史捲動，也能選配遠端桌面預覽。
 
-Ubuntu 24.04 Server、Desktop 或 SSH 可使用 `art-term` 終端機客戶端，以文字介面管理同一套遠端 Host／Shell，無需圖形桌面。建置、密碼解鎖與快捷鍵見 [Ubuntu 終端機版](docs/platforms/linux.md)。候選版本進度記錄於 [Issue 6](https://github.com/partypeopleland/art-term/issues/6)，尚未新增正式 Release 資產。
+Ubuntu 24.04 Server、Desktop 或 SSH 可使用 `art-term` 終端機客戶端，以文字介面管理同一套遠端 Host／Shell，無需圖形桌面。工作區分為 Host／Shell 側欄、實際 Screen 截圖預覽與多分頁終端，使用私有帳號金鑰直接啟動，不另設解鎖密碼。建置、保存與快捷鍵見 [Ubuntu 終端機版](docs/platforms/linux.md)。候選版本進度記錄於 [Issue 6](https://github.com/partypeopleland/art-term/issues/6)，尚未新增正式 Release 資產。
 
 ## 畫面預覽
 

@@ -49,7 +49,7 @@ impl StartupSignals {
                 _ = interrupt.recv() => libc::SIGINT,
             };
             if active.swap(false, Ordering::SeqCst) {
-                // A blocking password prompt cannot unwind on an external signal.
+                // Startup can fail before the UI installs its graceful signal handlers.
                 // SAFETY: the captured file owns the descriptor and snapshot.
                 unsafe {
                     libc::tcsetattr(tty.as_raw_fd(), libc::TCSANOW, &original);

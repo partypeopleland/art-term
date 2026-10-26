@@ -22,6 +22,9 @@ class McpFixture:
         self.token = secrets.token_hex(32)
         self.image = png((240, 30, 20) if name == 'A' else (20, 30, 240))
         self.events, self.sessions = [], set()
+        self.capture_started = threading.Event()
+        self.capture_gate = threading.Event()
+        self.capture_gate.set()
 
         class Handler(BaseHTTPRequestHandler):
             protocol_version = 'HTTP/1.1'
@@ -61,6 +64,8 @@ class McpFixture:
                     if self.headers.get('Mcp-Session-Id') not in outer.sessions: return self.reply({}, 400)
                     if method == 'notifications/initialized': return self.reply({}, 202)
                     if method != 'tools/call' or body.get('params', {}).get('name') != 'screenshot': return self.reply({}, 400)
+                    outer.capture_started.set()
+                    if not outer.capture_gate.wait(timeout=15): return self.reply({}, 503)
                     result = {'content': [{'type': 'image', 'mimeType': 'image/png', 'data': base64.b64encode(outer.image).decode()}]}
                 self.reply({'jsonrpc': '2.0', 'id': body.get('id'), 'result': result}, session=session)
         self.server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
@@ -69,6 +74,7 @@ class McpFixture:
         self.url = f'http://127.0.0.1:{self.server.server_port}/mcp'
 
     def close(self):
+        self.capture_gate.set()
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(timeout=5)
