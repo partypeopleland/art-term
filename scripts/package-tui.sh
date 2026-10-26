@@ -60,6 +60,9 @@ with tempfile.TemporaryDirectory(prefix="art-term-package-") as directory:
         "關閉本機分頁只會脫離，不刪除遠端 Shell。本版不提供圖形桌面預覽。\n",
         encoding="utf-8",
     )
+    for path in [bundle, *bundle.rglob("*")]:
+        path.chmod(0o755 if path.is_dir() else 0o644)
+    (bundle / "art-term").chmod(0o755)
     archive = output / (name + ".tar.gz")
     with tarfile.open(archive, "w:gz") as tar:
         tar.add(bundle, arcname=name)
