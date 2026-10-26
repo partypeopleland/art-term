@@ -12,7 +12,7 @@ use std::{
 };
 use tokio::{sync::watch, task::JoinHandle, time::Instant};
 
-const CAPTURE_INTERVAL: Duration = Duration::from_secs(1);
+const CAPTURE_INTERVAL: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PreviewTarget {
@@ -388,6 +388,8 @@ mod tests {
         permits: Semaphore,
         started: AtomicUsize,
         completed: AtomicUsize,
+        started_at: Mutex<Vec<Instant>>,
+        completed_at: Mutex<Vec<Instant>>,
         active: AtomicUsize,
         max_active: AtomicUsize,
         revision: AtomicU64,
@@ -398,6 +400,8 @@ mod tests {
                 permits: Semaphore::new(0),
                 started: AtomicUsize::new(0),
                 completed: AtomicUsize::new(0),
+                started_at: Mutex::new(Vec::new()),
+                completed_at: Mutex::new(Vec::new()),
                 active: AtomicUsize::new(0),
                 max_active: AtomicUsize::new(0),
                 revision: AtomicU64::new(1),
@@ -414,8 +418,10 @@ mod tests {
         async fn capture(&self, _: ScreenSelection) -> Result<ShotImage, PreviewError> {
             let active = self.state.active.fetch_add(1, Ordering::SeqCst) + 1;
             self.state.max_active.fetch_max(active, Ordering::SeqCst);
+            self.state.started_at.lock().unwrap().push(Instant::now());
             self.state.started.fetch_add(1, Ordering::SeqCst);
             self.state.permits.acquire().await.unwrap().forget();
+            self.state.completed_at.lock().unwrap().push(Instant::now());
             self.state.completed.fetch_add(1, Ordering::SeqCst);
             self.state.active.fetch_sub(1, Ordering::SeqCst);
             Ok(shot())
@@ -449,6 +455,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn automatic_capture_waits_thirty_seconds_after_completion() {
+        let (source, state) = MockSource::new();
+        let mut worker = PreviewWorker::start_source(source);
+        worker.set_target(Some(target("screen", 1)));
+        until(|| state.started.load(Ordering::SeqCst) == 1).await;
+        state.permits.add_permits(1);
+        assert_eq!(live(&mut worker).await.status, PreviewStatus::Live);
+        let completed = Instant::now();
+        tokio::time::sleep(Duration::from_millis(1200)).await;
+        assert_eq!(
+            state.started.load(Ordering::SeqCst),
+            1,
+            "no one-second polling"
+        );
+        tokio::time::sleep_until(completed + Duration::from_secs(29)).await;
+        assert_eq!(
+            state.started.load(Ordering::SeqCst),
+            1,
+            "no capture before thirty seconds"
+        );
+        until(|| state.started.load(Ordering::SeqCst) == 2).await;
+        let interval = state.started_at.lock().unwrap()[1] - state.completed_at.lock().unwrap()[0];
+        assert!(
+            interval >= Duration::from_secs(30),
+            "capture interval: {interval:?}"
+        );
+        state.permits.add_permits(1);
+        assert_eq!(live(&mut worker).await.status, PreviewStatus::Live);
+        worker.stop().await;
+        assert_eq!(state.max_active.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
     async fn switching_discards_inflight_result_and_keeps_capture_single_flight() {
         let (source, state) = MockSource::new();
         let mut worker = PreviewWorker::start_source(source);
@@ -466,6 +505,7 @@ mod tests {
             "cadence starts after completion"
         );
         assert!(worker.take_latest().is_none());
+        tokio::time::sleep(Duration::from_secs(30)).await;
         until(|| state.started.load(Ordering::SeqCst) == 2).await;
         state.permits.add_permits(1);
         let update = live(&mut worker).await;

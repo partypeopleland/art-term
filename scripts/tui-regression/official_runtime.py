@@ -323,7 +323,7 @@ def main():
             a.list_error = True
             choose(app, "Screen A")
             wait(lambda: bool(app.image_cells("f01e14")) and "Tools unconfirmed" in app.text(),
-                 "A valid screenshot remains visible when tools/list fails")
+                 "A valid screenshot remains visible when tools/list fails", timeout=40)
             assert "Tools ready" not in app.text()
             passed("T-SCREEN/T-TOOLS", "A valid preview remains available when the real upstream tools/list fails; tools are unconfirmed")
             a.list_error = False
@@ -344,7 +344,7 @@ def main():
             assert not app.image_cells("f01e14"), "Unavailable screenshot must not fabricate an image"
             passed("T-CONFIGURE/T-TOOLS", "Tools configure and execute before a virtual desktop screenshot is available")
             a.image = valid_a_image
-            wait(lambda: bool(app.image_cells("f01e14")), "actual A screenshot recovers after desktop starts")
+            wait(lambda: bool(app.image_cells("f01e14")), "actual A screenshot recovers after desktop starts", timeout=40)
             app.save(output, "selected-A-tools-ready")
             passed("T-CONFIGURE/T-TOOLS", "TUI selection configures the exact work Shell; a late real stdio client invokes HTTP desktop A")
 

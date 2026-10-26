@@ -14,6 +14,7 @@ import re
 import select
 import struct
 import tempfile
+import time
 import tomllib
 import traceback
 import zlib
@@ -80,11 +81,14 @@ def native_probe(binary, output, mode="sixel"):
             app.wait(lambda: len(runtime.work()) == 1, "work created")
             app.wait_text("Live")
             app.bind_screen(1)
-            app.wait(lambda: bool(app.sixels), "actual thumbnail Sixel")
+            app.wait(lambda: bool(app.sixels), "actual thumbnail Sixel", timeout=40)
+            first_frame_at = time.monotonic()
             result["thumbnail_raster"] = decode_sixel(app.sixels[-1])
             mcp.capture_started.clear()
             mcp.capture_gate.clear()
-            app.wait(mcp.capture_started.is_set, "native gated capture")
+            app.wait(mcp.capture_started.is_set, "native gated capture", timeout=40)
+            result["next_capture_wait_seconds"] = time.monotonic() - first_frame_at
+            assert result["next_capture_wait_seconds"] >= 29, "preview polled before its thirty-second interval"
 
             def open_viewer():
                 before = len(app.sixels)
@@ -218,7 +222,7 @@ def policy_probe(binary, output):
                     captures = len([event for event in mcp.events if event.get("method") == "tools/call"])
                     app.bind_screen(1); app.idle()
                     if supported:
-                        app.wait(lambda: bool(app.sixels), "supported SSH native image")
+                        app.wait(lambda: bool(app.sixels), "supported SSH native image", timeout=40)
                         raster = __import__("native_images").decode_sixel(app.sixels[-1])
                         assert raster.width == 38 * 8 and raster.height == (9 * 16 // 6 * 6), raster.summary()
                     else:
@@ -340,10 +344,10 @@ def main():
             passed("T-INPUT-01", "Committed CJK reaches work; visible physical cursor uses exact display-cell anchor; left borders stable")
 
             app.bind_screen(1)
-            app.wait(lambda: bool(app.image_cells("f01e14")), "source thumbnail")
+            app.wait(lambda: bool(app.image_cells("f01e14")), "source thumbnail", timeout=40)
             mcps[0].capture_started.clear()
             mcps[0].capture_gate.clear()
-            app.wait(mcps[0].capture_started.is_set, "gated next capture")
+            app.wait(mcps[0].capture_started.is_set, "gated next capture", timeout=40)
             thumbnail = signature((1, 24, 39, 33))
             before_frames = len(runtime.frames)
             before_resizes = list(runtime.work()[first]["resizes"])
@@ -351,7 +355,7 @@ def main():
             app.watch_instructions = True
             toggle()
             app.wait(expanded, "right viewer opens")
-            app.wait(lambda: bool([p for p in app.image_cells("f01e14") if p[0] > 40]), "right image prepared")
+            app.wait(lambda: bool([p for p in app.image_cells("f01e14") if p[0] > 40]), "right image prepared", timeout=40)
             assert thumbnail == signature((1, 24, 39, 33)), "thumbnail changed during gated click"
             assert app.instruction_frames == 0, "desktop instructions flashed in observed PTY frame"
             assert "Connections" in app.text() and "1:" in app.text(), "left pane or tabs lost"
@@ -404,7 +408,7 @@ def main():
             assert not expanded(), "screen modal retained viewer"
             app.send(b"\x1b")
             app.wait(lambda: "Stop" not in app.text(), "modal dismissed")
-            app.wait(lambda: bool(app.image_cells("f01e14")), "thumbnail after modal")
+            app.wait(lambda: bool(app.image_cells("f01e14")), "thumbnail after modal", timeout=40)
             toggle()
             app.wait(expanded, "open before tab switch")
             app.prefix("n")
@@ -414,13 +418,13 @@ def main():
             app.wait(lambda: not app.image_cells("f01e14"), "new tab clears old source")
             assert not expanded() and not app.image_cells("f01e14"), "new tab retained old source"
             app.bind_screen(2)
-            app.wait(lambda: bool(app.image_cells("141ef0")), "second source")
+            app.wait(lambda: bool(app.image_cells("141ef0")), "second source", timeout=40)
             toggle()
             app.wait(expanded, "blue viewer")
             app.prefix("c")
             app.wait_text("Stop")
             app.send(b"\x1b[B\r")
-            app.wait(lambda: bool(app.image_cells("f01e14")), "source switch to detailed")
+            app.wait(lambda: bool(app.image_cells("f01e14")), "source switch to detailed", timeout=40)
             assert not expanded() and not app.image_cells("141ef0"), "source switch retained old image"
             toggle()
             app.wait(expanded, "open before resize")
