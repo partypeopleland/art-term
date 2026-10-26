@@ -1,10 +1,10 @@
 # ADR-001：原生 Runtime 客戶端邊界
 
-狀態：已採用。2026-10-17 依 Owner 的直接 instance-mcp 決策更新桌面邊界；Runtime 終端邊界與 tmux 歷史延續既有設計。
+狀態：已採用。2026-10-17 依 Owner 的直接 instance-mcp 決策更新桌面邊界。2026-10-26 依 Owner 的 Ubuntu Server 需求新增文字客戶端；Runtime 終端邊界與 tmux 歷史延續既有設計。
 
 ## 要解決的問題
 
-Windows 與 Android 都要管理同一種遠端 Shell。若各平台分別處理認證、重連與終端輸出，兩端容易在斷線或工作被取代時產生不同結果。因此兩平台共用 Rust 連線核心，平台層只處理作業系統提供的能力。
+Windows、Android 與 Ubuntu 終端機都要管理同一種遠端 Shell。若各平台分別處理認證、重連與終端輸出，容易在斷線或工作被取代時產生不同結果。因此客戶端共用 Rust 連線核心，平台層處理作業系統提供的能力與呈現。
 
 ```text
 Windows UI ----+                         +--> Windows DPAPI
@@ -17,6 +17,8 @@ Android UI ----+                         +--> Android Keystore
 ```
 
 UI 透過 Tauri IPC（受權限限制的程序間呼叫）發出操作。共用核心保存連線身分、持有憑證並連接 Runtime；Windows DPAPI 與 Android Keystore 則負責裝置上的憑證保護。UI 可以顯示與操作分頁，但不能讀回已保存的管理憑證或 session token。
+
+Ubuntu 的 `art-term` 是直接在 TTY／SSH 執行的 Rust 程式，文字 UI 透過程序內的有界命令與不可變畫面溝通，不使用 WebView 或 Tauri IPC。每個分頁 actor 直接組合既有 core session／history API，vault 以密碼保護本機主金鑰。文字 UI 不取得已保存憑證，也不新增受控端協定。第一版保留既有 GUI 整合，避免為新增終端客戶端同時改動穩定的 Windows／Android。
 
 ## 共用核心擁有連線生命週期
 

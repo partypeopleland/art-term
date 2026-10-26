@@ -1,6 +1,6 @@
-# GUI 架構與模組責任
+# 客戶端架構與模組責任
 
-art-term 讓 Windows 與 Android 使用者連接既有 Runtime 的 Shell，並選擇觀看主機的共享桌面。兩平台共用 Vue 介面控制器與 Rust 核心；平台層負責檔案位置、憑證保護和原生操作，共用核心維持遠端連線的身分與恢復規則。
+art-term 讓 Windows、Android 與 Ubuntu 終端機使用者連接既有 Runtime 的 Shell。Windows 與 Android 共用 Vue 畫面並提供共享桌面；Ubuntu 使用可在 SSH 下操作的文字介面。三者共用 Rust 核心，平台層負責檔案位置、憑證保護和呈現，共用核心維持遠端連線的身分與恢復規則。
 
 ## 來源目錄與平台邊界
 
@@ -9,6 +9,14 @@ Rust 核心、App 的原生整合與 Vue 畫面分開維護。前端放在 `apps
 ```text
 crates/
   art-term-core/                  共用連線、設定、認證與工作生命週期
+  art-term-tui/                   Ubuntu Server／Desktop 終端客戶端
+    src/main.rs                  art-term 命令與密碼解鎖入口
+    src/backend.rs               Host、Shell 管理與分頁建立
+    src/tab.rs                   每個分頁的連線、歷史及恢復
+    src/terminal.rs              VT 終端模型、鍵盤編碼及查詢回覆
+    src/ui.rs                    文字畫面、表單與分頁選擇
+    src/tty.rs                   本機終端模式與退出還原
+    src/vault.rs                 密碼保護的本機主金鑰與儲存鎖
   art-term-gui/
     src/
       lib.rs                      Android 原生函式庫入口
@@ -39,7 +47,7 @@ apps/client/
 
 原生層由桌面入口與 Android 函式庫入口各自註冊模組。`#[path]` 指向共用與平台檔案，維持既有 Rust 模組名稱及呼叫關係。桌面 binary 仍名為 `art-term-gui`，Android 函式庫仍名為 `art_term_mobile`；bundle id、設定檔位置與憑證金鑰身分不因來源目錄搬移而改變。`gen/android` 由既有建置流程準備，不另複製成手工維護的 App。
 
-Ubuntu 桌面版尚未實作。後續可沿用 `desktop/` 畫面與共用核心，再加入 Linux 的憑證保存及系統整合；目前沒有空的 Linux 模組，也沒有額外的 Linux 受控端機制。新增平台仍須遵守共同 Runtime 與 helper 契約。
+Ubuntu 的交付目標是獨立 `art-term` 執行檔，可在 Server、Desktop 或 SSH 的終端機使用。它直接依賴 `art-term-core`，不載入 GUI crate、WebKit、GTK、D-Bus keyring 或本機網頁伺服器。受控端繼續使用相同 Runtime／helper，準備方式不因這個客戶端改變。用法見 [Ubuntu 終端機版](../platforms/linux.md)。
 
 可從 repository 根目錄執行 `git ls-files apps/client/src crates/art-term-gui/src crates/art-term-core/src` 查看受版本管理的實際來源檔。建置、測試與預覽命令使用 `apps/client`，例如 `npm --prefix apps/client run typecheck`；完整流程見[本地建置](../platforms/local-build.md)與[畫面預覽](../platforms/ui-preview.md)。
 
@@ -70,7 +78,24 @@ Vue 管理分類、Shell 選擇、分頁與終端呈現。WebView 透過受存�
 
 native GUI adapter 驗證 Host 操作並發出 target。target 是後端核發的連線目標，凍結 Host id／revision、Runtime 入口、Shell 名稱、官方 generation 與能力。revision 辨識設定版本，generation 辨識工作世代；session binding 是實際連線與這些資料的綁定。官方協定不提供跨服務重啟的原子工作身分比對，App 以原 attach token 恢復短暫斷線，驗證失敗就停止並請使用者重新選擇。
 
-Rust 核心讀取唯一 `connections.toml`，透過官方 HTTPS API 列出、建立或依使用者選擇續期 Shell，再以 WSS 連接已核發的 target。HTTPS 管理呼叫不接受 redirect、環境代理或降級，錯誤使用固定安全訊息。Runtime 使用未修改的官方產物；這條路徑不需要本專案伺服器補丁，也不恢復已退役的 SSH terminal、CLI／TUI 或 gateway。
+Rust 核心讀取唯一 `connections.toml`，透過官方 HTTPS API 列出、建立或依使用者選擇續期 Shell，再以 WSS 連接已核發的 target。HTTPS 管理呼叫不接受 redirect、環境代理或降級，錯誤使用固定安全訊息。Runtime 使用未修改的官方產物；Ubuntu 終端介面同樣使用這條 HTTPS／WSS 路徑。
+
+## Ubuntu 文字介面的狀態歸屬
+
+```text
+SSH / local TTY -> text UI -> backend -> shared HostStore / AdminClient
+                                  |
+                                  +-> tab actor -> shared SessionHandle -> WSS
+                                           |
+                                           +-> VT parser -> immutable screen -> text UI
+                                           +-> shared HistoryChannel -> existing helper
+```
+
+每個本機分頁只有一個 actor 修改連線與 VT 終端模型。背景分頁同樣解析輸出並確認 exact batch；畫面可以略過中間繪製，不能略過遠端輸出。解析器完成一批內容後才呼叫核心 ACK，遇到 Gap 先重設終端狀態。遠端終端查詢的回覆送回來源分頁，不能因使用者切換分頁而送錯工作。
+
+歷史捲動與使用者輸入依同一分頁排序。閱讀歷史時，輸入透過共同 helper 的 follow 操作回到即時畫面；結果不確定時拒絕重送。終端協定回覆仍直接回到原 PTY，不觸發 follow。歷史請求進行時仍處理輸出，避免遠端等待終端查詢回覆而互相卡住。重連沿用原 binding、token 及已解析游標，不建立新工作或重播輸入。關閉本機分頁只脫離連線，並清理該分頁自有的短命 helper。
+
+文字介面讀取不可變畫面，透過有界命令入口發出操作。網路工作與密碼雜湊不在畫面繪製迴圈執行。Host 及加密搬移沿用核心交易規則；密碼解鎖儲存另外持有程序間的寫入鎖，避免兩個 TUI 同時修改同一份設定。
 
 ## 受控端提供固定介面
 

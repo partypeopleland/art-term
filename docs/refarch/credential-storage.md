@@ -1,6 +1,6 @@
 # 憑證、執行時檔案與清理
 
-連線檔案需要能重開使用，也需要避免複製檔案就取得管理憑證。App 因此把可直接讀取的連線 metadata 與平台保護的密文一起存進唯一 TOML，解密能力留在 Windows 使用者環境或 Android Keystore。App identifier、Android user/profile 與自訂路徑會影響實際位置，使用平台 API 為準。
+連線檔案需要能重開使用，也需要避免複製檔案就取得管理憑證。App 因此把可直接讀取的連線 metadata 與保護後的密文一起存進唯一 TOML。Windows 使用 DPAPI，Android 使用 Keystore，Ubuntu 終端機版則以使用者輸入的密碼解鎖本機主金鑰。各客戶端的資料位置與解鎖方式分開，搬移使用加密匯出／匯入。
 
 ```text
 connections.toml
@@ -41,9 +41,20 @@ Android 的 marker 記錄 operator key 曾經使用過，並不保存金鑰。�
 | 同目錄 `ssh-identity-used-v1`、`ssh-identity-v1.init`、`ssh-identity-v1.tmp`、`ssh-identity-v1.lock` | 歷史 SSH 保護狀態及鎖，App 不再讀寫，也不主動刪除 |
 | Android `<app_data_dir>/host-keys.json`、`host-keys.lock` | 歷史 pin 資料，保留但目前 App 不再讀寫 |
 | APK | 不含 connections.toml 預設 asset 或原生嵌入設定 |
+| TUI `${XDG_CONFIG_HOME:-$HOME/.config}/art-term-tui/connections.toml` | 唯一 Host／Screen TOML，含 TUI 主金鑰保護的密文 |
+| TUI TOML 同目錄 `<filename>.vault-v1` | Argon2id 與 AES-GCM 保護的隨機主金鑰，需保留並以啟動密碼解鎖 |
+| TUI TOML 同目錄 `<filename>.vault-lock` | 程序間互斥；儲存及其 cipher 的所有持有者離開後才釋放 |
 | 使用者在系統選檔器指定的連線 JSON | 含管理憑證時以檔案密碼加密整份內容；不含憑證時為明文設定。自行保管／搬移，不放 Git 或公開文件 |
 
-HostStore 使用同目錄暫存檔及原子替換，revision/context保護憑證綁定；讀檔／解密失敗保留原資料。保存／取得 snapshot 前核對載入檔案的指紋；檔案被外部修改或刪除時拒絕過期操作，請重啟。Host revision 與匯入預覽的 store snapshot 核對是程序內 compare-and-swap（CAS，狀態仍符合讀取基線才套用）保護；檔案指紋檢查與原子替換之間沒有跨程序 CAS／鎖，也沒有 watcher，不能支援多個 App 同寫。此版沒有跨App instance鎖或裝置同步，備份前關閉App。
+HostStore 使用同目錄暫存檔及原子替換，revision/context 保護憑證綁定；讀檔／解密失敗保留原資料。保存／取得 snapshot 前核對載入檔案的指紋；檔案被外部修改或刪除時拒絕過期操作，請重啟。Host revision 與匯入預覽的 store snapshot 核對是程序內 compare-and-swap（CAS，狀態仍符合讀取基線才套用）保護；HostStore 本身沒有跨程序 CAS／鎖或 watcher。Windows／Android 仍不能多個 App 同寫；TUI 另以 vault lock 拒絕第二個寫入者。備份前關閉所有使用該設定的程序。
+
+## 純終端的密碼解鎖
+
+TUI 首次啟動時要求確認新密碼，之後從控制終端讀取密碼。密碼不經命令列參數或環境變數，輸入時不回顯。固定成本的 Argon2id 從密碼與隨機 salt 衍生 wrapping key，再以 AES-256-GCM 解開隨機主金鑰；每筆憑證使用主金鑰、全新 nonce 及完整 CredentialContext 加密。主金鑰和密碼只保留在受保護的程序記憶體，磁碟沒有明文金鑰。
+
+設定目錄預設為 `0700`，TOML、key metadata 及鎖檔為 `0600`，要求目前使用者持有且不是 symlink、hardlink 或特殊檔案。自訂 `--config` 的父目錄必須已存在並可安全寫入。metadata 先以不覆蓋既有檔案的原子方式保存；若初始化在 TOML 建立前中斷，下次仍解鎖原主金鑰。
+
+已存在 TOML 卻缺少 key metadata 時拒絕建立新金鑰，即使設定只含 Screen。密碼錯誤、metadata 損壞或 Host／Screen 無法解密時保留原檔。刪除最後一筆連線仍保留主金鑰，不能以刪除 key metadata 重設密碼。備份需保留整個設定目錄，跨裝置則使用 App 的加密搬移檔。TUI 不讀取 GUI 的平台金鑰，詳細操作見 [Ubuntu 終端機版](../platforms/linux.md)。
 
 ## Screen token 的保存與傳送
 

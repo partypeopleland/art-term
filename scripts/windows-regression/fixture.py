@@ -116,8 +116,11 @@ class Fixture:
 
     async def output(self, s, data):
         s['history'] += data
+        socket = s['ws']
+        if socket is None or socket.closed:
+            return
         for pos in range(0, len(data), 32768):
-            await s['ws'].send_bytes(data[pos:pos + 32768])
+            await socket.send_bytes(data[pos:pos + 32768])
             await asyncio.sleep(0)
 
     async def native_redraw(self, work):
@@ -132,6 +135,9 @@ class Fixture:
     async def ordinary_input(self, work, data):
         work['input'] += data
         await self.output(work, b''.join(b'\b \b' if value in (8, 127) else b'\r\n' if value == 13 else bytes([value]) for value in data))
+
+    def observe_input(self, name, data):
+        pass
 
     async def history_request(self, s):
         while b'\n' in s['previewInput']:
@@ -229,6 +235,7 @@ class Fixture:
         try:
             async for message in ws:
                 if message.type == WSMsgType.BINARY:
+                    self.observe_input(name, message.data)
                     if name.startswith('mcshot-'):
                         # Exec-only configure receiver: no command execution or secret retention.
                         s['previewInput'] += message.data
@@ -247,7 +254,7 @@ class Fixture:
                                              historyWork='th2-' + history[1].decode(), historyEpoch=0, historySnapshots={})
                                     s['previewInput'] = b''
                                     await self.output(s, (json.dumps({'v': 1, 'type': 'ready', 'requestId': 0,
-                                        'key': history[1].decode(), 'nonce': s['historyNonce'], 'instance': s['historyInstance'], 'nativeViewport': True}) + '\n').encode())
+                                        'key': history[1].decode(), 'nonce': s['historyNonce'], 'instance': s['historyInstance'], 'nativeViewport': 1}) + '\n').encode())
                         elif len(s['previewInput']) >= 4:
                             size = struct.unpack('!I', s['previewInput'][:4])[0]
                             if size > 16384:
