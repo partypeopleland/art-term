@@ -1,7 +1,7 @@
 use crate::preview::{CapturedFrame, PreviewError, PreviewTarget};
 use image::{imageops::FilterType, DynamicImage, GenericImage, RgbaImage};
 use ratatui::layout::Rect;
-use ratatui_image::protocol::{halfblocks::Halfblocks, sixel::Sixel, Protocol};
+use ratatui_image::protocol::{sixel::Sixel, Protocol};
 use std::sync::{Arc, Mutex};
 use tokio::{sync::watch, task::JoinHandle};
 
@@ -11,31 +11,21 @@ const MAX_PIXELS: u64 = 4_000_000;
 const CENTER_UNITS: f64 = 1_000_000.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ImageMode {
-    Compatible,
-    Sixel { cell_width: u16, cell_height: u16 },
+pub(crate) struct CellPixels {
+    width: u16,
+    height: u16,
 }
-impl ImageMode {
+impl CellPixels {
+    pub(crate) fn new(width: u16, height: u16) -> Option<Self> {
+        ((1..=64).contains(&width) && (1..=128).contains(&height)).then_some(Self { width, height })
+    }
     fn metrics(self) -> (u32, u32) {
-        match self {
-            Self::Compatible => (1, 2),
-            Self::Sixel {
-                cell_width,
-                cell_height,
-            } => (cell_width.into(), cell_height.into()),
-        }
+        (self.width.into(), self.height.into())
     }
     fn canvas(self, area: Rect) -> (u32, u32) {
         let (cw, ch) = self.metrics();
-        let width = area.width as u32 * cw;
-        let height = area.height as u32 * ch;
         // SIXEL emits six-pixel bands; round down so its last band stays inside the pane.
-        let height = if matches!(self, Self::Sixel { .. }) {
-            height / 6 * 6
-        } else {
-            height
-        };
-        (width, height)
+        (area.width as u32 * cw, area.height as u32 * ch / 6 * 6)
     }
 }
 
@@ -56,16 +46,13 @@ impl ImageViewport {
         point: (u16, u16),
         area: Rect,
         image: (u32, u32),
-        mode: ImageMode,
+        mode: CellPixels,
     ) -> bool {
         if area.is_empty() || image.0 == 0 || image.1 == 0 || mode.canvas(area).1 == 0 {
             return false;
         }
         let before = self.clone();
         let (cw, ch) = mode.metrics();
-        if cw == 0 || ch == 0 {
-            return false;
-        }
         let old = Geometry::new(self, area, image, mode);
         let px = (point.0.saturating_sub(area.x).min(area.width - 1) as f64 + 0.5) * cw as f64;
         let py = (point.1.saturating_sub(area.y).min(area.height - 1) as f64 + 0.5) * ch as f64;
@@ -88,16 +75,13 @@ impl ImageViewport {
         dy: i16,
         area: Rect,
         image: (u32, u32),
-        mode: ImageMode,
+        mode: CellPixels,
     ) -> bool {
         if area.is_empty() || image.0 == 0 || image.1 == 0 || mode.canvas(area).1 == 0 {
             return false;
         }
         let before = self.clone();
         let (cw, ch) = mode.metrics();
-        if cw == 0 || ch == 0 {
-            return false;
-        }
         let g = Geometry::new(self, area, image, mode);
         self.set_center(
             g.center.0 - dx as f64 * cw as f64 / g.scale,
@@ -124,7 +108,7 @@ struct Geometry {
     center: (f64, f64),
 }
 impl Geometry {
-    fn new(view: &ImageViewport, area: Rect, image: (u32, u32), mode: ImageMode) -> Self {
+    fn new(view: &ImageViewport, area: Rect, image: (u32, u32), mode: CellPixels) -> Self {
         let raster = mode.canvas(area);
         let canvas = (raster.0 as f64, raster.1 as f64);
         let scale = (canvas.0 / image.0 as f64).min(canvas.1 / image.1 as f64)
@@ -176,7 +160,7 @@ pub(crate) struct RenderWorker {
     task: Option<JoinHandle<()>>,
 }
 impl RenderWorker {
-    pub(crate) fn start(mode: ImageMode) -> Self {
+    pub(crate) fn start(mode: CellPixels) -> Self {
         let (request, mut receiver) = watch::channel::<Option<RenderRequest>>(None);
         let latest = Arc::new(Mutex::new(None));
         let output = latest.clone();
@@ -251,7 +235,7 @@ impl RenderWorker {
     }
 }
 
-fn prepare(request: RenderRequest, mode: ImageMode) -> PreparedSurfaces {
+fn prepare(request: RenderRequest, mode: CellPixels) -> PreparedSurfaces {
     let mut prepared = PreparedSurfaces {
         target: request.frame.target.clone(),
         sequence: request.frame.sequence,
@@ -286,15 +270,12 @@ fn surface(
     image: &DynamicImage,
     area: Rect,
     viewport: &ImageViewport,
-    mode: ImageMode,
+    mode: CellPixels,
 ) -> Result<Protocol, PreviewError> {
-    let (cw, ch) = mode.metrics();
     let (width, height) = mode.canvas(area);
     if area.is_empty()
         || area.width > MAX_COLUMNS
         || area.height > MAX_ROWS
-        || cw == 0
-        || ch == 0
         || height == 0
         || width as u64 * height as u64 > MAX_PIXELS
     {
@@ -328,18 +309,25 @@ fn surface(
         .copy_from(&resized, (width - output_w) / 2, (height - output_h) / 2)
         .map_err(|_| PreviewError::InvalidImage)?;
     let canvas = DynamicImage::ImageRgba8(canvas);
-    match mode {
-        ImageMode::Compatible => Halfblocks::new(canvas, area.as_size()).map(Protocol::Halfblocks),
-        ImageMode::Sixel { .. } => Sixel::new(canvas, area.as_size(), false).map(Protocol::Sixel),
-    }
-    .map_err(|_| PreviewError::InvalidImage)
+    Sixel::new(canvas, area.as_size(), false)
+        .map(Protocol::Sixel)
+        .map_err(|_| PreviewError::InvalidImage)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{backend::ScreenSelection, tab::TabId};
-    use ratatui::{buffer::Buffer, style::Color, widgets::Widget};
+    fn decoded(protocol: Protocol) -> icy_sixel::SixelImage {
+        let Protocol::Sixel(encoded) = protocol else {
+            panic!("native protocol")
+        };
+        let start = encoded.data.find("\x1bP").unwrap();
+        icy_sixel::SixelImage::decode(encoded.data[start..].as_bytes()).unwrap()
+    }
+    fn cell_pixels() -> CellPixels {
+        CellPixels::new(1, 2).unwrap()
+    }
 
     fn frame(sequence: u64) -> Arc<CapturedFrame> {
         let pixels = image::RgbImage::from_fn(80, 40, |x, _| {
@@ -366,22 +354,22 @@ mod tests {
     }
 
     #[test]
-    fn compatible_centers_letterbox_preserves_colors_and_bounds() {
+    fn native_centers_letterbox_preserves_colors_and_bounds() {
         let area = plan().thumbnail;
         let protocol = surface(
             &frame(1).pixels,
             area,
             &ImageViewport::default(),
-            ImageMode::Compatible,
+            cell_pixels(),
         )
         .unwrap();
         assert_eq!(protocol.size(), area.as_size());
-        let mut buffer = Buffer::empty(Rect::new(0, 0, 30, 25));
-        ratatui_image::Image::new(&protocol).render(area, &mut buffer);
-        assert_eq!(buffer[(2, 2)].bg, Color::Rgb(0, 0, 0));
-        assert_eq!(buffer[(4, 11)].bg, Color::Rgb(255, 0, 0));
-        assert_eq!(buffer[(20, 11)].bg, Color::Rgb(0, 255, 0));
-        assert_eq!(buffer[(0, 0)].bg, Color::Reset);
+        let decoded = decoded(protocol);
+        assert_eq!((decoded.width, decoded.height), (20, 36));
+        let pixel = |x: usize, y: usize| &decoded.pixels[(y * 20 + x) * 4..][..3];
+        assert_eq!(pixel(0, 0), [0, 0, 0]);
+        assert_eq!(pixel(2, 16), [255, 0, 0]);
+        assert_eq!(pixel(18, 16), [0, 255, 0]);
     }
 
     #[test]
@@ -389,20 +377,20 @@ mod tests {
         let area = Rect::new(0, 0, 100, 50);
         let size = (1000, 1000);
         let mut view = ImageViewport::default();
-        let before = Geometry::new(&view, area, size, ImageMode::Compatible);
+        let before = Geometry::new(&view, area, size, cell_pixels());
         let anchor = before.center.0 + (70.5 - before.canvas.0 / 2.0) / before.scale;
-        assert!(view.zoom_at(4, (70, 25), area, size, ImageMode::Compatible));
-        let after = Geometry::new(&view, area, size, ImageMode::Compatible);
+        assert!(view.zoom_at(4, (70, 25), area, size, cell_pixels()));
+        let after = Geometry::new(&view, area, size, cell_pixels());
         assert!(
             (anchor - (after.center.0 + (70.5 - after.canvas.0 / 2.0) / after.scale)).abs() < 0.01
         );
-        view.pan_cells(i16::MAX, i16::MAX, area, size, ImageMode::Compatible);
+        view.pan_cells(i16::MAX, i16::MAX, area, size, cell_pixels());
         let edge = view.clone();
-        assert!(!view.pan_cells(i16::MAX, i16::MAX, area, size, ImageMode::Compatible));
+        assert!(!view.pan_cells(i16::MAX, i16::MAX, area, size, cell_pixels()));
         assert_eq!(view, edge);
-        view.zoom_at(i16::MAX, (50, 25), area, size, ImageMode::Compatible);
+        view.zoom_at(i16::MAX, (50, 25), area, size, cell_pixels());
         assert_eq!(view.zoom, 16);
-        view.zoom_at(i16::MIN, (50, 25), area, size, ImageMode::Compatible);
+        view.zoom_at(i16::MIN, (50, 25), area, size, cell_pixels());
         assert_eq!(view, ImageViewport::default());
         view.reset();
         assert_eq!(view, ImageViewport::default());
@@ -420,15 +408,14 @@ mod tests {
         let source = DynamicImage::ImageRgb8(pixels);
         let area = Rect::new(0, 0, 20, 10);
         let mut view = ImageViewport::default();
-        view.zoom_at(16, (9, 4), area, (1000, 1000), ImageMode::Compatible);
-        let protocol = surface(&source, area, &view, ImageMode::Compatible).unwrap();
-        let mut buffer = Buffer::empty(area);
-        ratatui_image::Image::new(&protocol).render(area, &mut buffer);
+        view.zoom_at(16, (9, 4), area, (1000, 1000), cell_pixels());
+        let protocol = surface(&source, area, &view, cell_pixels()).unwrap();
+        let decoded = decoded(protocol);
         assert!(
-            buffer
-                .content
-                .iter()
-                .filter(|cell| cell.bg == Color::Rgb(0, 255, 0))
+            decoded
+                .pixels
+                .chunks_exact(4)
+                .filter(|p| p[1] > 240 && p[0] < 15 && p[2] < 15)
                 .count()
                 > 40
         );
@@ -436,23 +423,12 @@ mod tests {
 
     #[test]
     fn raster_limits_are_checked_before_allocation() {
+        assert!(CellPixels::new(0, 10).is_none());
+        assert!(CellPixels::new(1000, 1000).is_none());
         for (area, mode) in [
-            (Rect::new(0, 0, 161, 80), ImageMode::Compatible),
-            (Rect::new(0, 0, 160, 81), ImageMode::Compatible),
-            (
-                Rect::new(0, 0, 160, 80),
-                ImageMode::Sixel {
-                    cell_width: 1000,
-                    cell_height: 1000,
-                },
-            ),
-            (
-                Rect::new(0, 0, 10, 10),
-                ImageMode::Sixel {
-                    cell_width: 0,
-                    cell_height: 10,
-                },
-            ),
+            (Rect::new(0, 0, 161, 80), cell_pixels()),
+            (Rect::new(0, 0, 160, 81), cell_pixels()),
+            (Rect::new(0, 0, 160, 80), CellPixels::new(64, 128).unwrap()),
         ] {
             assert!(matches!(
                 surface(&frame(1).pixels, area, &ImageViewport::default(), mode),
@@ -463,10 +439,7 @@ mod tests {
 
     #[test]
     fn actual_sixel_roundtrip_preserves_raster_and_colors() {
-        let mode = ImageMode::Sixel {
-            cell_width: 8,
-            cell_height: 16,
-        };
+        let mode = CellPixels::new(8, 16).unwrap();
         let Protocol::Sixel(encoded) = surface(
             &frame(1).pixels,
             Rect::new(0, 0, 10, 5),
@@ -492,7 +465,7 @@ mod tests {
 
     #[tokio::test]
     async fn renderer_coalesces_identical_requests_and_discards_replaced_source() {
-        let mut worker = RenderWorker::start(ImageMode::Compatible);
+        let mut worker = RenderWorker::start(cell_pixels());
         let request = RenderRequest {
             frame: frame(1),
             plan: plan(),

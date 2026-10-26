@@ -69,9 +69,13 @@ Stop 只停止本機預覽，既有 Shell 工具選擇保留；Resume preview �
 
 同一來源的圖片在切焦點、點擊及下次截圖等待期間保留，不閃回設定說明。換分頁、改來源、停止或發生錯誤時清圖；開表單或說明會收回右側圖片。僅目前可見、未停止且來源有效的分頁取圖。終端與表單將實體游標放在插入點，中文字以顯示寬度定位；這提供輸入法定位基礎，實際系統輸入法組字仍需對應終端程式驗收。
 
-首次啟動在連線設定同目錄建立 `display.toml`，已有檔案不覆寫。預設 `image_mode = "compatible"` 使用 Halfblocks 彩色字元，任何支援真彩色的終端皆可顯示，但解析度受字格限制，小縮圖仍可能呈現顆粒。展開與放大可檢視更多原始細節。每個圖片區最多 160×80 字格，大視窗會置中顯示。
+首次啟動在連線設定同目錄建立 `display.toml`，已有檔案不覆寫。預設 `image_mode = "auto"`，只在已辨識的本機 Sixel 終端、且有實際字格像素尺寸時顯示原生圖片。不使用字格拼圖，也沒有文字圖片備援。舊設定的 `compatible` 現在視為 `auto`，檔案仍保留原樣。每個圖片區最多 160×80 字格所占的像素範圍，大視窗會置中顯示。
 
-直接連線的終端若確定支援 Sixel，可手動改為 `image_mode = "sixel"`，重新啟動後使用原生點陣圖片。程式只讀取 TTY 已提供的字格像素尺寸；若未提供，必須填入實際的 `cell_width`、`cell_height`，不能沿用範例數字猜測。設定錯誤會指出檔案並保留原檔。在 tmux／screen 內須使用 compatible；程式不修改 multiplexer 設定、不向 stdin 發送圖片能力查詢。Kitty／iTerm2 協定未啟用。Sixel 編碼與邊界有自動測試，實際終端繪圖仍須人工驗證。圖片操作只控制本機檢視，不操作遠端桌面。可在 `keybindings.toml` 的 `[bindings]` 自行配置 `viewer_toggle`、`viewer_fit`，預設未綁定。詳見[桌面流程](../refarch/desktop.md)。
+本輪預覽限本機執行；偵測到 SSH、tmux／screen、Linux 純文字主控台或無法確認顯示條件時，左下說明停用原因。這是本程式的支援範圍，不代表 SSH 協定本身無法傳圖片。**預覽停用不影響 Screen 選擇、Shell 桌面工具配置或 AI 呼叫工具。** 不會為無法顯示的預覽額外擷取圖片。一般 Linux 主控台與不支援 Sixel 的終端不能顯示原生圖片，安裝在 Ubuntu 不代表任何終端都有此能力。
+
+本機自動辨識目前限 XTerm 390、VT340 設定與 `TERM=vt340`。驗證啟動參數為 `xterm -ti vt340 -tn vt340 -b 0 -fn fixed`；`-b 0` 讓 TTY 回報文字區實際像素，不把內邊框算進字格尺寸。這是有限的環境辨識，沒有能力協定探測；一般 `xterm-256color` 不當作支援證據。其他已確認支援 Sixel 的本機終端可設定 `image_mode = "sixel"`，仍須使用實際字格像素。程式只讀取 TTY 已提供的尺寸；若未提供，可填 `cell_width`、`cell_height`，不能猜測數值。明確設定也不開啟 SSH、multiplexer 或 Linux 主控台的預覽。設定錯誤只停用預覽並顯示原因；讀取或格式錯誤另附檔案位置。Host／Shell 照常可用，原檔不改寫。
+
+Sixel 編碼已內建，不需安裝外部轉圖程式。程式不修改終端或 multiplexer 設定、不讀取 stdin 探測圖片能力，不新增輸入讀取器。Kitty／iTerm2 協定未啟用。圖片操作只控制本機檢視，不操作遠端桌面。可在 `keybindings.toml` 的 `[bindings]` 自行配置 `viewer_toggle`、`viewer_fit`，預設未綁定。詳見[桌面流程](../refarch/desktop.md)。
 
 ## 建置與驗證
 

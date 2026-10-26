@@ -429,6 +429,35 @@ def main():
             assert not any(item["op"] in ("configure", "clear") for item in gateway.controls[before:])
             passed("T-RESTORE/T-LIFETIME", "TUI quit/restart preserves Shell-owned selections and restores the original generation")
 
+            app.prefix("q")
+            app.finish()
+            before_captures = sum(event.get("method") == "tools/call" and event.get("params", {}).get("name") == "screenshot" for service in services for event in service.events)
+            app = driver.Terminal(binary, home, gateway.ca, rows=44, columns=150,
+                                  env_overrides={"SSH_CONNECTION": "fixture-ssh-session"})
+            apps.append(app)
+            app.start()
+            wait(lambda: "SSH" in app.text() and "桌面工具仍可使用" in "".join(app.text().replace("│", "").split()), "SSH local-only preview notice")
+            click(app, first)
+            click(app, "[Yes]")
+            wait(lambda: "Tools ready" in app.text(), "SSH reattach restores desktop tools without preview")
+            before = len(gateway.controls)
+            choose(app, "Screen A")
+            wait(lambda: "Desktop: Screen A | Tools ready" in app.text(), "SSH Screen setup without preview")
+            ssh_target = one.target()
+            assert ssh_target is not None and ssh_target != selected
+            listed = one.tool("list_target_tools")
+            assert not listed.get("isError"), listed
+            assert "browser_navigate" in json.dumps(listed)
+            result = one.execute("browser_navigate", {"url": "https://fixture.example/ssh-no-preview"}, ssh_target)
+            assert not result.get("isError") and '"desktop": "A"' in result["content"][0]["text"]
+            assert "ssh-no-preview" in result["content"][0]["text"]
+            assert any(item["binding"] == first and item["op"] == "configure" for item in gateway.controls[before:])
+            app.settle(.4)
+            assert not app.sixels, "SSH preview emitted native image"
+            assert sum(event.get("method") == "tools/call" and event.get("params", {}).get("name") == "screenshot" for service in services for event in service.events) == before_captures, "SSH preview requested screenshot"
+            assert two.target() == target_b, "SSH selection affected another Shell"
+            passed("T-CONFIGURE/T-TOOLS/T-IMAGE-POLICY", "SSH disables only local preview; actual Shell stdio discovers target/tools and invokes desktop A without screenshot")
+
             click(app, "[Desktop]")
             click(app, "Clear tools")
             click(app, "[Yes]")

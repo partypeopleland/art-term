@@ -1,10 +1,10 @@
-# 圖片顯示模式，修改後重新啟動 art-term。此檔不含連線或憑證。
-# compatible 使用彩色文字格；放大檢視與縮放可看原圖細節，但仍受文字格解析度限制。
-image_mode = "compatible"
+# 原生圖片預覽；不使用彩色字格或其他模擬圖片。修改後重新啟動 art-term。
+# auto 僅啟用已確認的本地 Sixel 終端；目前自動辨識 XTerm(390)／TERM=vt340。
+# SSH、tmux／screen 及 Linux 純文字主控台停用預覽，桌面工具仍可給 AI 使用。
+image_mode = "auto"
 
-# 僅在確認直接使用的終端支援 Sixel 時，改成 image_mode = "sixel"。
-# 原生模式需要正確的字元像素尺寸。優先讀取 TTY 的視窗像素資訊；
-# 若 SSH 沒有提供，請填該終端的實際尺寸。以下只是格式範例，不是建議值。
+# 確認本地直接終端支援 Sixel 後，可設 image_mode = "sixel"。
+# 優先讀取 TTY 實際字格像素；未提供時須填該終端的實際值，不可猜測。
 # cell_width = 8
 # cell_height = 16
-# 本程式不向 stdin 發送圖片能力／字格像素查詢，也不修改 tmux 設定；原生模式目前限直接終端。
+# 舊 compatible 值僅作 auto 別名，不再使用字格圖片；已有設定檔不會覆寫。

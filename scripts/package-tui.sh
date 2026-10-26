@@ -60,9 +60,10 @@ with tempfile.TemporaryDirectory(prefix="art-term-package-") as directory:
         "使用 --config /path/connections.toml 可指定其他檔案，相關金鑰與鎖定資料與它同目錄。\n"
         "使用 --help 查看選項，畫面內的 Help 查看快捷鍵。主機仍使用既有 art-term Runtime/helper。\n"
         "左上固定展開 Computer／Agent／Screen 樹，方向鍵與 Enter 或滑鼠操作；分頁可滑鼠切換／關閉。\n"
-        "點右上 Desktop 選擇此 Shell 的桌面並配置工具；Tools ready 才代表 broker 已確認。預覽顯示真實截圖。\n"
+        "點右上 Desktop 選擇此 Shell 的桌面並配置工具；Tools ready 才代表 broker 已確認。支援的本機終端可顯示原生截圖。\n"
         "點左下縮圖在右側展開；拖曳平移、滾輪縮放、[Fit] 還原、[X]／Esc／再點縮圖收回。這些操作只控制本機檢視。\n"
-        "display.toml 預設 compatible 彩色字格，受字格解析度限制；確定直接終端支援 Sixel 才改 sixel，並提供實際字格像素。tmux／screen 使用 compatible；無自動圖片探測。\n"
+        "display.toml 預設 auto，只用原生 Sixel，不用字格拼圖。SSH／tmux／screen／Linux 純文字主控台只停用預覽；桌面工具與 AI 呼叫照常可用。編碼器已內建。\n"
+        "本機 auto 目前辨識 XTerm390（-ti vt340 -tn vt340 -b 0 -fn fixed）；其他已確認支援的本機終端可設定 sixel，仍須提供實際字格像素。缺少條件或圖片設定錯誤只停用預覽，連線仍可使用。\n"
         "F1 說明、F2 連線、F3 終端、F4 桌面、F10 Actions。編輯設定同目錄的 keybindings.toml 後重新啟動，可自訂快捷鍵。\n"
         "關閉本機分頁只會脫離，不刪除遠端 Shell。可攜式加密匯入／匯出仍使用檔案密碼。\n",
         encoding="utf-8",

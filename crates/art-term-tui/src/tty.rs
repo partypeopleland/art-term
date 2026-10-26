@@ -1,4 +1,3 @@
-use crate::image_view::ImageMode;
 use crossterm::{
     cursor::{Hide, Show},
     event::{DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture},
@@ -95,8 +94,8 @@ fn restore() {
 }
 
 impl Tty {
-    pub(crate) fn enter_with_mode(mode: ImageMode) -> io::Result<Self> {
-        NATIVE_IMAGES.store(matches!(mode, ImageMode::Sixel { .. }), Ordering::SeqCst);
+    pub(crate) fn enter_with_native_images(native: bool) -> io::Result<Self> {
+        NATIVE_IMAGES.store(native, Ordering::SeqCst);
         PANIC_HOOK.call_once(|| {
             let previous = std::panic::take_hook();
             std::panic::set_hook(Box::new(move |panic| {

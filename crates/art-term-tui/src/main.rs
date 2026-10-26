@@ -104,13 +104,13 @@ async fn run() -> anyhow::Result<()> {
     );
     let paths = vault::VaultPaths::resolve(config)?;
     let bindings = keybindings::Bindings::load(&paths.keybindings_path())?;
-    let image_mode = display::load(&paths.display_path())?;
+    let display = display::load(&paths.display_path());
     let startup_signals = tty::StartupSignals::install()?;
     let vault = vault::Vault::open_account(paths).map_err(|_| anyhow::anyhow!(
         "Unable to open account-protected storage. Check private directory/key permissions and concurrent sessions. Existing profiles without an account key require explicit migration; files were preserved."
     ))?;
     let backend = backend::Backend::start(vault)?;
-    let result = ui::run(backend.clone(), startup_signals, bindings, image_mode).await;
+    let result = ui::run(backend.clone(), startup_signals, bindings, display).await;
     backend.shutdown().await;
     result
 }

@@ -33,105 +33,18 @@ class ObservedTerminal(driver.Terminal):
             self.instruction_frames += 1
 
 
-class NativeTerminal(driver.Terminal):
-    """Keep actual DCS payloads, excluding graphics from the text-only emulator."""
-    def __init__(self, *args, **kwargs):
-        self.pending = bytearray()
-        self.sixels = []
-        inherited = {key: os.environ.pop(key) for key in ("TMUX", "STY") if key in os.environ}
-        try:
-            super().__init__(*args, **kwargs)
-        finally:
-            os.environ.update(inherited)
-
-    def pump(self, timeout=0.05):
-        if not select.select([self.master], [], [], timeout)[0]:
-            return
-        try:
-            data = os.read(self.master, 65536)
-        except OSError:
-            return
-        self.raw.extend(data)
-        # Answer DSR so a querying build reaches the remaining diagnosis; the
-        # final assertion rejects it. The fixed fullscreen path needs no query.
-        if b"\x1b[6n" in data:
-            self.send(b"\x1b[1;1R")
-        self.pending.extend(data)
-        while self.pending:
-            start = self.pending.find(b"\x1bP")
-            if start < 0:
-                count = len(self.pending) - int(self.pending.endswith(b"\x1b"))
-                self.stream.feed(self.decoder.decode(bytes(self.pending[:count])))
-                del self.pending[:count]
-                return
-            if start:
-                self.stream.feed(self.decoder.decode(bytes(self.pending[:start])))
-                del self.pending[:start]
-            end = self.pending.find(b"\x1b\\", 2)
-            if end < 0:
-                return
-            payload = bytes(self.pending[:end + 2])
-            assert re.match(rb"\x1bP[0-9;]*q", payload), "Unexpected terminal DCS query"
-            self.sixels.append(payload)
-            del self.pending[:end + 2]
-
-
 def decode_sixel(payload):
-    """Decode emitted RGB Sixel runs into real RGB pixels, under raster bounds."""
-    content = re.sub(rb"^\x1bP[0-9;]*q", b"", payload)[:-2].decode("ascii")
-    raster = re.search(r'"(\d+);(\d+);(\d+);(\d+)', content)
-    assert raster, "Sixel payload has no raster attributes"
-    width, height = int(raster[3]), int(raster[4])
-    assert 0 < width <= 1280 and 0 < height <= 1280 and width * height <= 4_000_000, (width, height)
-    pixels = bytearray(width * height * 3)
-    palette, selected, x, y, index = {}, 0, 0, 0, 0
-    while index < len(content):
-        char = content[index]
-        if char == '"':
-            match = re.match(r'"[0-9;]+', content[index:])
-            index += len(match[0])
-            continue
-        if char == "#":
-            match = re.match(r"#(\d+)(?:;2;(\d+);(\d+);(\d+))?", content[index:])
-            assert match, "Unsupported Sixel palette encoding"
-            selected = int(match[1])
-            if match[2] is not None:
-                palette[selected] = bytes(round(int(match[n]) * 255 / 100) for n in (2, 3, 4))
-            index += len(match[0])
-            continue
-        if char == "$":
-            x = 0
-        elif char == "-":
-            x, y = 0, y + 6
-        elif char == "!" or "?" <= char <= "~":
-            repeat = 1
-            if char == "!":
-                match = re.match(r"!(\d+)([?-~])", content[index:])
-                assert match
-                repeat, char = int(match[1]), match[2]
-                index += len(match[0]) - 1
-            bits = ord(char) - 63
-            assert repeat <= 1280 and x + repeat <= width, "Sixel run exceeds bounded raster"
-            for bit in range(6):
-                if bits & (1 << bit):
-                    assert y + bit < height, "Sixel pixels exceed raster height"
-                    color = palette.get(selected, b"\0\0\0")
-                    for column in range(x, x + repeat):
-                        offset = ((y + bit) * width + column) * 3
-                        pixels[offset:offset + 3] = color
-            x += repeat
-        else:
-            assert char in "\r\n", ("Unknown Sixel token", char)
-        index += 1
-    colors = {tuple(pixels[index:index + 3]) for index in range(0, len(pixels), 3)}
+    from native_images import decode_sixel as decode
+    raster = decode(payload)
+    colors = {raster.pixels[i:i + 3] for i in range(0, len(raster.pixels), 3)}
     assert len(colors) >= 4, "Encoded image lost the known source colors"
     for expected in ((240, 30, 20), (30, 40, 240)):
         assert any(all(abs(a - b) <= 4 for a, b in zip(color, expected)) for color in colors), ("Missing source corner", expected)
-    return {"width": width, "height": height, "rgb_sha256": hashlib.sha256(pixels).hexdigest(), "colors": len(colors)}
+    return raster.summary()
 
 
-def native_probe(binary, output):
-    result = {"binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "mode": "sixel-protocol-only",
+def native_probe(binary, output, mode="sixel"):
+    result = {"binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "mode": "sixel-protocol-only", "configured_mode": mode,
               "checks": [], "physical_os_ime": "NOT_RUN", "actual_sixel_client": "NOT_RUN"}
     app = runtime = mcp = None
     with tempfile.TemporaryDirectory(prefix="art-term-viewer-native-") as directory:
@@ -141,14 +54,14 @@ def native_probe(binary, output):
         fixtures.mkdir(mode=0o700)
         settings = home / "config/art-term-tui/display.toml"
         settings.parent.mkdir(parents=True, mode=0o700)
-        config = "# isolated protocol fixture: explicit cell pixels\nimage_mode='sixel'\ncell_width=8\ncell_height=16\n"
+        config = f"# isolated protocol fixture: explicit cell pixels\nimage_mode='{mode}'\ncell_width=8\ncell_height=16\n"
         settings.write_text(config)
         settings.chmod(0o600)
         try:
             runtime = driver.Runtime(fixtures)
             mcp = driver.McpFixture("A")
             mcp.image = detailed_png()
-            app = NativeTerminal(binary, home, runtime.ca)
+            app = driver.Terminal(binary, home, runtime.ca)
             app.start()
             assert settings.read_text() == config, "existing display config overwritten"
             app.click_text("New Host")
@@ -229,34 +142,96 @@ def native_probe(binary, output):
 
 
 def detailed_png():
-    """Original 640x320 source: colored corners and a four-pixel central grating."""
+    """Original 1280x640 source with colored corners and a one-pixel grating."""
     def chunk(kind, data):
         return struct.pack("!I", len(data)) + kind + data + struct.pack("!I", zlib.crc32(kind + data) & 0xffffffff)
     rows = []
-    for y in range(320):
+    for y in range(640):
         row = bytearray(b"\0")
-        for x in range(640):
-            color = ((240, 30, 20), (20, 220, 30), (30, 40, 240), (240, 210, 20))[(y >= 160) * 2 + (x >= 320)]
-            if 192 <= x < 448 and 96 <= y < 224:
-                color = (250, 0, 250) if (x // 4) % 2 else (0, 250, 250)
+        for x in range(1280):
+            color = ((240, 30, 20), (20, 220, 30), (30, 40, 240), (240, 210, 20))[(y >= 320) * 2 + (x >= 640)]
+            if 384 <= x < 896 and 192 <= y < 448:
+                color = (250, 0, 250) if x % 2 else (0, 250, 250)
             row.extend(color)
         rows.append(row)
-    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack("!IIBBBBB", 640, 320, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(b"".join(rows))) + chunk(b"IEND", b"")
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack("!IIBBBBB", 1280, 640, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(b"".join(rows))) + chunk(b"IEND", b"")
+
+
+def policy_probe(binary, output):
+    result = {"binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "checks": [], "mode": "preview-policy"}
+    runtime = app = mcp = None
+    with tempfile.TemporaryDirectory(prefix="art-term-preview-policy-") as directory:
+        root = Path(directory)
+        fixture = root / "fixture"; fixture.mkdir(mode=0o700)
+        cases = [
+            ("SSH_CONNECTION", {"SSH_CONNECTION": ""}, "image_mode='sixel'\ncell_width=8\ncell_height=16\n", (8, 16), "SSH"),
+            ("SSH_CLIENT", {"SSH_CLIENT": "fixture"}, "image_mode='auto'\n", (8, 16), "SSH"),
+            ("SSH_TTY", {"SSH_TTY": "/dev/pts/fixture"}, "image_mode='compatible'\n", (8, 16), "SSH"),
+            ("tmux", {"TMUX": "fixture"}, "image_mode='sixel'\n", (8, 16), "tmux"),
+            ("screen", {"STY": "fixture"}, "image_mode='auto'\n", (8, 16), "screen"),
+            ("linux", {"TERM": "linux"}, "image_mode='sixel'\n", (8, 16), "主控台"),
+            ("unknown-local", {"TERM": "xterm-256color"}, "image_mode='auto'\n", (8, 16), "未確認"),
+            ("missing-pixels", {}, "image_mode='auto'\n", (0, 0), "像素"),
+            ("partial-pixels", {}, "image_mode='sixel'\ncell_width=8\n", (8, 16), "同時"),
+            ("invalid-settings", {}, "image_mode='unknown'\n", (8, 16), "設定"),
+        ]
+        try:
+            runtime = driver.Runtime(fixture)
+            mcp = driver.McpFixture("A")
+            for index, (name, env, content, pixels, notice) in enumerate(cases):
+                home = root / ("home-" + name); home.mkdir(mode=0o700)
+                settings = home / "config/art-term-tui/display.toml"
+                settings.parent.mkdir(parents=True, mode=0o700)
+                settings.write_text(content); settings.chmod(0o600)
+                app = driver.Terminal(binary, home, runtime.ca, env_overrides=env, cell_pixels=pixels)
+                app.start()
+                app.wait(lambda: notice in app.text() and "桌面工具仍可使用" in "".join(app.text().replace("│", "").split()), "optional preview notice " + name, timeout=5)
+                assert settings.read_text() == content, "existing display file changed"
+                assert not app.sixels
+                if index == 0:
+                    app.click_text("New Host"); app.wait_text("HTTPS Runtime URL")
+                    app.send("SSH policy fixture\t" + runtime.origin + "\t" + runtime.credential); app.send(b"\x13")
+                    app.wait(lambda: "HTTPS Runtime URL" not in app.text(), "Host saved"); app.idle()
+                    app.action("New Screen"); app.wait_text("新增 Screen")
+                    app.send("SSH desktop\t" + mcp.url + "\t" + mcp.token); app.send(b"\x13")
+                    app.wait(lambda: "新增 Screen" not in app.text(), "Screen saved"); app.idle()
+                    app.click_text("New Shell", (0, 1, 40, 24)); app.wait_text("Live")
+                    app.bind_screen(1); app.idle(); app.settle(.5)
+                    assert not mcp.capture_started.is_set(), "unavailable preview requested screenshot"
+                    assert not app.sixels, "unavailable preview emitted image"
+                    app.prefix("t"); app.send("SSH-SHELL-STILL-USABLE")
+                    app.wait(lambda: any("SSH-SHELL-STILL-USABLE" in state["input"] for state in runtime.work().values()), "ordinary SSH work input")
+                app.prefix("q"); app.finish(); app.save(output, "policy-" + name)
+                assert not re.search(rb"\x1b\[[?>]?[0-9;]*[cn]|\x1b\[(?:14|16|18)t|\x1b_G", app.raw), "preview refusal emitted terminal query"
+                app.close(); app = None
+                result["checks"].append({"id": "T-IMAGE-POLICY", "result": "PASS", "description": name + " refuses only preview, preserves settings and TUI"})
+                print("PASS T-IMAGE-POLICY " + name, flush=True)
+        except Exception:
+            result["failure"] = traceback.format_exc(); print(result["failure"], flush=True)
+            if app: app.save(output, "policy-failure")
+        finally:
+            if app: app.close()
+            if mcp: mcp.close()
+            if runtime: runtime.close()
+    (output / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
+    return int("failure" in result)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument("--mode", choices=("compatible", "sixel"), default="compatible")
+    parser.add_argument("--mode", choices=("native", "sixel", "legacy", "policy"), default="native")
     args = parser.parse_args()
     binary = args.binary.resolve(strict=True)
     output = args.output_dir.resolve()
     output.mkdir(parents=True, exist_ok=False)
-    if args.mode == "sixel":
-        return native_probe(binary, output)
+    if args.mode in ("sixel", "legacy"):
+        return native_probe(binary, output, "compatible" if args.mode == "legacy" else "sixel")
+    if args.mode == "policy":
+        return policy_probe(binary, output)
     result = {"binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "checks": [],
-              "mode": "compatible", "physical_os_ime": "NOT_RUN", "actual_sixel_client": "NOT_RUN"}
+              "mode": "native-sixel", "physical_os_ime": "NOT_RUN", "actual_sixel_client": "NOT_RUN"}
     app = runtime = None
     mcps = []
 
@@ -269,8 +244,9 @@ def main():
 
     def signature(region):
         left, top, right, bottom = region
-        return tuple((app.screen.buffer[y][x].data, app.screen.buffer[y][x].fg, app.screen.buffer[y][x].bg)
-                     for y in range(top, bottom) for x in range(left, right))
+        return (tuple((app.screen.buffer[y][x].data, app.screen.buffer[y][x].fg, app.screen.buffer[y][x].bg)
+                      for y in range(top, bottom) for x in range(left, right)),
+                app.image_signature(region))
 
     def expanded():
         return bool(app.locations("[X]", (40, 1, app.screen.columns, 4)))
@@ -296,9 +272,9 @@ def main():
             app = ObservedTerminal(binary, home, runtime.ca)
             app.start()
             settings = home / "config/art-term-tui/display.toml"
-            assert tomllib.loads(settings.read_text())["image_mode"] == "compatible"
+            assert tomllib.loads(settings.read_text())["image_mode"] == "auto"
             assert settings.stat().st_mode & 0o777 == 0o600
-            passed("T-IMAGE-03", "Fresh startup creates private compatible display configuration")
+            passed("T-IMAGE-03", "Fresh startup creates private auto-native display configuration")
             app.click_text("New Host")
             app.wait_text("HTTPS Runtime URL")
             app.send("中文")

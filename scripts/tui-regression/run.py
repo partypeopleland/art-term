@@ -24,6 +24,9 @@ import zlib
 import aiohttp
 import pyte
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from native_images import NativeImages
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "windows-regression"))
 from fixture import Fixture
 from mcp_fixture import McpFixture
@@ -41,6 +44,13 @@ def screenshot_png(primary):
 
 
 class Screen(pyte.Screen):
+    images = None
+
+    def erase_in_display(self, how=0, *args, **kwargs):
+        if self.images is not None and how in (0, 1, 2, 3):
+            self.images.clear()
+        super().erase_in_display(how, *args, **kwargs)
+
     def set_mode(self, *modes, **kwargs):
         if kwargs.get("private") and any(mode in (47, 1047, 1049) for mode in modes):
             self.erase_in_display(2)
@@ -49,18 +59,26 @@ class Screen(pyte.Screen):
 
 
 class Terminal:
-    def __init__(self, binary, home, ca=None, rows=36, columns=120):
+    def __init__(self, binary, home, ca=None, rows=36, columns=120, env_overrides=None, cell_pixels=(8, 16)):
+        self.cell_pixels = cell_pixels
         self.master, self.slave = pty.openpty()
         self.original = termios.tcgetattr(self.slave)
         self.screen = Screen(columns, rows)
         self.stream = pyte.Stream(self.screen)
         self.decoder = codecs.getincrementaldecoder("utf-8")("replace")
         self.raw = bytearray()
+        self.images = NativeImages(self.screen, self.stream, self.decoder, cell_pixels)
+        self.screen.images = self.images
+        self.sixels = self.images.payloads
         self.resize(rows, columns)
         env = os.environ.copy()
-        for name in ("NO_COLOR", "DISPLAY", "WAYLAND_DISPLAY", "DBUS_SESSION_BUS_ADDRESS", "DBUS_SYSTEM_BUS_ADDRESS", "ART_TERM_OPENAB_FIXTURE_CA"):
+        for name in ("NO_COLOR", "DISPLAY", "WAYLAND_DISPLAY", "DBUS_SESSION_BUS_ADDRESS", "DBUS_SYSTEM_BUS_ADDRESS", "ART_TERM_OPENAB_FIXTURE_CA", "SSH_CLIENT", "SSH_CONNECTION", "SSH_TTY", "TMUX", "STY"):
             env.pop(name, None)
-        env.update(HOME=str(home), XDG_CONFIG_HOME=str(home / "config"), XDG_DATA_HOME=str(home / "data"), XDG_CACHE_HOME=str(home / "cache"), TERM="xterm-256color", COLORTERM="truecolor", LC_ALL="C.UTF-8")
+        env.update(HOME=str(home), XDG_CONFIG_HOME=str(home / "config"), XDG_DATA_HOME=str(home / "data"), XDG_CACHE_HOME=str(home / "cache"), TERM="vt340", XTERM_VERSION="XTerm(390)", COLORTERM="truecolor", LC_ALL="C.UTF-8")
+        if env_overrides:
+            for name, value in env_overrides.items():
+                if value is None: env.pop(name, None)
+                else: env[name] = value
         if ca is not None:
             env["ART_TERM_OPENAB_FIXTURE_CA"] = str(ca)
 
@@ -71,7 +89,7 @@ class Terminal:
         self.process = subprocess.Popen([str(binary)], stdin=self.slave, stdout=self.slave, stderr=self.slave, env=env, preexec_fn=controlling_terminal, close_fds=True)
 
     def resize(self, rows, columns):
-        fcntl.ioctl(self.master, termios.TIOCSWINSZ, struct.pack("HHHH", rows, columns, 0, 0))
+        fcntl.ioctl(self.master, termios.TIOCSWINSZ, struct.pack("HHHH", rows, columns, columns * self.cell_pixels[0], rows * self.cell_pixels[1]))
         self.screen.resize(rows, columns)
 
     def pump(self, timeout=0.05):
@@ -81,7 +99,7 @@ class Terminal:
             except OSError:
                 return
             self.raw.extend(data)
-            self.stream.feed(self.decoder.decode(data))
+            self.images.feed(data)
             if b"\x1b[6n" in data:
                 self.send(b"\x1b[1;1R")
 
@@ -205,9 +223,10 @@ class Terminal:
             self.pump()
 
     def image_cells(self, color):
-        return [(x, y) for y in range(self.screen.lines) for x in range(self.screen.columns)
-                if self.screen.buffer[y][x].data in ("▀", "▄", " ")
-                and color in (self.screen.buffer[y][x].fg, self.screen.buffer[y][x].bg)]
+        return self.images.cells(color)
+
+    def image_signature(self, region):
+        return self.images.signature(region)
 
     def bind_screen(self, row):
         self.prefix("c")
@@ -391,7 +410,7 @@ def main():
 
             app.prefix("1")
             app.bind_screen(1)
-            app.wait(lambda: bool(app.image_cells("f01e14")), "real red MCP screenshot cells")
+            app.wait(lambda: bool(app.image_cells("f01e14")), "real red MCP screenshot pixels")
             cells = app.image_cells("f01e14")
             assert all(1 <= x < 39 and 24 <= y < 33 for x, y in cells), cells
             runtime.emit(first, b"\r\nOUTPUT-WITH-IMAGE\r\n")
@@ -399,13 +418,13 @@ def main():
             app.save(output, "three-panes-real-image")
             app.wait(lambda: any(event.get("method") == "tools-control" and event.get("action") == "configure" and event.get("binding") == first for event in runtime.snapshot()["events"]), "selected Screen configures exact active Shell")
             app.wait_text("Tools unconfirmed")
-            passed("Actual PNG screenshot becomes colored Halfblocks in lower-left while terminal output continues")
+            passed("Actual PNG screenshot becomes native Sixel pixels in lower-left while terminal output continues")
             passed("Actual Shell configure exchange occurs; zero-adapter fixture never claims tools ready")
 
             app.prefix("2")
             app.wait(lambda: not app.image_cells("f01e14"), "tab switch clears previous screenshot")
             app.bind_screen(2)
-            app.wait(lambda: bool(app.image_cells("141ef0")), "real blue SSE MCP screenshot cells")
+            app.wait(lambda: bool(app.image_cells("141ef0")), "real blue SSE MCP screenshot pixels")
             app.prefix("1")
             app.wait(lambda: bool(app.image_cells("f01e14")) and not app.image_cells("141ef0"), "first tab Screen binding restored")
             app.prefix("v")
@@ -479,7 +498,7 @@ def main():
             app.send("y")
             app.wait(lambda: len(tomllib.loads(config.read_text()).get("desktops", [])) == 1 and "Screen-A-renamed" not in app.text(), "Screen deletion completed")
             app.wait(lambda: "桌面設定已變更" in "".join(app.text().split()) and not app.image_cells("f01e14"), "deleted Screen binding cleared")
-            assert "Screen-B" in app.text()
+            app.wait_text("Screen-B")
             passed("Screen edit rotates token and invalidates old revision; confirmed deletion clears bindings")
             app.idle()
             app.prefix("1")

@@ -1,9 +1,12 @@
+#[cfg(test)]
+use crate::image_view::CellPixels;
 use crate::{
     backend::{
         Backend, DesktopRequest, DesktopState, HostEdit, HostSelection, ImportView, OpenShell,
         ProfileView, ScreenEdit, ScreenSelection, ShellListView, ShellView, ToolReadiness,
     },
-    image_view::{ImageMode, ImageViewport, RenderRequest, RenderWorker, SurfacePlan},
+    display::DisplaySelection,
+    image_view::{ImageViewport, RenderRequest, RenderWorker, SurfacePlan},
     keybindings::{BindingAction, Bindings},
     layout::{Focus, WorkspaceLayout},
     preview::{CapturedFrame, PreviewStatus, PreviewTarget, PreviewWorker},
@@ -353,7 +356,7 @@ struct App {
     renderer: Option<RenderWorker>,
     render_request: Option<(u64, SurfacePlan)>,
     expanded_image: Option<Protocol>,
-    image_mode: ImageMode,
+    display: DisplaySelection,
     expanded: bool,
     viewport: ImageViewport,
     drag: Option<(u16, u16)>,
@@ -385,10 +388,15 @@ impl App {
     }
     #[cfg(test)]
     fn with_bindings(backend: Backend, bindings: Bindings) -> Self {
-        Self::with_image_mode(backend, bindings, ImageMode::Compatible)
+        Self::with_display(
+            backend,
+            bindings,
+            DisplaySelection::Available(CellPixels::new(8, 16).unwrap()),
+        )
     }
-    fn with_image_mode(backend: Backend, bindings: Bindings, image_mode: ImageMode) -> Self {
-        let preview = PreviewWorker::start(backend.clone());
+    fn with_display(backend: Backend, bindings: Bindings, display: DisplaySelection) -> Self {
+        let pixels = display.pixels();
+        let preview = pixels.map(|_| PreviewWorker::start(backend.clone()));
         Self {
             focus: Focus::Connections,
             layout: WorkspaceLayout::new(Rect::default(), Focus::Connections),
@@ -401,14 +409,14 @@ impl App {
             catalog_errors: HashSet::new(),
             load_queue: VecDeque::new(),
             tree_load: None,
-            preview: Some(preview),
+            preview,
             preview_target: None,
             preview_image: None,
             source_frame: None,
-            renderer: Some(RenderWorker::start(image_mode)),
+            renderer: pixels.map(RenderWorker::start),
             render_request: None,
             expanded_image: None,
-            image_mode,
+            display,
             expanded: false,
             viewport: ImageViewport::default(),
             drag: None,
@@ -1308,13 +1316,15 @@ impl App {
                 }
                 MouseEventKind::Drag(MouseButton::Left) => {
                     if let Some((x, y)) = self.drag.replace((event.column, event.row)) {
-                        if let Some(source) = &self.source_frame {
+                        if let (Some(source), Some(pixels)) =
+                            (&self.source_frame, self.display.pixels())
+                        {
                             self.viewport.pan_cells(
                                 event.column as i16 - x as i16,
                                 event.row as i16 - y as i16,
                                 canvas,
                                 (source.pixels.width(), source.pixels.height()),
-                                self.image_mode,
+                                pixels,
                             );
                             self.refresh_surfaces();
                         }
@@ -1330,7 +1340,9 @@ impl App {
                 MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
                     if contains(canvas, event.column, event.row) =>
                 {
-                    if let Some(source) = &self.source_frame {
+                    if let (Some(source), Some(pixels)) =
+                        (&self.source_frame, self.display.pixels())
+                    {
                         self.viewport.zoom_at(
                             if event.kind == MouseEventKind::ScrollUp {
                                 1
@@ -1340,7 +1352,7 @@ impl App {
                             (event.column, event.row),
                             canvas,
                             (source.pixels.width(), source.pixels.height()),
-                            self.image_mode,
+                            pixels,
                         );
                         self.refresh_surfaces();
                     }
@@ -1656,7 +1668,7 @@ impl App {
         }
     }
     fn damage_images(&mut self) {
-        if matches!(self.image_mode, ImageMode::Sixel { .. }) {
+        if self.display.pixels().is_some() {
             self.image_damage = true;
         }
     }
@@ -1670,6 +1682,10 @@ impl App {
         self.viewport.reset();
     }
     fn toggle_viewer(&mut self) {
+        if let Some(notice) = self.display.notice() {
+            self.status = notice.into();
+            return;
+        }
         if self.expanded {
             self.close_viewer();
         } else if self.source_frame.is_none() {
@@ -1723,6 +1739,9 @@ impl App {
         }
     }
     fn update_preview(&mut self) {
+        if self.display.pixels().is_none() {
+            return;
+        }
         let target = self.tabs.get(self.tab).and_then(|tab| {
             self.selected_screen().map(|screen| PreviewTarget {
                 tab: tab.id(),
@@ -1991,7 +2010,9 @@ fn draw(app: &App, frame: &mut Frame) -> HitMap {
         {
             frame.render_widget(Image::new(image), layout.preview_inner);
         } else {
-            let message = if app.source_frame.is_some() {
+            let message = if let Some(notice) = app.display.notice() {
+                format!("{notice}\n{}", app.desktop_status())
+            } else if app.source_frame.is_some() {
                 "準備圖片…".into()
             } else {
                 match app.preview_status {
@@ -2107,12 +2128,8 @@ fn draw(app: &App, frame: &mut Frame) -> HitMap {
             Line::from(
                 "點擊左下桌面圖片切換右側預覽；拖曳平移、滾輪縮放、[Fit] 還原、[X] 或 Esc 關閉。",
             ),
-            Line::from(match app.image_mode {
-                ImageMode::Compatible => "Compatible 圖片模式以終端色塊呈現，解析度受字元格限制。",
-                ImageMode::Sixel { .. } => {
-                    "Sixel 圖片模式需要支援 Sixel 的終端機與正確字元格像素設定。"
-                }
-            }),
+            Line::from("本地預覽僅使用原生 Sixel 圖片；SSH 僅停預覽，桌面工具仍可使用。"),
+            Line::from("display.toml 的舊 compatible 值視為 auto，不再使用字格圖片。"),
             Line::from(format!(
                 "快捷鍵可在 keybindings.toml 自訂；目前前綴 {}。",
                 app.bindings.leader_label()
@@ -2660,16 +2677,16 @@ pub(crate) async fn run(
     backend: Backend,
     startup_signals: crate::tty::StartupSignals,
     bindings: Bindings,
-    image_mode: ImageMode,
+    display: DisplaySelection,
 ) -> anyhow::Result<()> {
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     let mut interrupt = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
     startup_signals.disarm();
-    let mut tty = Tty::enter_with_mode(image_mode)?;
+    let mut tty = Tty::enter_with_native_images(display.pixels().is_some())?;
     let mut events = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_millis(40));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    let mut app = App::with_image_mode(backend, bindings, image_mode);
+    let mut app = App::with_display(backend, bindings, display);
     app.profiles();
     let result = async {
         while !app.quit {
@@ -3148,14 +3165,15 @@ mod tests {
         app.preview_target = Some(target);
         app.source_frame = Some(frame.clone());
         app.preview_status = Some(PreviewStatus::Live);
-        app.preview_image = Some(Protocol::Halfblocks(
-            ratatui_image::protocol::halfblocks::Halfblocks::new(
+        app.preview_image = Some(Protocol::Sixel(
+            ratatui_image::protocol::sixel::Sixel::new(
                 image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
                     31,
                     14,
                     image::Rgb([20, 120, 240]),
                 )),
                 app.layout.preview_inner.as_size(),
+                false,
             )
             .unwrap(),
         ));
@@ -3180,6 +3198,32 @@ mod tests {
             row: y,
             modifiers: KeyModifiers::NONE,
         });
+    }
+    #[tokio::test]
+    async fn unavailable_native_preview_has_no_workers_and_keeps_screen_controls_accessible() {
+        let (_directory, backend, mut previous) = test_app().await;
+        previous.stop().await;
+        let notice =
+            "此 SSH 工作階段僅停用桌面預覽；原生預覽限本地執行 art-term。桌面工具仍可使用。";
+        let mut app = App::with_display(
+            backend.clone(),
+            Bindings::default(),
+            DisplaySelection::Unavailable(notice.into()),
+        );
+        app.resize(Rect::new(0, 0, 100, 30));
+        assert!(app.preview.is_none());
+        assert!(app.renderer.is_none());
+        assert!(app.preview_target.is_none());
+        app.toggle_viewer();
+        assert!(!app.expanded);
+        assert_eq!(app.status, notice);
+        let text: String = draw_without_update(&mut app).split_whitespace().collect();
+        assert!(text.contains("桌面工具仍可使用"));
+        assert!(text.contains("SSH工作階段僅停用桌面預覽"));
+        app.local(LocalCommand::Screens);
+        assert!(matches!(app.modal, Some(Modal::Screens { .. })));
+        app.stop().await;
+        backend.shutdown().await;
     }
     #[tokio::test]
     async fn cached_thumbnail_survives_focus_and_viewer_gestures_without_instruction_flash() {
@@ -3280,10 +3324,7 @@ mod tests {
     async fn native_damage_tracks_visibility_geometry_and_source_without_clearing_focus() {
         let (_directory, backend, mut app) = test_app().await;
         seed_frame(&mut app);
-        app.image_mode = ImageMode::Sixel {
-            cell_width: 8,
-            cell_height: 16,
-        };
+        app.display = DisplaySelection::Available(CellPixels::new(8, 16).unwrap());
         app.image_damage = false;
         app.hit(HitAction::Focus(Focus::Terminal));
         assert!(!app.image_damage);

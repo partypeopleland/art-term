@@ -82,6 +82,11 @@
       "candidate_artifact_check": false
     },
     {
+      "id": "T-IMAGE-CLIENT",
+      "runner": "native_client.py",
+      "candidate_artifact_check": false
+    },
+    {
       "id": "T-RELEASE",
       "runner": null,
       "candidate_artifact_check": true
