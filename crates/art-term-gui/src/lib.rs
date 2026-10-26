@@ -7,8 +7,7 @@ mod android_operator;
 #[path = "shared/instance_desktops.rs"]
 mod instance_desktops;
 #[cfg(target_os = "android")]
-#[path = "shared/instance_restore.rs"]
-mod instance_restore;
+use art_term_core::instance_restore;
 #[cfg(target_os = "android")]
 #[path = "platform/android/mobile.rs"]
 mod mobile;

@@ -1,3 +1,5 @@
+pub(crate) use crate::desktop::{DesktopRequest, DesktopState, DesktopView, ToolReadiness};
+
 use crate::{
     tab::{self, TabClient, TabId, TerminalSize},
     vault::Vault,
@@ -80,6 +82,7 @@ impl From<&HostProfile> for HostSelection {
     }
 }
 pub(crate) struct HostEdit {
+    pub category: art_term_core::connections::Category,
     pub previous: Option<HostSelection>,
     pub name: String,
     pub base_url: String,
@@ -215,6 +218,7 @@ impl Connector {
 
 pub(super) struct Registration {
     pub host_id: String,
+    pub desktop: Arc<crate::desktop::Desktop>,
     pub cancel: watch::Sender<bool>,
     pub task: JoinHandle<()>,
 }
@@ -304,6 +308,32 @@ impl Backend {
             screens: self.inner.store.desktops()?,
         })
     }
+    pub(crate) fn desktop_request(&self, id: TabId, request: DesktopRequest) -> Result<()> {
+        self.check_open()?;
+        let desktop = self
+            .inner
+            .tabs
+            .lock()
+            .map_err(|_| ApiError::Storage)?
+            .get(&id)
+            .filter(|r| !r.task.is_finished())
+            .map(|r| r.desktop.clone())
+            .ok_or(ApiError::SessionMissing)?;
+        desktop.request(request)
+    }
+    pub(crate) fn desktop_view(&self, id: TabId) -> Result<DesktopView> {
+        self.check_open()?;
+        let desktop = self
+            .inner
+            .tabs
+            .lock()
+            .map_err(|_| ApiError::Storage)?
+            .get(&id)
+            .filter(|r| !r.task.is_finished())
+            .map(|r| r.desktop.clone())
+            .ok_or(ApiError::SessionMissing)?;
+        desktop.view()
+    }
     pub(crate) fn screen_snapshot(&self, selected: &ScreenSelection) -> Result<DesktopSnapshot> {
         self.check_open()?;
         let snapshot = self.inner.store.desktop(&selected.id)?;
@@ -359,21 +389,36 @@ impl Backend {
         };
         let profile = match edit.previous {
             Some(previous) => {
-                let profile = self.inner.store.update(
+                let mut metadata = self
+                    .inner
+                    .store
+                    .list()?
+                    .into_iter()
+                    .find(|host| host.id == previous.id && host.revision == previous.revision)
+                    .ok_or(ApiError::StateChanged)?
+                    .metadata
+                    .unwrap_or_default();
+                metadata.category = edit.category;
+                let profile = self.inner.store.update_with_metadata(
                     &previous.id,
                     previous.revision,
                     edit.name,
                     edit.base_url,
                     credential,
+                    Some(metadata),
                 )?;
                 self.cancel_host(&previous.id);
                 profile
             }
-            None => {
-                self.inner
-                    .store
-                    .add(edit.name, edit.base_url, credential.ok_or(ApiError::Auth)?)?
-            }
+            None => self.inner.store.add_with_metadata(
+                edit.name,
+                edit.base_url,
+                credential.ok_or(ApiError::Auth)?,
+                Some(art_term_core::connections::ConnectionMetadata {
+                    category: edit.category,
+                    ..Default::default()
+                }),
+            )?,
         };
         Ok(HostSelection::from(&profile))
     }
@@ -504,6 +549,7 @@ impl Backend {
             .lock()
             .map_err(|_| ApiError::Storage)?
             .insert(id, registration);
+        self.desktop_request(id, DesktopRequest::Restore)?;
         Ok(client)
     }
     pub(crate) async fn delete_shell(&self, shell: ShellSelection, confirmed: bool) -> Result<()> {
@@ -684,6 +730,7 @@ impl Backend {
         }
         for registration in registrations {
             let _ = registration.task.await;
+            registration.desktop.stop().await;
         }
         // Core cleanup guards can finish a final bounded DELETE after a failed close.
         let until = tokio::time::Instant::now() + Duration::from_secs(11);
@@ -725,6 +772,7 @@ mod tests {
     async fn add(backend: &Backend) -> HostSelection {
         backend
             .save_host(HostEdit {
+                category: art_term_core::connections::Category::Host,
                 previous: None,
                 name: "Fixture".into(),
                 base_url: "https://fixture.example".into(),
@@ -732,6 +780,54 @@ mod tests {
             })
             .await
             .unwrap()
+    }
+
+    #[tokio::test]
+    async fn agent_creation_and_blank_secret_edit_preserve_category_and_other_metadata() {
+        let (_root, backend) = backend();
+        let selected = backend
+            .save_host(HostEdit {
+                category: art_term_core::connections::Category::Agent,
+                previous: None,
+                name: "Agent".into(),
+                base_url: "https://agent.fixture".into(),
+                credential: Zeroizing::new("agent-fixture-secret".into()),
+            })
+            .await
+            .unwrap();
+        let before = backend.inner.store.snapshot(&selected.id).unwrap();
+        assert_eq!(
+            before.profile.metadata.as_ref().unwrap().category,
+            art_term_core::connections::Category::Agent
+        );
+        let mut metadata = before.profile.metadata.clone().unwrap();
+        metadata.desktop_transport = Some("runtime-mcp".into());
+        let configured = backend
+            .inner
+            .store
+            .update_with_metadata(
+                &selected.id,
+                selected.revision,
+                "Agent".into(),
+                "https://agent.fixture".into(),
+                None,
+                Some(metadata.clone()),
+            )
+            .unwrap();
+        let edited = backend
+            .save_host(HostEdit {
+                category: art_term_core::connections::Category::Agent,
+                previous: Some(HostSelection::from(&configured)),
+                name: "Renamed Agent".into(),
+                base_url: "https://agent.fixture".into(),
+                credential: Zeroizing::new(String::new()),
+            })
+            .await
+            .unwrap();
+        let after = backend.inner.store.snapshot(&edited.id).unwrap();
+        assert_eq!(after.profile.metadata, Some(metadata));
+        assert_eq!(after.credential.expose(), before.credential.expose());
+        backend.shutdown().await;
     }
 
     #[tokio::test]
@@ -795,6 +891,7 @@ mod tests {
         let current = HostSelection::from(&changed);
         let saved = backend
             .save_host(HostEdit {
+                category: art_term_core::connections::Category::Agent,
                 previous: Some(current.clone()),
                 name: "Renamed".into(),
                 base_url: "https://fixture.example".into(),
@@ -807,6 +904,7 @@ mod tests {
         assert_eq!(snapshot.profile.metadata, Some(metadata));
         assert!(backend
             .save_host(HostEdit {
+                category: art_term_core::connections::Category::Agent,
                 previous: Some(current),
                 name: "Stale".into(),
                 base_url: "https://fixture.example".into(),
@@ -816,6 +914,7 @@ mod tests {
             .is_err());
         assert!(backend
             .save_host(HostEdit {
+                category: art_term_core::connections::Category::Agent,
                 previous: Some(saved.clone()),
                 name: "Redirect".into(),
                 base_url: "https://another.example".into(),

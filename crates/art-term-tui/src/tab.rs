@@ -226,6 +226,14 @@ pub(super) fn spawn(
     let (sizes, resize) = watch::channel(size);
     let (cancel, cancellation) = watch::channel(false);
     let (finished, completion) = watch::channel(false);
+    let desktop = crate::desktop::Desktop::start(
+        binding.clone(),
+        store.clone(),
+        api.clone(),
+        connector.clone(),
+        ownership.clone(),
+        cancel.subscribe(),
+    );
     let tab = Tab {
         handle: Some(handle),
         binding,
@@ -251,8 +259,12 @@ pub(super) fn spawn(
         history_initialized: !managed,
         last_history: tokio::time::Instant::now(),
     };
+    let cleanup = desktop.clone();
+    let lifetime = cancel.clone();
     let task = tokio::spawn(async move {
         tab.run(input, resize, cancellation, views).await;
+        lifetime.send_replace(true);
+        cleanup.stop().await;
         finished.send_replace(true);
     });
     (
@@ -269,6 +281,7 @@ pub(super) fn spawn(
         },
         Registration {
             host_id: host,
+            desktop,
             cancel,
             task,
         },

@@ -47,6 +47,7 @@ with tempfile.TemporaryDirectory(prefix="art-term-package-") as directory:
     bundle.mkdir()
     shutil.copy2(binary, bundle / "art-term")
     shutil.copy2(root / "LICENSE", bundle / "LICENSE")
+    shutil.copy2(root / "crates/art-term-tui/keybindings.default.toml", bundle / "keybindings.example.toml")
     shutil.copy2(root / "docs/third-party-notices.md", bundle / "THIRD-PARTY-NOTICES.md")
     shutil.copytree(root / "crates/art-term-tui/licenses", bundle / "licenses")
     (bundle / "README.md").write_text(
@@ -57,8 +58,9 @@ with tempfile.TemporaryDirectory(prefix="art-term-package-") as directory:
         "預設設定在 ${XDG_CONFIG_HOME:-$HOME/.config}/art-term-tui；請保留整個目錄，尤其是 connections.toml.account-key-v1 帳號金鑰；請勿公開或分開搬移。\n"
         "使用 --config /path/connections.toml 可指定其他檔案，相關金鑰與鎖定資料與它同目錄。\n"
         "使用 --help 查看選項，畫面內的 Help 查看快捷鍵。主機仍使用既有 art-term Runtime/helper。\n"
-        "畫面分為左上連線、左下桌面預覽及右側分頁終端。Ctrl-] c 可選擇目前分頁的 Screen。\n"
-        "預覽以彩色方塊顯示真實截圖，可在 SSH 終端使用。Ctrl-] h / t / v 切換三區焦點。\n"
+        "左上固定展開 Computer／Agent／Screen 樹，方向鍵與 Enter 或滑鼠操作；分頁可滑鼠切換／關閉。\n"
+        "點右上 Desktop 選擇此 Shell 的桌面並配置工具；Tools ready 才代表 broker 已確認。預覽顯示真實截圖。\n"
+        "F1 說明、F2 連線、F3 終端、F4 桌面、F10 Actions。編輯設定同目錄的 keybindings.toml 後重新啟動，可自訂快捷鍵。\n"
         "關閉本機分頁只會脫離，不刪除遠端 Shell。可攜式加密匯入／匯出仍使用檔案密碼。\n",
         encoding="utf-8",
     )

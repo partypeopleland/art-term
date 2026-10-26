@@ -4,15 +4,15 @@ Screen 是保存在 App 的獨立 instance-mcp 桌面入口，與 Computers／Ag
 
 ## Ubuntu 終端機預覽
 
-TUI 的左上連線區管理 Host／Agent／Shell 與 Screens，左下顯示桌面圖片，右側保留分頁與終端。連線區按 `g` 切換 Hosts／Screens，Screens 中以 `n`／`e`／`d` 新增／編輯／刪除。token 輸入遮罩，保留 token 的空白編輯仍須符合核心的 URL 與 revision 規則。
+TUI 的左上固定展開 Computer／Agent／Screen 樹狀選單，左下顯示桌面圖片，右側保留分頁與終端。方向鍵／Enter 或滑鼠執行清單操作；Actions 提供編輯／刪除等入口，分頁可點選切換與關閉。token 輸入遮罩，空白編輯仍須符合核心 URL 與 revision 規則。
 
-每個分頁以 `Ctrl-] c` 明確選擇 Screen，選單第一列可停止。選擇只屬於目前本機分頁，不會配置遠端 Shell 的 AI 工具 broker，也不會在重開程式時自動恢復。未選擇或背景分頁不擷取。
+每個分頁透過右上 Desktop 或可自訂的快捷鍵選擇 Screen。TUI 先透過共用 MCP 初始化驗證目前來源與認證，沿用受保護 configure 通道配置該工作 Shell 的 broker，不以截圖成功作為工具設定或恢復的前提；分別顯示預覽與工具狀態；沒有 adapter 或無法確認時不顯示 Tools ready。重新連入沿用下方共同的 current／verify／來源核對恢復流程，不改寫既有指派。Stop 只停本機取圖；Clear tools 才明確取消該 Shell 工具，關頁與程式結束不取消。背景分頁不擷取。
 
 預覽沿用核心直接 MCP `screenshot` 與相同的 URL、token、TLS、圖片驗證規則。PNG／JPEG 解碼後，以 Halfblocks 的字元前景與背景色呈現真實截圖，保留圖片比例。固定使用 Halfblocks，不發出能力查詢或啟用 Kitty、Sixel、iTerm2 原生圖片協定；不需要本機圖形桌面。圖片不提供遠端桌面輸入。
 
 網路與圖片處理在背景依序完成，同時最多一個擷取請求與一個有界處理工作。目標變更先清除舊圖，既有請求仍正常完成 MCP session 清理；TabId、generation、Screen id／revision 與預覽尺寸共同排除晚到結果。解碼受 PNG／JPEG、8 MiB 圖片、4096 像素邊長與 64 MiB 配置上限限制，預覽區最多 160×80 字元。錯誤清除舊圖並顯示安全訊息。操作見 [Ubuntu 終端機版](../platforms/linux.md)。
 
-## Windows／Android 的預覽與工具路徑
+## 共用預覽與工具路徑
 
 ```text
 App native -- direct screenshot ---------------------> instance-mcp -> desktop

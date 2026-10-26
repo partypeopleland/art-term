@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "T-CRUD",
+      "runner": "catalog.py",
+      "candidate_artifact_check": false
+    },
+    {
+      "id": "T-SECRET",
+      "runner": "run.py",
+      "candidate_artifact_check": false
+    },
+    {
+      "id": "T-TERM",
+      "runner": "run.py",
+      "candidate_artifact_check": false
+    },
+    {
+      "id": "T-HISTORY",
+      "runner": "run.py",
+      "candidate_artifact_check": false
+    },
+    {
+      "id": "T-SCREEN",
+      "runner": "run.py",
+      "candidate_artifact_check": false
+    },
+    {
+      "id": "T-CONFIGURE",
+      "runner": "official_runtime.py",
+      "candidate_artifact_check": false
+    },
+    {
+      "id": "T-TOOLS",
+      "runner": "official_runtime.py",
+      "candidate_artifact_check": false
+    },
+    {
+      "id": "T-TARGET",
+      "runner": "official_runtime.py",
+      "candidate_artifact_check": false
+    },
+    {
+      "id": "T-RESTORE",
+      "runner": "official_runtime.py",
+      "candidate_artifact_check": false
+    },
+    {
+      "id": "T-LIFETIME",
+      "runner": "official_runtime.py",
+      "candidate_artifact_check": false
+    },
+    {
+      "id": "T-MOUSE",
+      "runner": "catalog.py",
+      "candidate_artifact_check": false
+    },
+    {
+      "id": "T-TRANSFER",
+      "runner": "catalog.py",
+      "candidate_artifact_check": false
+    },
+    {
+      "id": "T-KEYS",
+      "runner": "catalog.py",
+      "candidate_artifact_check": false
+    },
+    {
+      "id": "T-RELEASE",
+      "runner": null,
+      "candidate_artifact_check": true
+    }
+  ]
+}

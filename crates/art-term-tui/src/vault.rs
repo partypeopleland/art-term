@@ -39,6 +39,10 @@ pub(crate) struct VaultPaths {
 }
 
 impl VaultPaths {
+    pub(crate) fn keybindings_path(&self) -> PathBuf {
+        self.config.with_file_name("keybindings.toml")
+    }
+
     pub(crate) fn resolve(config: Option<PathBuf>) -> Result<Self, ApiError> {
         let config = match config {
             Some(path) => {

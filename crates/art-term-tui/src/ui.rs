@@ -1,8 +1,9 @@
 use crate::{
     backend::{
-        Backend, HostEdit, HostSelection, ImportView, OpenShell, ProfileView, ScreenEdit,
-        ScreenSelection, ShellListView, ShellView,
+        Backend, DesktopRequest, DesktopState, HostEdit, HostSelection, ImportView, OpenShell,
+        ProfileView, ScreenEdit, ScreenSelection, ShellListView, ShellView, ToolReadiness,
     },
+    keybindings::{BindingAction, Bindings},
     layout::{Focus, WorkspaceLayout},
     preview::{PreviewStatus, PreviewTarget, PreviewWorker},
     tab::{HistoryStatus, TabAction, TabClient, TabId, TabStatus, TerminalSize},
@@ -10,65 +11,113 @@ use crate::{
 };
 use art_term_core::instance_mcp::DesktopProfile;
 use art_term_core::openab::profiles::HostProfile;
-use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
+    MouseEventKind,
+};
 use futures_util::StreamExt;
 use ratatui::{
-    layout::{Constraint, Layout, Rect},
+    layout::Rect,
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, Paragraph, Wrap},
     Frame,
 };
 use ratatui_image::{protocol::Protocol, Image};
-use std::{collections::HashMap, future::Future, path::PathBuf, time::Duration};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    future::Future,
+    path::PathBuf,
+    time::Duration,
+};
 use tokio::task::JoinHandle;
 use tui_term::widget::PseudoTerminal;
 use zeroize::Zeroizing;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum LocalCommand {
-    Hosts,
-    Terminal,
-    Preview,
-    Screens,
-    Shells,
-    Create,
-    Previous,
-    Next,
-    Close,
-    Up,
-    Down,
-    Follow,
-    Recover,
-    Import,
-    Export,
-    Help,
-    Quit,
-}
+use BindingAction as LocalCommand;
 
-const BINDINGS: &[(char, LocalCommand, &str)] = &[
-    ('h', LocalCommand::Hosts, "主機清單 / Hosts"),
-    ('t', LocalCommand::Terminal, "終端焦點 / Terminal"),
-    ('v', LocalCommand::Preview, "預覽焦點 / Preview"),
-    ('c', LocalCommand::Screens, "選擇分頁 Screen"),
-    ('s', LocalCommand::Shells, "遠端 Shell 清單"),
-    ('n', LocalCommand::Create, "建立並連線新 Shell"),
-    ('p', LocalCommand::Previous, "上一個分頁"),
-    ('l', LocalCommand::Next, "下一個分頁"),
-    ('w', LocalCommand::Close, "關閉本機分頁（不刪遠端工作）"),
-    ('u', LocalCommand::Up, "向上閱讀歷史"),
-    ('d', LocalCommand::Down, "向下閱讀歷史"),
-    ('f', LocalCommand::Follow, "回到即時輸出"),
-    ('r', LocalCommand::Recover, "恢復原連線"),
-    ('i', LocalCommand::Import, "匯入 Host / Screen"),
-    ('e', LocalCommand::Export, "加密匯出全部 Host / Screen"),
-    ('?', LocalCommand::Help, "操作說明 / Help"),
-    ('q', LocalCommand::Quit, "離開（保留遠端工作）"),
+const COMMANDS: &[(LocalCommand, &str)] = &[
+    (LocalCommand::Hosts, "Connections"),
+    (LocalCommand::Terminal, "Terminal"),
+    (LocalCommand::Preview, "Preview"),
+    (LocalCommand::Screens, "Desktop"),
+    (LocalCommand::NewHost, "New Host"),
+    (LocalCommand::NewAgent, "New Agent"),
+    (LocalCommand::NewScreen, "New Screen"),
+    (LocalCommand::Create, "New Shell"),
+    (LocalCommand::Edit, "Edit"),
+    (LocalCommand::Delete, "Delete"),
+    (LocalCommand::Test, "Test"),
+    (LocalCommand::Refresh, "Refresh"),
+    (LocalCommand::Import, "Import"),
+    (LocalCommand::Export, "Export"),
+    (LocalCommand::Previous, "Previous Tab"),
+    (LocalCommand::Next, "Next Tab"),
+    (LocalCommand::Close, "Close Tab"),
+    (LocalCommand::Up, "History Up"),
+    (LocalCommand::Down, "History Down"),
+    (LocalCommand::Follow, "Follow"),
+    (LocalCommand::Recover, "Recover"),
+    (LocalCommand::Help, "Help"),
+    (LocalCommand::Quit, "Quit"),
 ];
+
+#[derive(Clone)]
+enum HitAction {
+    Command(LocalCommand),
+    Focus(Focus),
+    Tab(usize),
+    CloseTab(usize),
+    Tree(String),
+    Field(usize),
+    Submit,
+    Cancel,
+    Confirm,
+    ModalRow(usize),
+    ToggleReplace,
+}
+#[derive(Default)]
+struct HitMap {
+    regions: Vec<(Rect, HitAction)>,
+}
+impl HitMap {
+    fn add(&mut self, rect: Rect, action: HitAction) {
+        if rect.width > 0 && rect.height > 0 {
+            self.regions.push((rect, action));
+        }
+    }
+    fn at(&self, x: u16, y: u16) -> Option<HitAction> {
+        self.regions
+            .iter()
+            .rev()
+            .find(|(r, _)| x >= r.x && x < r.right() && y >= r.y && y < r.bottom())
+            .map(|(_, a)| a.clone())
+    }
+}
+#[derive(Clone)]
+enum TreeAction {
+    NewHost,
+    NewAgent,
+    NewScreen,
+    NewShell(HostSelection),
+    Refresh(HostSelection),
+    Shell(HostSelection, ShellView),
+    Screen(usize),
+    Host(usize),
+}
+#[derive(Clone)]
+struct TreeRow {
+    key: String,
+    label: String,
+    action: Option<TreeAction>,
+}
+struct TreeLoad {
+    host: HostSelection,
+    task: JoinHandle<crate::backend::Result<ShellListView>>,
+}
 
 enum Page {
     Hosts,
-    Shells(ShellListView),
     Terminal,
     Help,
 }
@@ -77,8 +126,12 @@ enum Confirm {
     DeleteScreen(ScreenSelection),
     Attach(ShellView),
     DeleteShell(ShellView),
+    ClearTools(TabId),
 }
 enum Modal {
+    Actions {
+        row: usize,
+    },
     Host(HostForm),
     Screen(ScreenForm),
     Screens {
@@ -143,6 +196,7 @@ impl Field {
     }
 }
 struct HostForm {
+    category: art_term_core::connections::Category,
     previous: Option<HostSelection>,
     fields: [Field; 3],
     active: usize,
@@ -151,6 +205,10 @@ impl HostForm {
     fn new(host: Option<&HostProfile>) -> Self {
         Self {
             previous: host.map(HostSelection::from),
+            category: host
+                .and_then(|h| h.metadata.as_ref())
+                .map(|m| m.category.clone())
+                .unwrap_or(art_term_core::connections::Category::Host),
             fields: [
                 Field::new(
                     "名稱 / Name",
@@ -171,8 +229,14 @@ impl HostForm {
             active: 0,
         }
     }
+    fn agent() -> Self {
+        let mut form = Self::new(None);
+        form.category = art_term_core::connections::Category::Agent;
+        form
+    }
     fn edit(mut self) -> HostEdit {
         HostEdit {
+            category: self.category,
             previous: self.previous,
             name: std::mem::take(&mut *self.fields[0].value),
             base_url: std::mem::take(&mut *self.fields[1].value),
@@ -249,7 +313,6 @@ enum JobResult {
     ScreenSaved(crate::backend::Result<ScreenSelection>),
     Deleted(crate::backend::Result<()>),
     Tested(crate::backend::Result<usize>),
-    Shells(crate::backend::Result<ShellListView>),
     Opened(crate::backend::Result<TabClient>),
     RemoteDeleted(crate::backend::Result<()>),
     Preview(crate::backend::Result<ImportView>),
@@ -260,13 +323,23 @@ struct Pending {
     epoch: u64,
     task: JoinHandle<JobResult>,
 }
+struct ClosingTab {
+    host: HostSelection,
+    task: JoinHandle<()>,
+}
 struct App {
     backend: Backend,
     focus: Focus,
     layout: WorkspaceLayout,
-    screens: HashMap<TabId, ScreenSelection>,
-    screen_row: usize,
-    screen_section: bool,
+    bindings: Bindings,
+    hits: HitMap,
+    paused: HashSet<TabId>,
+    tree_selected: Option<String>,
+    tree_offset: usize,
+    catalog: HashMap<String, ShellListView>,
+    catalog_errors: HashSet<String>,
+    load_queue: VecDeque<HostSelection>,
+    tree_load: Option<TreeLoad>,
     preview: Option<PreviewWorker>,
     preview_target: Option<PreviewTarget>,
     preview_image: Option<Protocol>,
@@ -274,10 +347,8 @@ struct App {
     generation: u64,
     profiles: ProfileView,
     page: Page,
-    shell_tree: Option<ShellListView>,
     modal: Option<Modal>,
-    host_row: usize,
-    shell_row: usize,
+    confirm_yes: bool,
     help_offset: u16,
     tabs: Vec<TabClient>,
     tab: usize,
@@ -285,20 +356,31 @@ struct App {
     status: String,
     pending: Option<Pending>,
     closing: Vec<JoinHandle<()>>,
+    closing_tabs: Vec<ClosingTab>,
     epoch: u64,
     size: TerminalSize,
     quit: bool,
 }
 
 impl App {
+    #[cfg(test)]
     fn new(backend: Backend) -> Self {
+        Self::with_bindings(backend, Bindings::default())
+    }
+    fn with_bindings(backend: Backend, bindings: Bindings) -> Self {
         let preview = PreviewWorker::start(backend.clone());
         Self {
             focus: Focus::Connections,
             layout: WorkspaceLayout::new(Rect::default(), Focus::Connections),
-            screens: HashMap::new(),
-            screen_row: 0,
-            screen_section: false,
+            bindings,
+            hits: HitMap::default(),
+            paused: HashSet::new(),
+            tree_selected: None,
+            tree_offset: 0,
+            catalog: HashMap::new(),
+            catalog_errors: HashSet::new(),
+            load_queue: VecDeque::new(),
+            tree_load: None,
             preview: Some(preview),
             preview_target: None,
             preview_image: None,
@@ -310,10 +392,8 @@ impl App {
                 screens: Vec::new(),
             },
             page: Page::Hosts,
-            shell_tree: None,
             modal: None,
-            host_row: 0,
-            shell_row: 0,
+            confirm_yes: false,
             help_offset: 0,
             tabs: Vec::new(),
             tab: 0,
@@ -321,6 +401,7 @@ impl App {
             status: "載入主機清單…".into(),
             pending: None,
             closing: Vec::new(),
+            closing_tabs: Vec::new(),
             epoch: 0,
             size: TerminalSize::new(24, 80),
             quit: false,
@@ -358,9 +439,6 @@ impl App {
             Focus::Connections
         };
         self.dismiss_modal();
-        if let Page::Shells(list) = &page {
-            self.shell_tree = Some(list.clone());
-        }
         self.page = page;
         self.help_offset = 0;
         self.epoch = self.epoch.wrapping_add(1);
@@ -374,32 +452,240 @@ impl App {
         }
     }
     fn show_modal(&mut self, modal: Modal) {
+        self.confirm_yes = false;
         self.invalidate_preview();
         self.dismiss_modal();
         self.modal = Some(modal);
         self.epoch = self.epoch.wrapping_add(1);
     }
+    fn rows(&self) -> Vec<TreeRow> {
+        let mut rows = Vec::new();
+        for (agent, title) in [(false, "Computer"), (true, "Agent")] {
+            rows.push(TreeRow {
+                key: format!("category:{title}"),
+                label: title.into(),
+                action: None,
+            });
+            if !agent {
+                rows.push(TreeRow {
+                    key: "new-host".into(),
+                    label: "  + New Host".into(),
+                    action: Some(TreeAction::NewHost),
+                });
+            }
+            if agent {
+                rows.push(TreeRow {
+                    key: "new-agent".into(),
+                    label: "  + New Agent".into(),
+                    action: Some(TreeAction::NewAgent),
+                });
+            }
+            for (index, host) in self.profiles.hosts.iter().enumerate().filter(|(_, h)| {
+                h.metadata
+                    .as_ref()
+                    .is_some_and(|m| m.category == art_term_core::connections::Category::Agent)
+                    == agent
+            }) {
+                let selection = HostSelection::from(host);
+                rows.push(TreeRow {
+                    key: format!("host:{}", host.id),
+                    label: format!("  {}", safe(&host.name)),
+                    action: Some(TreeAction::Host(index)),
+                });
+                rows.push(TreeRow {
+                    key: format!("new-shell:{}", host.id),
+                    label: "    + New Shell".into(),
+                    action: Some(TreeAction::NewShell(selection.clone())),
+                });
+                if let Some(list) = self
+                    .catalog
+                    .get(&host.id)
+                    .filter(|l| l.host.revision == host.revision)
+                {
+                    for shell in &list.shells {
+                        rows.push(TreeRow {
+                            key: format!("shell:{}:{}", host.id, shell.label),
+                            label: format!(
+                                "    {}{}",
+                                safe(&shell.label),
+                                if shell.attached { " ●" } else { "" }
+                            ),
+                            action: Some(TreeAction::Shell(selection.clone(), shell.clone())),
+                        });
+                    }
+                    if list.draining {
+                        rows.push(TreeRow {
+                            key: format!("draining:{}", host.id),
+                            label: "    主機維護中 / Draining".into(),
+                            action: None,
+                        });
+                    }
+                    if list.shells.is_empty() {
+                        rows.push(TreeRow {
+                            key: format!("empty:{}", host.id),
+                            label: "    (No Shells)".into(),
+                            action: None,
+                        });
+                    }
+                } else {
+                    rows.push(TreeRow {
+                        key: format!("loading:{}", host.id),
+                        label: if self.catalog_errors.contains(&host.id) {
+                            "    unavailable / 請重試".into()
+                        } else {
+                            "    loading…".into()
+                        },
+                        action: None,
+                    });
+                }
+                rows.push(TreeRow {
+                    key: format!("refresh:{}", host.id),
+                    label: "    Refresh Shells".into(),
+                    action: Some(TreeAction::Refresh(selection)),
+                });
+            }
+        }
+        rows.push(TreeRow {
+            key: "category:screen".into(),
+            label: "Screen".into(),
+            action: None,
+        });
+        rows.push(TreeRow {
+            key: "new-screen".into(),
+            label: "  + New Screen".into(),
+            action: Some(TreeAction::NewScreen),
+        });
+        for (index, screen) in self.profiles.screens.iter().enumerate() {
+            rows.push(TreeRow {
+                key: format!("screen:{}", screen.id),
+                label: format!("  ▣ {}", safe(&screen.name)),
+                action: Some(TreeAction::Screen(index)),
+            });
+        }
+        rows
+    }
+    fn selected_action(&self) -> Option<TreeAction> {
+        let key = self.tree_selected.as_ref()?;
+        self.rows()
+            .into_iter()
+            .find(|row| &row.key == key)
+            .and_then(|row| row.action)
+    }
+    fn move_tree(&mut self, amount: i16) {
+        let rows = self.rows();
+        let indices: Vec<_> = rows
+            .iter()
+            .enumerate()
+            .filter_map(|(i, r)| r.action.as_ref().map(|_| i))
+            .collect();
+        if indices.is_empty() {
+            return;
+        }
+        let current = indices
+            .iter()
+            .position(|i| self.tree_selected.as_ref() == Some(&rows[*i].key))
+            .unwrap_or(0);
+        let next =
+            (current as isize + amount as isize).clamp(0, indices.len() as isize - 1) as usize;
+        self.tree_selected = Some(rows[indices[next]].key.clone());
+    }
     fn host(&self) -> Option<HostSelection> {
-        match &self.page {
-            Page::Shells(list) => Some(list.host.clone()),
-            Page::Terminal => self
-                .tabs
-                .get(self.tab)
-                .and_then(|tab| self.profiles.hosts.iter().find(|h| h.id == tab.host_id()))
-                .map(HostSelection::from),
-            _ => self
-                .profiles
-                .hosts
-                .get(self.host_row)
-                .map(HostSelection::from),
+        if self.focus == Focus::Connections {
+            match self.selected_action() {
+                Some(TreeAction::Host(index)) => {
+                    return self.profiles.hosts.get(index).map(HostSelection::from)
+                }
+                Some(
+                    TreeAction::NewShell(host)
+                    | TreeAction::Refresh(host)
+                    | TreeAction::Shell(host, _),
+                ) => return Some(host),
+                _ => (),
+            }
+        }
+        self.tabs
+            .get(self.tab)
+            .and_then(|t| self.profiles.hosts.iter().find(|h| h.id == t.host_id()))
+            .or(self.profiles.hosts.first())
+            .map(HostSelection::from)
+    }
+    fn queue_host(&mut self, host: HostSelection) {
+        if let Some(queued) = self
+            .load_queue
+            .iter_mut()
+            .find(|queued| queued.id == host.id)
+        {
+            *queued = host;
+        } else {
+            self.load_queue.push_back(host);
         }
     }
     fn shells(&mut self) {
         if let Some(host) = self.host() {
-            let backend = self.backend.clone();
-            self.job(async move { JobResult::Shells(backend.list_shells(host).await) });
-        } else {
-            self.status = "請先選擇或新增主機。".into();
+            self.queue_host(host);
+            self.navigate(Page::Hosts);
+        }
+    }
+    fn activate_tree(&mut self) {
+        match self.selected_action() {
+            Some(TreeAction::NewHost) => self.show_modal(Modal::Host(HostForm::new(None))),
+            Some(TreeAction::NewAgent) => self.show_modal(Modal::Host(HostForm::agent())),
+            Some(TreeAction::NewScreen) => self.show_modal(Modal::Screen(ScreenForm::new(None))),
+            Some(TreeAction::NewShell(host)) => {
+                let backend = self.backend.clone();
+                let size = self.size;
+                self.job(async move {
+                    JobResult::Opened(backend.open(OpenShell::Create { host }, size).await)
+                });
+            }
+            Some(TreeAction::Refresh(host)) => self.queue_host(host),
+            Some(TreeAction::Host(index)) => {
+                if let Some(host) = self.profiles.hosts.get(index) {
+                    self.tree_selected = Some(format!("new-shell:{}", host.id));
+                }
+            }
+            Some(TreeAction::Shell(_, shell)) => {
+                self.show_modal(Modal::Confirm(Confirm::Attach(shell)))
+            }
+            Some(TreeAction::Screen(index)) => self.bind_screen(index + 1),
+            None => (),
+        }
+    }
+    fn edit_selected(&mut self) {
+        match self.selected_action() {
+            Some(TreeAction::Screen(i)) => {
+                if let Some(p) = self.profiles.screens.get(i) {
+                    self.show_modal(Modal::Screen(ScreenForm::new(Some(p))));
+                }
+            }
+            _ => {
+                if let Some(h) = self
+                    .host()
+                    .and_then(|h| self.profiles.hosts.iter().find(|p| p.id == h.id))
+                {
+                    self.show_modal(Modal::Host(HostForm::new(Some(h))));
+                }
+            }
+        }
+    }
+    fn delete_selected(&mut self) {
+        match self.selected_action() {
+            Some(TreeAction::Screen(i)) => {
+                if let Some(p) = self.profiles.screens.get(i) {
+                    self.show_modal(Modal::Confirm(Confirm::DeleteScreen(ScreenSelection {
+                        id: p.id.clone(),
+                        revision: p.revision,
+                    })));
+                }
+            }
+            Some(TreeAction::Shell(_, shell)) => {
+                self.show_modal(Modal::Confirm(Confirm::DeleteShell(shell)))
+            }
+            _ => {
+                if let Some(h) = self.host() {
+                    self.show_modal(Modal::Confirm(Confirm::DeleteHost(h)));
+                }
+            }
         }
     }
     fn create(&mut self) {
@@ -437,9 +723,23 @@ impl App {
             }
             LocalCommand::Screens => self.show_modal(Modal::Screens { row: 0 }),
             LocalCommand::Hosts => {
-                self.screen_section = false;
                 self.navigate(Page::Hosts);
                 self.profiles();
+            }
+            LocalCommand::Actions => self.show_modal(Modal::Actions { row: 0 }),
+            LocalCommand::Edit => self.edit_selected(),
+            LocalCommand::Delete => self.delete_selected(),
+            LocalCommand::NewHost => self.show_modal(Modal::Host(HostForm::new(None))),
+            LocalCommand::NewAgent => self.show_modal(Modal::Host(HostForm::agent())),
+            LocalCommand::NewScreen => self.show_modal(Modal::Screen(ScreenForm::new(None))),
+            LocalCommand::Refresh => {
+                self.profiles();
+            }
+            LocalCommand::Test => {
+                if let Some(host) = self.host() {
+                    let backend = self.backend.clone();
+                    self.job(async move { JobResult::Tested(backend.test_host(host).await) });
+                }
             }
             LocalCommand::Shells => self.shells(),
             LocalCommand::Create => self.create(),
@@ -453,10 +753,21 @@ impl App {
                 if !self.tabs.is_empty() {
                     self.invalidate_preview();
                     let tab = self.tabs.remove(self.tab);
-                    self.screens.remove(&tab.id());
-                    self.closing.push(tokio::spawn(async move {
+                    self.paused.remove(&tab.id());
+                    let host = self
+                        .profiles
+                        .hosts
+                        .iter()
+                        .find(|host| host.id == tab.host_id())
+                        .map(HostSelection::from);
+                    let task = tokio::spawn(async move {
                         tab.close().await;
-                    }));
+                    });
+                    if let Some(host) = host {
+                        self.closing_tabs.push(ClosingTab { host, task });
+                    } else {
+                        self.closing.push(task);
+                    }
                     self.tab = self.tab.min(self.tabs.len().saturating_sub(1));
                     if self.tabs.is_empty() {
                         self.navigate(Page::Hosts);
@@ -481,189 +792,235 @@ impl App {
         }
         if self.modal.is_some() {
             self.prefix = false;
+            let key = self.bindings.navigation_key(key);
             self.modal_key(key);
             return;
         }
-        if self.prefix {
-            self.prefix = false;
-            if prefix(key) && self.focus == Focus::Terminal {
-                self.send(TabAction::Key(KeyEvent::new(
-                    KeyCode::Char(']'),
-                    KeyModifiers::CONTROL,
-                )));
-                return;
+        let was_prefix = self.prefix;
+        self.prefix = false;
+        if self.bindings.is_leader(key) {
+            if was_prefix && self.focus == Focus::Terminal {
+                self.send(TabAction::Key(self.bindings.literal_leader()));
+            } else {
+                self.prefix = true;
             }
-            if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
+            return;
+        }
+        if !was_prefix
+            && self.focus == Focus::Connections
+            && !matches!(self.page, Page::Help)
+            && key.modifiers.is_empty()
+        {
+            match key.code {
+                KeyCode::Up => {
+                    self.move_tree(-1);
+                    return;
+                }
+                KeyCode::Down => {
+                    self.move_tree(1);
+                    return;
+                }
+                KeyCode::Enter => {
+                    self.activate_tree();
+                    return;
+                }
+                _ => (),
+            }
+        }
+        if let Some(action) = self.bindings.action(key, was_prefix) {
+            self.binding_action(action);
+            return;
+        }
+        if was_prefix {
+            self.status = "未知快捷鍵；點擊 Help 查看目前設定。".into();
+            return;
+        }
+        if self.focus == Focus::Terminal && matches!(self.page, Page::Terminal) {
+            self.send(TabAction::Key(key));
+            return;
+        }
+        let key = if self.focus == Focus::Connections
+            && matches!(key.code, KeyCode::Up | KeyCode::Down | KeyCode::Enter)
+        {
+            key
+        } else {
+            self.bindings.navigation_key(key)
+        };
+        if matches!(self.page, Page::Help) {
+            match key.code {
+                KeyCode::Down => self.help_offset = self.help_offset.saturating_add(1),
+                KeyCode::Up => self.help_offset = self.help_offset.saturating_sub(1),
+                KeyCode::Esc => self.navigate(if self.tabs.is_empty() {
+                    Page::Hosts
+                } else {
+                    Page::Terminal
+                }),
+                _ => (),
+            }
+        } else if self.focus == Focus::Preview {
+            if key.code == KeyCode::Enter {
+                self.local(LocalCommand::Screens);
+            }
+        } else {
+            match key.code {
+                KeyCode::Down => self.move_tree(1),
+                KeyCode::Up => self.move_tree(-1),
+                KeyCode::Enter => self.activate_tree(),
+                KeyCode::Esc if !self.tabs.is_empty() => self.navigate(Page::Terminal),
+                _ => (),
+            }
+        }
+    }
+    fn binding_action(&mut self, action: BindingAction) {
+        match action {
+            BindingAction::FocusNext => {
                 self.focus = match self.focus {
                     Focus::Connections => Focus::Preview,
                     Focus::Preview => Focus::Terminal,
                     Focus::Terminal => Focus::Connections,
                 };
-                if self.focus == Focus::Terminal {
-                    self.page = Page::Terminal;
-                }
+                self.page = if self.focus == Focus::Terminal {
+                    Page::Terminal
+                } else {
+                    Page::Hosts
+                };
                 self.invalidate_preview();
                 return;
             }
-            if let KeyCode::Char(c @ '1'..='9') = key.code {
-                self.select_tab((c as u8 - b'1') as usize);
+            BindingAction::TreeUp => {
+                if self.focus == Focus::Connections {
+                    self.move_tree(-1);
+                }
                 return;
             }
-            if let KeyCode::Char(c) = key.code {
-                if let Some((_, command, _)) = BINDINGS.iter().find(|(binding, _, _)| *binding == c)
-                {
-                    self.local(*command);
-                } else {
-                    self.status = "未知快捷鍵，Ctrl-] ? 查看說明。".into();
+            BindingAction::TreeDown => {
+                if self.focus == Focus::Connections {
+                    self.move_tree(1);
                 }
+                return;
             }
-            return;
-        }
-        if prefix(key) {
-            self.prefix = true;
-            return;
-        }
-        if self.modal.is_some() {
-            self.modal_key(key);
-            return;
-        }
-        if self.focus == Focus::Preview {
-            if matches!(key.code, KeyCode::Enter | KeyCode::Char('c')) {
-                self.show_modal(Modal::Screens { row: 0 });
+            BindingAction::TreeActivate => {
+                if self.focus == Focus::Connections {
+                    self.activate_tree();
+                }
+                return;
             }
-            return;
-        }
-        if self.focus == Focus::Connections && key.code == KeyCode::Char('g') {
-            self.screen_section = !self.screen_section;
-            self.navigate(Page::Hosts);
-            return;
-        }
-        if self.focus == Focus::Connections && self.screen_section {
-            self.screen_key(key);
-            return;
-        }
-        match &self.page {
-            Page::Terminal if self.focus == Focus::Terminal => self.send(TabAction::Key(key)),
-            Page::Terminal => {
-                self.navigate(Page::Hosts);
-            }
-            Page::Help => {
-                if matches!(key.code, KeyCode::Down | KeyCode::Char('j')) {
-                    self.help_offset = self.help_offset.saturating_add(1).min(40);
-                } else if matches!(key.code, KeyCode::Up | KeyCode::Char('k')) {
-                    self.help_offset = self.help_offset.saturating_sub(1);
-                } else if key.code == KeyCode::PageDown {
-                    self.help_offset = self.help_offset.saturating_add(10).min(40);
-                } else if key.code == KeyCode::PageUp {
-                    self.help_offset = self.help_offset.saturating_sub(10);
-                } else if matches!(key.code, KeyCode::Esc | KeyCode::Char('q')) {
-                    if self.tabs.is_empty() {
-                        self.navigate(Page::Hosts);
-                    } else {
-                        self.navigate(Page::Terminal);
-                    }
-                }
-            }
-            Page::Hosts => match key.code {
-                KeyCode::Down | KeyCode::Char('j') => {
-                    self.host_row =
-                        (self.host_row + 1).min(self.profiles.hosts.len().saturating_sub(1))
-                }
-                KeyCode::Up | KeyCode::Char('k') => self.host_row = self.host_row.saturating_sub(1),
-                KeyCode::Char('n') => self.show_modal(Modal::Host(HostForm::new(None))),
-                KeyCode::Char('e') => {
-                    if let Some(host) = self.profiles.hosts.get(self.host_row) {
-                        self.show_modal(Modal::Host(HostForm::new(Some(host))));
-                    }
-                }
-                KeyCode::Delete | KeyCode::Char('d') => {
-                    if let Some(host) = self.host() {
-                        self.show_modal(Modal::Confirm(Confirm::DeleteHost(host)));
-                    }
-                }
-                KeyCode::Char('t') => {
-                    if let Some(host) = self.host() {
-                        let backend = self.backend.clone();
-                        self.job(async move { JobResult::Tested(backend.test_host(host).await) });
-                    }
-                }
-                KeyCode::Enter => self.shells(),
-                KeyCode::Char('r') => self.profiles(),
-                KeyCode::Char('i') => self.local(LocalCommand::Import),
-                KeyCode::Char('x') => self.local(LocalCommand::Export),
-                KeyCode::Char('?') => self.local(LocalCommand::Help),
-                KeyCode::Char('q') => self.quit = true,
-                KeyCode::Esc if !self.tabs.is_empty() => self.navigate(Page::Terminal),
-                _ => (),
-            },
-            Page::Shells(list) => match key.code {
-                KeyCode::Down | KeyCode::Char('j') => {
-                    self.shell_row = (self.shell_row + 1).min(list.shells.len().saturating_sub(1))
-                }
-                KeyCode::Up | KeyCode::Char('k') => {
-                    self.shell_row = self.shell_row.saturating_sub(1)
-                }
-                KeyCode::Enter => {
-                    if let Some(shell) = list.shells.get(self.shell_row) {
-                        self.show_modal(Modal::Confirm(Confirm::Attach(shell.clone())));
-                    }
-                }
-                KeyCode::Delete | KeyCode::Char('d') => {
-                    if let Some(shell) = list.shells.get(self.shell_row) {
-                        self.show_modal(Modal::Confirm(Confirm::DeleteShell(shell.clone())));
-                    }
-                }
-                KeyCode::Char('n') => self.create(),
-                KeyCode::Char('r') => self.shells(),
-                KeyCode::Esc => self.navigate(Page::Hosts),
-                _ => (),
-            },
-        }
-    }
-    fn screen_key(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Down | KeyCode::Char('j') => {
-                self.screen_row =
-                    (self.screen_row + 1).min(self.profiles.screens.len().saturating_sub(1))
-            }
-            KeyCode::Up | KeyCode::Char('k') => self.screen_row = self.screen_row.saturating_sub(1),
-            KeyCode::Char('n') => self.show_modal(Modal::Screen(ScreenForm::new(None))),
-            KeyCode::Char('e') => {
-                if let Some(p) = self.profiles.screens.get(self.screen_row) {
-                    self.show_modal(Modal::Screen(ScreenForm::new(Some(p))));
-                }
-            }
-            KeyCode::Delete | KeyCode::Char('d') => {
-                if let Some(p) = self.profiles.screens.get(self.screen_row) {
-                    self.show_modal(Modal::Confirm(Confirm::DeleteScreen(ScreenSelection {
-                        id: p.id.clone(),
-                        revision: p.revision,
-                    })));
-                }
-            }
-            KeyCode::Enter => self.bind_screen(self.screen_row + 1),
             _ => (),
+        }
+        let index = match action {
+            BindingAction::Tab1 => Some(0),
+            BindingAction::Tab2 => Some(1),
+            BindingAction::Tab3 => Some(2),
+            BindingAction::Tab4 => Some(3),
+            BindingAction::Tab5 => Some(4),
+            BindingAction::Tab6 => Some(5),
+            BindingAction::Tab7 => Some(6),
+            BindingAction::Tab8 => Some(7),
+            BindingAction::Tab9 => Some(8),
+            _ => None,
+        };
+        if let Some(index) = index {
+            self.select_tab(index);
+        } else {
+            self.local(action);
         }
     }
     fn bind_screen(&mut self, row: usize) {
         self.invalidate_preview();
-        if let Some(tab) = self.tabs.get(self.tab) {
-            if row == 0 {
-                self.screens.remove(&tab.id());
-            } else if let Some(screen) = self.profiles.screens.get(row - 1) {
-                self.screens.insert(
-                    tab.id(),
-                    ScreenSelection {
-                        id: screen.id.clone(),
-                        revision: screen.revision,
-                    },
-                );
-            }
-        } else {
+        let Some(tab) = self.tabs.get(self.tab) else {
             self.status = "先開啟 Shell 分頁，再選擇 Screen。".into();
+            return;
+        };
+        let id = tab.id();
+        if row == 0 {
+            self.paused.insert(id);
+            self.status = "預覽已停止；Shell 桌面工具仍保留。".into();
+        } else if row <= self.profiles.screens.len() {
+            let screen = &self.profiles.screens[row - 1];
+            match self.backend.desktop_request(
+                id,
+                DesktopRequest::Select(ScreenSelection {
+                    id: screen.id.clone(),
+                    revision: screen.revision,
+                }),
+            ) {
+                Ok(()) => {
+                    self.paused.remove(&id);
+                    self.status = "桌面設定中；請查看目前分頁的工具狀態。".into();
+                }
+                Err(error) => self.status = error.to_string(),
+            }
+        } else if row == self.profiles.screens.len() + 1 {
+            self.show_modal(Modal::Confirm(Confirm::ClearTools(id)));
+        } else if row == self.profiles.screens.len() + 2 {
+            self.paused.remove(&id);
+        } else {
+            self.show_modal(Modal::Screen(ScreenForm::new(None)));
         }
     }
-    fn modal_key(&mut self, key: KeyEvent) {
+    fn selected_screen(&self) -> Option<ScreenSelection> {
+        let id = self.tabs.get(self.tab)?.id();
+        if self.paused.contains(&id) {
+            return None;
+        }
+        let view = self.backend.desktop_view(id).ok()?;
+        if let DesktopState::Selected { screen, .. } = view.state {
+            self.backend
+                .screen_is_current(&screen)
+                .ok()
+                .filter(|current| *current)
+                .map(|_| screen)
+        } else {
+            None
+        }
+    }
+    fn desktop_status(&self) -> String {
+        let Some(tab) = self.tabs.get(self.tab) else {
+            return "Desktop: 先開啟 Shell".into();
+        };
+        if tab.view().status != TabStatus::Live {
+            return "Desktop: 工作連線未就緒，工具未確認".into();
+        }
+        let Ok(view) = self.backend.desktop_view(tab.id()) else {
+            return "Desktop: unavailable".into();
+        };
+        if view.busy {
+            return "Desktop: 設定中…".into();
+        }
+        match view.state {
+            DesktopState::Selected { screen, tools } => {
+                let name = self
+                    .profiles
+                    .screens
+                    .iter()
+                    .find(|p| p.id == screen.id && p.revision == screen.revision)
+                    .map(|p| safe(&p.name));
+                match name {
+                    Some(name) => format!(
+                        "Desktop: {} | {}{}",
+                        name,
+                        if tools == ToolReadiness::Ready {
+                            "Tools ready"
+                        } else {
+                            "Tools unconfirmed"
+                        },
+                        if self.paused.contains(&tab.id()) {
+                            " | 預覽停止"
+                        } else {
+                            ""
+                        }
+                    ),
+                    None => "Desktop: 桌面已變更，請重新選擇".into(),
+                }
+            }
+            DesktopState::Unselected => "Desktop: 未設定，點擊 [Desktop]".into(),
+            DesktopState::Unknown => format!(
+                "Desktop: {}",
+                view.notice.unwrap_or("工具狀態未確認，請選擇桌面")
+            ),
+        }
+    }
+    fn modal_key(&mut self, mut key: KeyEvent) {
         let Some(mut modal) = self.modal.take() else {
             return;
         };
@@ -677,9 +1034,40 @@ impl App {
             }
             return;
         }
+        if matches!(modal, Modal::Confirm(_)) {
+            if matches!(
+                key.code,
+                KeyCode::Up
+                    | KeyCode::Down
+                    | KeyCode::Left
+                    | KeyCode::Right
+                    | KeyCode::Tab
+                    | KeyCode::BackTab
+            ) {
+                self.confirm_yes = !self.confirm_yes;
+                self.modal = Some(modal);
+                return;
+            }
+            if key.code == KeyCode::Enter {
+                key = KeyEvent::new(
+                    KeyCode::Char(if self.confirm_yes { 'y' } else { 'n' }),
+                    KeyModifiers::NONE,
+                );
+            }
+        }
         match &mut modal {
+            Modal::Actions { row } => match key.code {
+                KeyCode::Down => *row = (*row + 1).min(COMMANDS.len() - 1),
+                KeyCode::Up => *row = row.saturating_sub(1),
+                KeyCode::Enter => {
+                    let action = COMMANDS[*row].0;
+                    self.local(action);
+                    return;
+                }
+                _ => (),
+            },
             Modal::Screens { row } => match key.code {
-                KeyCode::Down => *row = (*row + 1).min(self.profiles.screens.len()),
+                KeyCode::Down => *row = (*row + 1).min(self.profiles.screens.len() + 3),
                 KeyCode::Up => *row = row.saturating_sub(1),
                 KeyCode::Enter => {
                     self.bind_screen(*row);
@@ -775,11 +1163,17 @@ impl App {
                 let backend = self.backend.clone();
                 match action {
                     Confirm::DeleteScreen(screen) => {
-                        self.screens.retain(|_, bound| bound.id != screen.id);
                         self.invalidate_preview();
                         self.job(
                             async move { JobResult::Deleted(backend.delete_screen(screen).await) },
                         );
+                    }
+                    Confirm::ClearTools(id) => {
+                        match self.backend.desktop_request(id, DesktopRequest::Clear) {
+                            Ok(()) => self.status = "正在取消此 Shell 的桌面工具…".into(),
+                            Err(error) => self.status = error.to_string(),
+                        }
+                        self.invalidate_preview();
                     }
                     Confirm::DeleteHost(host) => {
                         self.job(async move { JobResult::Deleted(backend.delete_host(host).await) })
@@ -839,6 +1233,102 @@ impl App {
         }
         self.modal = Some(modal);
     }
+    fn mouse(&mut self, event: MouseEvent) {
+        self.prefix = false;
+        match event.kind {
+            MouseEventKind::Down(MouseButton::Left) => {
+                if let Some(action) = self.hits.at(event.column, event.row) {
+                    self.hit(action);
+                }
+            }
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+                let amount = if event.kind == MouseEventKind::ScrollUp {
+                    -1
+                } else {
+                    1
+                };
+                if let Some(modal) = self.modal.as_mut() {
+                    match modal {
+                        Modal::Actions { row } => {
+                            *row = (*row as isize + amount).clamp(0, COMMANDS.len() as isize - 1)
+                                as usize
+                        }
+                        Modal::Screens { row } => {
+                            *row = (*row as isize + amount)
+                                .clamp(0, self.profiles.screens.len() as isize + 3)
+                                as usize
+                        }
+                        Modal::Import { scroll, .. } => {
+                            *scroll =
+                                (*scroll as i32 + amount as i32).clamp(0, u16::MAX as i32) as u16
+                        }
+                        _ => (),
+                    }
+                } else if matches!(self.page, Page::Help) {
+                    self.help_offset = (self.help_offset as i32 + amount as i32 * 3)
+                        .clamp(0, u16::MAX as i32) as u16;
+                } else if contains(self.layout.connections, event.column, event.row) {
+                    self.focus = Focus::Connections;
+                    self.page = Page::Hosts;
+                    self.move_tree(amount as i16);
+                } else if contains(self.layout.terminal, event.column, event.row) {
+                    self.focus = Focus::Terminal;
+                    self.page = Page::Terminal;
+                    self.send(TabAction::Scroll(amount as i16 * 3));
+                }
+            }
+            _ => (),
+        }
+    }
+    fn hit(&mut self, action: HitAction) {
+        match action {
+            HitAction::Command(command) => self.binding_action(command),
+            HitAction::Focus(focus) => {
+                self.focus = focus;
+                self.page = if focus == Focus::Terminal {
+                    Page::Terminal
+                } else {
+                    Page::Hosts
+                };
+                self.invalidate_preview();
+            }
+            HitAction::Tab(index) => self.select_tab(index),
+            HitAction::CloseTab(index) => {
+                self.select_tab(index);
+                self.local(LocalCommand::Close);
+            }
+            HitAction::Tree(key) => {
+                self.focus = Focus::Connections;
+                self.page = Page::Hosts;
+                self.tree_selected = Some(key);
+                self.activate_tree();
+            }
+            HitAction::Field(index) => match self.modal.as_mut() {
+                Some(Modal::Host(form)) if index < form.fields.len() => form.active = index,
+                Some(Modal::Screen(form)) if index < form.fields.len() => form.active = index,
+                Some(Modal::Transfer(form)) if index < form.fields.len() => form.active = index,
+                _ => (),
+            },
+            HitAction::Submit => {
+                self.modal_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::CONTROL))
+            }
+            HitAction::Cancel => self.modal_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+            HitAction::Confirm => {
+                self.modal_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE))
+            }
+            HitAction::ToggleReplace => {
+                self.modal_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))
+            }
+            HitAction::ModalRow(index) => {
+                match self.modal.as_mut() {
+                    Some(Modal::Actions { row } | Modal::Screens { row }) => *row = index,
+                    _ => return,
+                }
+                self.modal_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+            }
+        }
+    }
+
     fn paste(&mut self, text: String) {
         if self.modal.is_some() {
             let text = Zeroizing::new(text);
@@ -853,6 +1343,65 @@ impl App {
         }
     }
     async fn complete(&mut self) {
+        if self
+            .tree_load
+            .as_ref()
+            .is_some_and(|load| load.task.is_finished())
+        {
+            let load = self.tree_load.take().unwrap();
+            if self
+                .profiles
+                .hosts
+                .iter()
+                .any(|h| h.id == load.host.id && h.revision == load.host.revision)
+            {
+                match load.task.await {
+                    Ok(Ok(list)) => {
+                        self.catalog_errors.remove(&load.host.id);
+                        self.catalog.insert(load.host.id, list);
+                    }
+                    _ => {
+                        self.catalog_errors.insert(load.host.id);
+                    }
+                }
+            }
+        }
+        if self.tree_load.is_none() {
+            if let Some(host) = self.load_queue.pop_front() {
+                let backend = self.backend.clone();
+                let requested = host.clone();
+                let task = tokio::spawn(async move {
+                    tokio::time::timeout(Duration::from_secs(4), backend.list_shells(requested))
+                        .await
+                        .unwrap_or(Err(crate::backend::BackendError::Busy))
+                });
+                self.tree_load = Some(TreeLoad { host, task });
+            }
+        }
+        let rows = self.rows();
+        if !rows
+            .iter()
+            .any(|r| self.tree_selected.as_ref() == Some(&r.key) && r.action.is_some())
+        {
+            self.tree_selected = rows.into_iter().find(|r| r.action.is_some()).map(|r| r.key);
+        }
+        let mut index = 0;
+        while index < self.closing_tabs.len() {
+            if self.closing_tabs[index].task.is_finished() {
+                let closed = self.closing_tabs.swap_remove(index);
+                let _ = closed.task.await;
+                if let Some(host) = self
+                    .profiles
+                    .hosts
+                    .iter()
+                    .find(|host| host.id == closed.host.id)
+                {
+                    self.queue_host(HostSelection::from(host));
+                }
+            } else {
+                index += 1;
+            }
+        }
         self.closing.retain(|task| !task.is_finished());
         if !self
             .pending
@@ -873,24 +1422,16 @@ impl App {
         match result {
             JobResult::Profiles(Ok(profiles)) => {
                 self.invalidate_preview();
-                self.screens.retain(|_, bound| {
+                self.catalog.retain(|id, list| {
                     profiles
-                        .screens
-                        .iter()
-                        .any(|p| p.id == bound.id && p.revision == bound.revision)
-                });
-                if self.shell_tree.as_ref().is_some_and(|list| {
-                    !profiles
                         .hosts
                         .iter()
-                        .any(|h| h.id == list.host.id && h.revision == list.host.revision)
-                }) {
-                    self.shell_tree = None;
-                }
+                        .any(|h| &h.id == id && h.revision == list.host.revision)
+                });
                 self.profiles = profiles;
-                self.host_row = self
-                    .host_row
-                    .min(self.profiles.hosts.len().saturating_sub(1));
+                for host in self.profiles.hosts.clone() {
+                    self.queue_host(HostSelection::from(&host));
+                }
                 self.status = format!(
                     "{} Hosts，{} 個已保存 Screen",
                     self.profiles.hosts.len(),
@@ -909,19 +1450,16 @@ impl App {
             JobResult::Tested(Ok(count)) => {
                 self.status = format!("主機連線正常，遠端工作數量 {count}。")
             }
-            JobResult::Shells(Ok(list)) if current => {
-                self.shell_row = 0;
-                self.navigate(Page::Shells(list));
-                self.status = "選擇 Shell 並按 Enter；n 建立新工作，r 重新整理。".into();
-            }
-            JobResult::Shells(Ok(_)) => self.status = "先前的工作清單已完成；目前頁面保留。".into(),
             JobResult::Opened(Ok(tab)) => {
+                if let Some(host) = self.profiles.hosts.iter().find(|h| h.id == tab.host_id()) {
+                    self.queue_host(HostSelection::from(host));
+                }
                 self.tabs.push(tab);
                 if current {
                     self.tab = self.tabs.len() - 1;
                     self.navigate(Page::Terminal);
                 }
-                self.status = "遠端 Shell 已連線。Ctrl-] ? 查看分頁快捷鍵。".into();
+                self.status = "遠端 Shell 已連線；點擊右上 [Desktop] 設定此連線的桌面。".into();
             }
             JobResult::RemoteDeleted(Ok(())) => {
                 self.status = "遠端工作已刪除。".into();
@@ -957,7 +1495,6 @@ impl App {
             | JobResult::Saved(Err(error))
             | JobResult::Deleted(Err(error))
             | JobResult::Tested(Err(error))
-            | JobResult::Shells(Err(error))
             | JobResult::Opened(Err(error))
             | JobResult::RemoteDeleted(Err(error))
             | JobResult::Preview(Err(error))
@@ -985,27 +1522,16 @@ impl App {
         }
     }
     fn update_preview(&mut self) {
-        let stale = self
-            .tabs
-            .get(self.tab)
-            .and_then(|tab| self.screens.get(&tab.id()))
-            .is_some_and(|screen| !self.backend.screen_is_current(screen).unwrap_or(false));
-        if stale {
-            if let Some(tab) = self.tabs.get(self.tab) {
-                self.screens.remove(&tab.id());
-            }
-            self.invalidate_preview();
-        }
         let target = if self.modal.is_none()
             && !matches!(self.page, Page::Help)
             && self.layout.preview_inner.width > 0
             && self.layout.preview_inner.height > 0
         {
             self.tabs.get(self.tab).and_then(|tab| {
-                self.screens.get(&tab.id()).map(|screen| PreviewTarget {
+                self.selected_screen().map(|screen| PreviewTarget {
                     tab: tab.id(),
                     generation: self.generation,
-                    screen: screen.clone(),
+                    screen,
                     area: self.layout.preview_inner,
                 })
             })
@@ -1037,6 +1563,11 @@ impl App {
         }
     }
     async fn stop(&mut self) {
+        self.load_queue.clear();
+        if let Some(load) = self.tree_load.take() {
+            load.task.abort();
+            let _ = load.task.await;
+        }
         if let Some(worker) = self.preview.take() {
             worker.stop().await;
         }
@@ -1052,16 +1583,15 @@ impl App {
                 tab.close().await;
             }));
         }
+        for closed in self.closing_tabs.drain(..) {
+            let _ = closed.task.await;
+        }
         for task in self.closing.drain(..) {
             let _ = task.await;
         }
     }
 }
 
-fn prefix(key: KeyEvent) -> bool {
-    // Crossterm maps the legacy wire byte 0x1d to Ctrl-5.
-    matches!(key.code, KeyCode::Char(']' | '5')) && key.modifiers == KeyModifiers::CONTROL
-}
 fn submit(key: KeyEvent, active: usize, count: usize) -> bool {
     (key.code == KeyCode::Char('s') && key.modifiers.contains(KeyModifiers::CONTROL))
         || (key.code == KeyCode::Enter && active + 1 == count)
@@ -1098,123 +1628,134 @@ fn panel(title: impl Into<Line<'static>>) -> Block<'static> {
         .border_style(Style::default().fg(Color::DarkGray))
 }
 
-fn draw(app: &App, frame: &mut Frame) {
+fn contains(rect: Rect, x: u16, y: u16) -> bool {
+    x >= rect.x && x < rect.right() && y >= rect.y && y < rect.bottom()
+}
+fn elide(text: &str, width: u16) -> String {
+    let mut text = safe(text);
+    if Span::raw(&text).width() <= width as usize {
+        return text;
+    }
+    while !text.is_empty() && Span::raw(&text).width() + 1 > width as usize {
+        text.pop();
+    }
+    if width > 0 {
+        text.push('…');
+    }
+    text
+}
+fn button(frame: &mut Frame, hits: &mut HitMap, area: Rect, label: &str, action: HitAction) {
+    frame.render_widget(
+        Paragraph::new(elide(label, area.width)).style(Style::default().fg(Color::Cyan)),
+        area,
+    );
+    hits.add(area, action);
+}
+fn draw(app: &App, frame: &mut Frame) -> HitMap {
     let area = frame.area();
+    let mut hits = HitMap::default();
     if area.height < 4 || area.width < 20 {
         frame.render_widget(Paragraph::new("終端太小，請放大視窗。"), area);
-        return;
+        return hits;
     }
     let layout = WorkspaceLayout::new(area, app.focus);
-    frame.render_widget(
-        Paragraph::new(
-            " art-term  | Ctrl-] h Connections  t Terminal  v Preview  c Screen  ? Help",
-        )
-        .style(Style::default().fg(Color::Cyan)),
-        Rect::new(area.x, area.y, area.width, 1),
+    let mut x = area.x;
+    let desktop_width = 9.min(area.width);
+    for (label, command) in [
+        ("[Actions]", LocalCommand::Actions),
+        ("[Connections]", LocalCommand::Hosts),
+        ("[Preview]", LocalCommand::Preview),
+        ("[Terminal]", LocalCommand::Terminal),
+        ("[Help]", LocalCommand::Help),
+    ] {
+        let width = Span::raw(label).width() as u16 + 1;
+        if x + width > area.right() - desktop_width {
+            break;
+        }
+        button(
+            frame,
+            &mut hits,
+            Rect::new(x, area.y, width, 1),
+            label,
+            HitAction::Command(command),
+        );
+        x += width;
+    }
+    button(
+        frame,
+        &mut hits,
+        Rect::new(area.right() - desktop_width, area.y, desktop_width, 1),
+        "[Desktop]",
+        HitAction::Command(LocalCommand::Screens),
     );
-    let border = |title: String, focused: bool| {
-        panel(title).border_style(Style::default().fg(if focused {
+    let border = |title: String, focus: Focus| {
+        panel(title).border_style(Style::default().fg(if app.focus == focus {
             Color::Cyan
         } else {
             Color::DarkGray
         }))
     };
     if layout.connections.width > 0 {
-        let mut items = Vec::new();
-        let mut selected = None;
-        items.push(ListItem::new("Hosts / Agents"));
-        for (index, host) in app.profiles.hosts.iter().enumerate() {
-            if !app.screen_section && matches!(app.page, Page::Hosts) && index == app.host_row {
-                selected = Some(items.len());
-            }
-            items.push(ListItem::new(format!(
-                "{} {} {}",
-                if host
-                    .metadata
-                    .as_ref()
-                    .is_some_and(|m| m.category == art_term_core::connections::Category::Agent)
-                {
-                    "Agent"
+        let block = border("Connections / 連線".into(), Focus::Connections);
+        let inner = block.inner(layout.connections);
+        frame.render_widget(block, layout.connections);
+        hits.add(layout.connections, HitAction::Focus(Focus::Connections));
+        let rows = app.rows();
+        let selected = rows
+            .iter()
+            .position(|r| app.tree_selected.as_ref() == Some(&r.key));
+        let offset = selected
+            .map(|i| i.saturating_sub(inner.height.saturating_sub(1) as usize))
+            .unwrap_or(0)
+            .max(
+                app.tree_offset
+                    .min(rows.len().saturating_sub(inner.height as usize)),
+            );
+        for (index, row) in rows
+            .iter()
+            .enumerate()
+            .skip(offset)
+            .take(inner.height as usize)
+        {
+            let rect = Rect::new(inner.x, inner.y + (index - offset) as u16, inner.width, 1);
+            let chosen = Some(index) == selected;
+            let text = format!("{}{}", if chosen { "▶" } else { " " }, row.label);
+            frame.render_widget(
+                Paragraph::new(elide(&text, inner.width)).style(if chosen {
+                    Style::default().bg(Color::DarkGray)
+                } else if row.action.is_none() {
+                    Style::default().fg(Color::DarkGray)
                 } else {
-                    "Host"
-                },
-                if app
-                    .shell_tree
-                    .as_ref()
-                    .is_some_and(|list| list.host.id == host.id)
-                {
-                    "▾"
-                } else {
-                    "▸"
-                },
-                safe(&host.name)
-            )));
-            if let Some(list) = &app.shell_tree {
-                if list.host.id == host.id {
-                    for (row, shell) in list.shells.iter().enumerate() {
-                        if !app.screen_section
-                            && matches!(app.page, Page::Shells(_))
-                            && row == app.shell_row
-                        {
-                            selected = Some(items.len());
-                        }
-                        items.push(ListItem::new(format!(
-                            "  └ {}{}",
-                            safe(&shell.label),
-                            if shell.attached { " ●" } else { "" }
-                        )));
-                    }
-                    if list.draining {
-                        items.push(ListItem::new("  主機維護中 / Draining"));
-                    }
-                    if list.shells.is_empty() {
-                        items.push(ListItem::new("  (n 建立新 Shell)"));
-                    }
-                }
+                    Style::default()
+                }),
+                rect,
+            );
+            if row.action.is_some() {
+                hits.add(rect, HitAction::Tree(row.key.clone()));
             }
         }
-        items.push(ListItem::new("Screens  (g 切換選取)"));
-        for (index, screen) in app.profiles.screens.iter().enumerate() {
-            if app.screen_section && index == app.screen_row {
-                selected = Some(items.len());
-            }
-            items.push(ListItem::new(format!("  ▣ {}", safe(&screen.name))));
-        }
-        if app.profiles.hosts.is_empty() {
-            items.push(ListItem::new("n 新增 Host / i 匯入"));
-        }
-        let mut state = ListState::default().with_selected(selected);
-        frame.render_stateful_widget(
-            List::new(items)
-                .block(border(
-                    "Connections / 連線".into(),
-                    app.focus == Focus::Connections,
-                ))
-                .highlight_style(Style::default().bg(Color::DarkGray))
-                .highlight_symbol("▶"),
-            layout.connections,
-            &mut state,
-        );
     }
     if layout.preview.width > 0 {
         let name = app
-            .tabs
-            .get(app.tab)
-            .and_then(|t| app.screens.get(&t.id()))
+            .selected_screen()
             .and_then(|b| app.profiles.screens.iter().find(|p| p.id == b.id))
             .map(|p| safe(&p.name))
             .unwrap_or_else(|| "停止".into());
         frame.render_widget(
-            border(format!("Desktop / {name}"), app.focus == Focus::Preview),
+            border(format!("Desktop / {name}"), Focus::Preview),
             layout.preview,
         );
+        hits.add(layout.preview, HitAction::Focus(Focus::Preview));
         if let Some(image) = &app.preview_image {
             frame.render_widget(Image::new(image), layout.preview_inner);
         } else {
             let message = match app.preview_status {
-                Some(PreviewStatus::Capturing) => "擷取中…".to_string(),
+                Some(PreviewStatus::Capturing) => "擷取中…".into(),
                 Some(PreviewStatus::Failed(error)) => error.to_string(),
-                _ => "Ctrl-] c 選擇 Screen\nEnter / c 選擇；停止可取消".into(),
+                _ => format!(
+                    "點擊右上 [Desktop]\n選擇此 Shell 使用的桌面。\n{}",
+                    app.desktop_status()
+                ),
             };
             frame.render_widget(
                 Paragraph::new(message).wrap(Wrap { trim: false }),
@@ -1222,53 +1763,88 @@ fn draw(app: &App, frame: &mut Frame) {
             );
         }
     }
-    if layout.terminal.width > 0 {
-        let tabs = app
+    if layout.tabs.width > 0 {
+        let slots = (layout.tabs.width / 24).max(1) as usize;
+        let start = app.tab / slots * slots;
+        let slot_width = (layout.tabs.width / slots as u16).max(1);
+        for (slot, (index, tab)) in app
             .tabs
             .iter()
             .enumerate()
-            .map(|(i, t)| {
-                Span::styled(
-                    format!(" {}:{} ", i + 1, safe(t.label())),
-                    if i == app.tab {
-                        Style::default().bg(Color::Cyan).fg(Color::Black)
-                    } else {
-                        Style::default().fg(Color::Gray)
-                    },
-                )
-            })
-            .collect::<Vec<_>>();
-        frame.render_widget(Paragraph::new(Line::from(tabs)), layout.tabs);
-        frame.render_widget(
-            border("Terminal / 終端".into(), app.focus == Focus::Terminal),
-            layout.terminal,
-        );
-        if let Some(tab) = app.tabs.get(app.tab) {
-            let view = tab.view();
+            .skip(start)
+            .take(slots)
+            .enumerate()
+        {
+            let rect = Rect::new(
+                layout.tabs.x + slot as u16 * slot_width,
+                layout.tabs.y,
+                slot_width,
+                1,
+            );
+            let close_width = 3.min(rect.width);
+            let title_width = rect.width.saturating_sub(close_width);
+            let label = elide(&format!("{}:{}", index + 1, tab.label()), title_width);
             frame.render_widget(
-                PseudoTerminal::new(view.screen.as_ref()),
+                Paragraph::new(label).style(if index == app.tab {
+                    Style::default().bg(Color::Cyan).fg(Color::Black)
+                } else {
+                    Style::default().fg(Color::Gray)
+                }),
+                Rect::new(rect.x, rect.y, title_width, 1),
+            );
+            hits.add(
+                Rect::new(rect.x, rect.y, title_width, 1),
+                HitAction::Tab(index),
+            );
+            button(
+                frame,
+                &mut hits,
+                Rect::new(rect.right() - close_width, rect.y, close_width, 1),
+                "[x]",
+                HitAction::CloseTab(index),
+            );
+        }
+    }
+    if layout.terminal.width > 0 {
+        let title = elide(
+            &format!("Terminal | {}", app.desktop_status()),
+            layout.terminal.width.saturating_sub(2),
+        );
+        frame.render_widget(border(title, Focus::Terminal), layout.terminal);
+        hits.add(layout.terminal, HitAction::Focus(Focus::Terminal));
+        if let Some(tab) = app.tabs.get(app.tab) {
+            frame.render_widget(
+                PseudoTerminal::new(tab.view().screen.as_ref()),
                 layout.terminal_inner,
             );
         } else {
-            frame.render_widget(
-                Paragraph::new("選擇左側 Host，Enter 開啟 Shell 清單。\nCtrl-] n 建立新 Shell。"),
-                layout.terminal_inner,
-            );
+            frame.render_widget(Paragraph::new("左側選擇 New Shell 或現有 Shell，按 Enter 或滑鼠點選。\n桌面設定在右上 [Desktop]。"),layout.terminal_inner);
         }
     }
     if matches!(app.page, Page::Help) {
         let content = body(area);
         frame.render_widget(Clear, content);
+        hits = HitMap::default();
         let mut lines = vec![
-            Line::from("Ctrl-] 放開後按快捷鍵；只有 Terminal 焦點會送普通按鍵與貼上到遠端。"),
-            Line::from("Ctrl-] Ctrl-] 傳送原始 Ctrl-]；Ctrl-C / Ctrl-D 與 Tab 保留給遠端。"),
+            Line::from("滑鼠點選區塊與分頁；連線樹固定展開，↑↓移動、Enter執行。"),
+            Line::from("[Actions] 包含新增／編輯／刪除、匯入匯出及歷史操作。"),
+            Line::from(format!(
+                "快捷鍵可在 keybindings.toml 自訂；目前前綴 {}。",
+                app.bindings.leader_label()
+            )),
         ];
-        lines.extend(
-            BINDINGS
-                .iter()
-                .map(|(key, _, label)| Line::from(format!("{key}  {label}"))),
-        );
-        lines.extend([Line::from("Ctrl-] Tab 輪流切換三區焦點。連線：↑↓ 選擇，Enter 展開/連線；Esc 回 Hosts；g 切換 Screens。"),Line::from("Host / Screen：n 新增、e 編輯、d 刪除；Screen Enter 綁定目前分頁。"),Line::from("Ctrl-] c 選 Screen；第一項停止。每個分頁明確選擇自己的 Screen。"),Line::from("表單 Tab/Shift-Tab 移動，Ctrl-U 清空、Ctrl-S 儲存、Esc 取消。"),Line::from("預覽使用終端彩色方塊，支援純 SSH；不需要圖形桌面。Esc 返回。")]);
+        lines.extend(COMMANDS.iter().map(|(command, label)| {
+            Line::from(format!("{}  {}", app.bindings.label(*command), label))
+        }));
+        lines.extend([
+            Line::from("桌面預覽與遠端工具狀態分開顯示；Tools ready 才代表 broker 配置已確認。"),
+            Line::from(
+                "Stop 只停止預覽；Clear tools 取消此 Shell 的桌面工具。關頁不刪除遠端工作。",
+            ),
+            Line::from(
+                "只有 Terminal 焦點會送普通按鍵與貼上；Shift+滑鼠可使用終端本身的文字選取。",
+            ),
+        ]);
         frame.render_widget(
             Paragraph::new(lines)
                 .block(panel("Help / 說明"))
@@ -1276,29 +1852,45 @@ fn draw(app: &App, frame: &mut Frame) {
                 .wrap(Wrap { trim: false }),
             content,
         );
+        let close = Rect::new(
+            content.right().saturating_sub(10),
+            content.y,
+            10.min(content.width),
+            1,
+        );
+        button(
+            frame,
+            &mut hits,
+            close,
+            "[Close]",
+            HitAction::Command(if app.tabs.is_empty() {
+                LocalCommand::Hosts
+            } else {
+                LocalCommand::Terminal
+            }),
+        );
     }
-    let state = if matches!(app.page, Page::Terminal) {
-        app.tabs
-            .get(app.tab)
-            .map(|tab| {
-                let view = tab.view();
-                format!(
-                    "{} | {}{}",
-                    status(&view.status),
-                    history(&view.history),
-                    view.notice
-                        .map(|notice| format!(" | {}", safe(notice)))
-                        .unwrap_or_default()
-                )
-            })
-            .unwrap_or_default()
-    } else {
-        format!(
-            "{} Hosts | {} Screens",
-            app.profiles.hosts.len(),
-            app.profiles.screens.len()
-        )
-    };
+    let state = app
+        .tabs
+        .get(app.tab)
+        .map(|t| {
+            let v = t.view();
+            format!(
+                "{} | {}{}",
+                status(&v.status),
+                history(&v.history),
+                v.notice
+                    .map(|n| format!(" | {}", safe(n)))
+                    .unwrap_or_default()
+            )
+        })
+        .unwrap_or_else(|| {
+            format!(
+                "{} Hosts | {} Screens",
+                app.profiles.hosts.len(),
+                app.profiles.screens.len()
+            )
+        });
     frame.render_widget(
         Paragraph::new(format!(
             "{}  {}{}",
@@ -1313,47 +1905,22 @@ fn draw(app: &App, frame: &mut Frame) {
         .style(Style::default().fg(Color::Gray)),
         Rect::new(area.x, area.bottom() - 2, area.width, 1),
     );
-    let footer = if app.prefix {
-        "Ctrl-] 命令：h 主機 | s Shells | n 新工作 | p/l 分頁 | w 關閉 | ? 說明 | q 離開"
-    } else if matches!(app.modal, Some(Modal::Import { .. })) {
-        "↑↓ 捲動 | Space 重複項目策略 | y 確認匯入 | Esc 取消"
-    } else if app.modal.is_some() {
-        "Tab 移動 | Ctrl-U 清空 | Ctrl-S 儲存 | Esc 取消"
-    } else {
-        match app.page { Page::Hosts => "↑↓ 選取 | Enter Shells | n 新增 | e 編輯 | d 刪除 | t 測試 | i 匯入 | x 匯出 | Ctrl-] ? 說明", Page::Shells(_) => "↑↓ 選取 | Enter 連線/接管 | n 建立 | r 整理 | d 刪除遠端工作 | Esc 返回", _ => "Ctrl-] ? 操作說明 | Ctrl-] h 主機 | Ctrl-] 1..9 分頁 | Ctrl-] w 關閉 | Ctrl-] q 離開" }
-    };
     frame.render_widget(
-        Paragraph::new(footer).style(Style::default().fg(Color::Cyan)),
+        Paragraph::new(if app.prefix {
+            format!(
+                "{} 命令模式 | 點擊 Help 查看目前快捷鍵",
+                app.bindings.leader_label()
+            )
+        } else {
+            "滑鼠點選 | ↑↓ / Enter 操作連線樹 | [Actions] 全部操作 | [Desktop] 桌面設定".into()
+        })
+        .style(Style::default().fg(Color::Cyan)),
         Rect::new(area.x, area.bottom() - 1, area.width, 1),
     );
     if let Some(modal) = &app.modal {
-        draw_modal(modal, frame);
-        if let Modal::Screens { row } = modal {
-            let rect = Rect::new(
-                area.x + 2,
-                area.y + 2,
-                area.width.saturating_sub(4),
-                area.height.saturating_sub(4),
-            );
-            frame.render_widget(Clear, rect);
-            let items = std::iter::once(ListItem::new("停止預覽 / Stop"))
-                .chain(
-                    app.profiles
-                        .screens
-                        .iter()
-                        .map(|p| ListItem::new(safe(&p.name))),
-                )
-                .collect::<Vec<_>>();
-            let mut state = ListState::default().with_selected(Some(*row));
-            frame.render_stateful_widget(
-                List::new(items)
-                    .block(panel("Screen：↑↓ 選擇 / Enter 確認 / Esc 取消"))
-                    .highlight_style(Style::default().bg(Color::DarkGray)),
-                rect,
-                &mut state,
-            );
-        }
+        hits = draw_modal(app, modal, frame);
     }
+    hits
 }
 
 fn status(value: &TabStatus) -> String {
@@ -1372,58 +1939,137 @@ fn history(value: &HistoryStatus) -> String {
         HistoryStatus::Uncertain => "歷史控制狀態不確定".into(),
     }
 }
-fn draw_modal(modal: &Modal, frame: &mut Frame) {
-    let area = frame.area();
+fn modal_rect(area: Rect) -> Rect {
     let width = area.width.saturating_sub(4).min(88);
-    let height = area.height.saturating_sub(4).min(20);
-    let rect = Rect::new(
+    let height = area.height.saturating_sub(4).min(24);
+    Rect::new(
         area.x + (area.width - width) / 2,
         area.y + (area.height - height) / 2,
         width,
         height,
-    );
+    )
+}
+fn draw_modal(app: &App, modal: &Modal, frame: &mut Frame) -> HitMap {
+    let rect = modal_rect(frame.area());
+    let mut hits = HitMap::default();
     frame.render_widget(Clear, rect);
     match modal {
-        Modal::Screen(form) => draw_fields(
-            &form.fields,
-            form.active,
-            if form.previous.is_some() {
-                "編輯 Screen"
+        Modal::Host(form) => {
+            return draw_fields(
+                &form.fields,
+                form.active,
+                if matches!(form.category, art_term_core::connections::Category::Agent) {
+                    if form.previous.is_some() {
+                        "編輯 Agent / Edit"
+                    } else {
+                        "新增 Agent / New Agent"
+                    }
+                } else if form.previous.is_some() {
+                    "編輯 Host / Edit"
+                } else {
+                    "新增 Host / Add"
+                },
+                rect,
+                frame,
+            )
+        }
+        Modal::Screen(form) => {
+            return draw_fields(
+                &form.fields,
+                form.active,
+                if form.previous.is_some() {
+                    "編輯 Screen"
+                } else {
+                    "新增 Screen"
+                },
+                rect,
+                frame,
+            )
+        }
+        Modal::Transfer(form) => {
+            return draw_fields(
+                &form.fields,
+                form.active,
+                if form.export {
+                    "加密匯出全部 Host / Screen"
+                } else {
+                    "匯入 Host / Screen（不含密碼可留白）"
+                },
+                rect,
+                frame,
+            )
+        }
+        Modal::Actions { row } | Modal::Screens { row } => {
+            let actions = matches!(modal, Modal::Actions { .. });
+            let labels = if actions {
+                COMMANDS
+                    .iter()
+                    .map(|(command, label)| format!("{}  {}", label, app.bindings.label(*command)))
+                    .collect::<Vec<_>>()
             } else {
-                "新增 Screen"
-            },
-            rect,
-            frame,
-        ),
-        Modal::Screens { .. } => (),
-        Modal::Host(form) => draw_fields(
-            &form.fields,
-            form.active,
-            if form.previous.is_some() {
-                "編輯 Host / Edit"
+                std::iter::once("停止預覽 / Stop".into())
+                    .chain(app.profiles.screens.iter().map(|p| safe(&p.name)))
+                    .chain([
+                        "取消桌面工具 / Clear tools".into(),
+                        "恢復預覽 / Resume preview".into(),
+                        "新增 Screen / New Screen".into(),
+                    ])
+                    .collect::<Vec<String>>()
+            };
+            let block = panel(if actions {
+                "Actions / 所有操作"
             } else {
-                "新增 Host / Add"
-            },
-            rect,
-            frame,
-        ),
-        Modal::Transfer(form) => draw_fields(
-            &form.fields,
-            form.active,
-            if form.export {
-                "加密匯出全部 Host / Screen"
-            } else {
-                "匯入 Host / Screen（不含密碼可留白）"
-            },
-            rect,
-            frame,
-        ),
+                "Screen：選擇此 Shell 的桌面"
+            });
+            let inner = block.inner(rect);
+            frame.render_widget(block, rect);
+            let detail_rows = if !actions && inner.height >= 5 { 2 } else { 0 };
+            let height = inner.height.saturating_sub(1 + detail_rows) as usize;
+            let offset = row.saturating_sub(height.saturating_sub(1));
+            for (i, label) in labels.iter().enumerate().skip(offset).take(height) {
+                let region = Rect::new(inner.x, inner.y + (i - offset) as u16, inner.width, 1);
+                frame.render_widget(
+                    Paragraph::new(elide(label, inner.width)).style(if i == *row {
+                        Style::default().bg(Color::DarkGray)
+                    } else {
+                        Style::default()
+                    }),
+                    region,
+                );
+                hits.add(region, HitAction::ModalRow(i));
+            }
+            if detail_rows > 0 {
+                let notice = app
+                    .tabs
+                    .get(app.tab)
+                    .and_then(|t| app.backend.desktop_view(t.id()).ok())
+                    .and_then(|view| view.notice)
+                    .unwrap_or("Stop 只停止預覽；Clear tools 才會取消工具設定。");
+                frame.render_widget(
+                    Paragraph::new(elide(&app.desktop_status(), inner.width)),
+                    Rect::new(inner.x, inner.bottom() - 3, inner.width, 1),
+                );
+                frame.render_widget(
+                    Paragraph::new(elide(notice, inner.width)),
+                    Rect::new(inner.x, inner.bottom() - 2, inner.width, 1),
+                );
+            }
+            if inner.height > 0 {
+                button(
+                    frame,
+                    &mut hits,
+                    Rect::new(inner.x, inner.bottom() - 1, inner.width.min(10), 1),
+                    "[Cancel]",
+                    HitAction::Cancel,
+                );
+            }
+        }
         Modal::Confirm(action) => {
             let message = match action {
-                Confirm::DeleteScreen(_) => "刪除此 Screen？所有分頁的此 Screen 綁定將停止。",
-                Confirm::DeleteHost(_) => {
-                    "刪除此 Host 設定？原本機分頁會失效，遠端工作不會被刪除。"
+                Confirm::DeleteScreen(_) => {
+                    "刪除此 Screen？本機預覽將停止；不會清除遠端 Shell 的現有工具設定。"
                 }
+                Confirm::DeleteHost(_) => "刪除此 Host 設定？本機分頁會失效，遠端工作不會被刪除。",
                 Confirm::Attach(shell) => {
                     if shell.attached {
                         "接管此 Shell？目前其他連線可能中斷。"
@@ -1432,54 +2078,158 @@ fn draw_modal(modal: &Modal, frame: &mut Frame) {
                     }
                 }
                 Confirm::DeleteShell(_) => "永久終止並刪除此遠端 Shell？這與關閉本機分頁不同。",
+                Confirm::ClearTools(_) => {
+                    "取消此 Shell 的桌面工具？其他 Shell 與共享桌面不受影響。"
+                }
             };
+            let block = panel("確認 / Confirm");
+            let inner = block.inner(rect);
+            frame.render_widget(block, rect);
             frame.render_widget(
-                Paragraph::new(format!("\n{message}\n\ny 確認 / n 或 Esc 取消"))
-                    .block(panel("確認 / Confirm"))
-                    .wrap(Wrap { trim: false }),
-                rect,
+                Paragraph::new(message).wrap(Wrap { trim: false }),
+                Rect::new(
+                    inner.x,
+                    inner.y,
+                    inner.width,
+                    inner.height.saturating_sub(2),
+                ),
             );
+            if inner.height > 1 {
+                frame.render_widget(
+                    Paragraph::new(if app.confirm_yes {
+                        "↑↓ 選擇 [Yes]；Enter 確認"
+                    } else {
+                        "↑↓ 選擇 [Cancel]；Enter 取消"
+                    })
+                    .style(Style::default().fg(Color::Yellow)),
+                    Rect::new(inner.x, inner.bottom() - 2, inner.width, 1),
+                );
+            }
+            if inner.height > 0 {
+                button(
+                    frame,
+                    &mut hits,
+                    Rect::new(
+                        inner.x,
+                        inner.bottom() - 1,
+                        (if inner.width >= 18 {
+                            8
+                        } else {
+                            inner.width.saturating_sub(8)
+                        })
+                        .min(inner.width),
+                        1,
+                    ),
+                    "[Yes]",
+                    HitAction::Confirm,
+                );
+                if inner.width >= 14 {
+                    button(
+                        frame,
+                        &mut hits,
+                        Rect::new(
+                            if inner.width >= 18 {
+                                inner.x + 9
+                            } else {
+                                inner.right() - 8
+                            },
+                            inner.bottom() - 1,
+                            8,
+                            1,
+                        ),
+                        "[Cancel]",
+                        HitAction::Cancel,
+                    );
+                }
+            }
         }
         Modal::Import {
             preview,
             replace,
             scroll,
         } => {
-            let mut lines = vec![
-                Line::from("確認本次將匯入的資料。既有其他項目保留。"),
-                Line::from(format!(
-                    "Space：{} 重複項目",
-                    if *replace {
-                        "更新可明確辨識的"
-                    } else {
-                        "略過"
-                    }
-                )),
-                Line::from(""),
-            ];
-            lines.extend(preview.entries.iter().map(|entry| {
-                Line::from(format!(
-                    "{} {} [{}] {}",
-                    entry.kind,
-                    safe(&entry.name),
-                    entry.status,
-                    if entry.has_secret {
-                        "含加密憑證"
-                    } else {
-                        "不含憑證"
-                    }
-                ))
-            }));
-            lines.push(Line::from("y 確認匯入 / Esc 取消"));
+            let block = panel("匯入預覽 / Import preview");
+            let inner = block.inner(rect);
+            frame.render_widget(block, rect);
+            let lines = preview
+                .entries
+                .iter()
+                .map(|entry| {
+                    Line::from(format!(
+                        "{} {} [{}] {}",
+                        entry.kind,
+                        safe(&entry.name),
+                        entry.status,
+                        if entry.has_secret {
+                            "含加密憑證"
+                        } else {
+                            "不含憑證"
+                        }
+                    ))
+                })
+                .collect::<Vec<_>>();
             frame.render_widget(
                 Paragraph::new(lines)
-                    .block(panel("匯入預覽 / Import preview"))
                     .scroll((*scroll, 0))
                     .wrap(Wrap { trim: false }),
-                rect,
+                Rect::new(
+                    inner.x,
+                    inner.y,
+                    inner.width,
+                    inner.height.saturating_sub(2),
+                ),
             );
+            if inner.height > 1 {
+                button(
+                    frame,
+                    &mut hits,
+                    Rect::new(inner.x, inner.bottom() - 2, inner.width, 1),
+                    if *replace {
+                        "[Replace duplicates: ON]"
+                    } else {
+                        "[Replace duplicates: OFF]"
+                    },
+                    HitAction::ToggleReplace,
+                );
+                button(
+                    frame,
+                    &mut hits,
+                    Rect::new(
+                        inner.x,
+                        inner.bottom() - 1,
+                        (if inner.width >= 18 {
+                            8
+                        } else {
+                            inner.width.saturating_sub(8)
+                        })
+                        .min(inner.width),
+                        1,
+                    ),
+                    if inner.width >= 15 { "[Apply]" } else { "[OK]" },
+                    HitAction::Confirm,
+                );
+                if inner.width >= 14 {
+                    button(
+                        frame,
+                        &mut hits,
+                        Rect::new(
+                            if inner.width >= 18 {
+                                inner.x + 9
+                            } else {
+                                inner.right() - 8
+                            },
+                            inner.bottom() - 1,
+                            8,
+                            1,
+                        ),
+                        "[Cancel]",
+                        HitAction::Cancel,
+                    );
+                }
+            }
         }
     }
+    hits
 }
 fn draw_fields(
     fields: &[Field],
@@ -1487,41 +2237,93 @@ fn draw_fields(
     title: &'static str,
     rect: Rect,
     frame: &mut Frame,
-) {
+) -> HitMap {
+    let mut hits = HitMap::default();
     let block = panel(title);
     let inner = block.inner(rect);
     frame.render_widget(block, rect);
-    let constraints = fields
-        .iter()
-        .map(|_| Constraint::Length(3))
-        .chain(std::iter::once(Constraint::Min(1)))
-        .collect::<Vec<_>>();
-    let regions = Layout::vertical(constraints).split(inner);
+    let field_height = if inner.height >= fields.len() as u16 * 3 + 1 {
+        3
+    } else {
+        1
+    };
     for (index, field) in fields.iter().enumerate() {
-        frame.render_widget(
-            Paragraph::new(field.visible()).block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(field.label)
-                    .border_style(Style::default().fg(if index == active {
-                        Color::Cyan
-                    } else {
-                        Color::DarkGray
-                    })),
-            ),
-            regions[index],
-        );
+        let y = inner.y + index as u16 * field_height;
+        if y + field_height > inner.bottom().saturating_sub(1) {
+            break;
+        }
+        let region = Rect::new(inner.x, y, inner.width, field_height);
+        let style = Style::default().fg(if index == active {
+            Color::Cyan
+        } else {
+            Color::DarkGray
+        });
+        if field_height == 3 {
+            frame.render_widget(
+                Paragraph::new(field.visible()).block(
+                    Block::default()
+                        .borders(Borders::ALL)
+                        .title(field.label)
+                        .border_style(style),
+                ),
+                region,
+            );
+        } else {
+            frame.render_widget(
+                Paragraph::new(elide(
+                    &format!("{}: {}", field.label, field.visible()),
+                    inner.width,
+                ))
+                .style(style),
+                region,
+            );
+        }
+        hits.add(region, HitAction::Field(index));
     }
-    frame.render_widget(
-        Paragraph::new("Tab 移動；Enter 下一欄／最後一欄儲存；Ctrl-S 儲存；Esc 取消。")
-            .wrap(Wrap { trim: false }),
-        regions[fields.len()],
-    );
+    if inner.height > 0 {
+        button(
+            frame,
+            &mut hits,
+            Rect::new(
+                inner.x,
+                inner.bottom() - 1,
+                (if inner.width >= 18 {
+                    8
+                } else {
+                    inner.width.saturating_sub(8)
+                })
+                .min(inner.width),
+                1,
+            ),
+            "[Save]",
+            HitAction::Submit,
+        );
+        if inner.width >= 14 {
+            button(
+                frame,
+                &mut hits,
+                Rect::new(
+                    if inner.width >= 18 {
+                        inner.x + 9
+                    } else {
+                        inner.right() - 8
+                    },
+                    inner.bottom() - 1,
+                    8,
+                    1,
+                ),
+                "[Cancel]",
+                HitAction::Cancel,
+            );
+        }
+    }
+    hits
 }
 
 pub(crate) async fn run(
     backend: Backend,
     startup_signals: crate::tty::StartupSignals,
+    bindings: Bindings,
 ) -> anyhow::Result<()> {
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     let mut interrupt = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
@@ -1530,20 +2332,21 @@ pub(crate) async fn run(
     let mut events = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_millis(40));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    let mut app = App::new(backend);
+    let mut app = App::with_bindings(backend, bindings);
     app.profiles();
     let result = async {
         while !app.quit {
             app.complete().await;
             tty.terminal.draw(|frame| {
                 app.resize(frame.area());
-                draw(&app, frame);
+                app.hits = draw(&app, frame);
             })?;
             tokio::select! {
                 event = events.next() => match event {
                     Some(Ok(Event::Key(key))) => app.key(key),
                     Some(Ok(Event::Paste(text))) => app.paste(text),
-                    Some(Ok(Event::Resize(_, _))) => (),
+                    Some(Ok(Event::Mouse(event))) => app.mouse(event),
+                    Some(Ok(Event::Resize(_, _))) => app.hits=HitMap::default(),
                     Some(Err(error)) => return Err(anyhow::Error::from(error)),
                     None => break,
                     _ => (),
@@ -1564,6 +2367,141 @@ pub(crate) async fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn joined_local_detach_refreshes_current_host_only_after_work_has_closed() {
+        let directory = tempfile::Builder::new()
+            .prefix("art-term-tree-detach-")
+            .permissions(std::os::unix::fs::PermissionsExt::from_mode(0o700))
+            .tempdir_in("/tmp")
+            .unwrap();
+        let paths =
+            crate::vault::VaultPaths::resolve(Some(directory.path().join("connections.toml")))
+                .unwrap();
+        let backend = Backend::start(crate::vault::Vault::open_account(paths).unwrap()).unwrap();
+        let mut app = App::new(backend.clone());
+        app.profiles.hosts.push(HostProfile {
+            id: "host".into(),
+            revision: 2,
+            name: "Host".into(),
+            base_url: "https://fixture.example".into(),
+            credential_present: false,
+            metadata: None,
+        });
+        app.tree_load = Some(TreeLoad {
+            host: HostSelection {
+                id: "host".into(),
+                revision: 2,
+            },
+            task: tokio::spawn(std::future::pending()),
+        });
+        let (release, done) = tokio::sync::oneshot::channel();
+        app.closing_tabs.push(ClosingTab {
+            host: HostSelection {
+                id: "host".into(),
+                revision: 1,
+            },
+            task: tokio::spawn(async move {
+                let _ = done.await;
+            }),
+        });
+        app.complete().await;
+        assert!(app.load_queue.is_empty());
+        release.send(()).unwrap();
+        while !app.closing_tabs[0].task.is_finished() {
+            tokio::task::yield_now().await;
+        }
+        app.complete().await;
+        assert_eq!(app.load_queue.len(), 1);
+        assert_eq!(app.load_queue[0].revision, 2);
+        app.stop().await;
+        backend.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn host_edit_queues_latest_revision_behind_stale_inflight_tree_read() {
+        let directory = tempfile::Builder::new()
+            .prefix("art-term-tree-revision-")
+            .permissions(std::os::unix::fs::PermissionsExt::from_mode(0o700))
+            .tempdir_in("/tmp")
+            .unwrap();
+        let paths =
+            crate::vault::VaultPaths::resolve(Some(directory.path().join("connections.toml")))
+                .unwrap();
+        let backend = Backend::start(crate::vault::Vault::open_account(paths).unwrap()).unwrap();
+        let mut app = App::new(backend.clone());
+        app.tree_load = Some(TreeLoad {
+            host: HostSelection {
+                id: "host".into(),
+                revision: 1,
+            },
+            task: tokio::spawn(std::future::pending()),
+        });
+        app.queue_host(HostSelection {
+            id: "host".into(),
+            revision: 2,
+        });
+        app.queue_host(HostSelection {
+            id: "host".into(),
+            revision: 3,
+        });
+        assert_eq!(app.load_queue.len(), 1);
+        assert_eq!(app.load_queue[0].revision, 3);
+        app.stop().await;
+        backend.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn every_narrow_form_and_confirmation_has_a_visible_mouse_cancel() {
+        let directory = tempfile::Builder::new()
+            .prefix("art-term-modal-cancel-")
+            .permissions(std::os::unix::fs::PermissionsExt::from_mode(0o700))
+            .tempdir_in("/tmp")
+            .unwrap();
+        let paths =
+            crate::vault::VaultPaths::resolve(Some(directory.path().join("connections.toml")))
+                .unwrap();
+        let backend = Backend::start(crate::vault::Vault::open_account(paths).unwrap()).unwrap();
+        let mut app = App::new(backend.clone());
+        app.resize(Rect::new(0, 0, 20, 14));
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(20, 14)).unwrap();
+        for modal in [
+            Modal::Host(HostForm::new(None)),
+            Modal::Screen(ScreenForm::new(None)),
+            Modal::Transfer(TransferForm::new(true)),
+            Modal::Confirm(Confirm::DeleteHost(HostSelection {
+                id: "host".into(),
+                revision: 1,
+            })),
+            Modal::Import {
+                preview: ImportView {
+                    ticket: 1,
+                    entries: Vec::new(),
+                },
+                replace: false,
+                scroll: 0,
+            },
+        ] {
+            app.show_modal(modal);
+            terminal.draw(|frame| app.hits = draw(&app, frame)).unwrap();
+            let text = terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .map(|cell| cell.symbol())
+                .collect::<String>();
+            assert!(text.contains("[Cancel]"), "{text}");
+            assert!(app
+                .hits
+                .regions
+                .iter()
+                .any(|(_, action)| matches!(action, HitAction::Cancel)));
+        }
+        app.stop().await;
+        backend.shutdown().await;
+    }
+
     #[test]
     fn secret_fields_mask_unicode_and_clear_without_returning_plaintext() {
         let mut field = Field::new("secret", "秘密-value".into(), true);
@@ -1581,33 +2519,6 @@ mod tests {
         );
         assert_eq!(terminal_size(Rect::new(0, 0, 80, 2)), None);
         assert_eq!(terminal_size(Rect::new(0, 0, 0, 10)), None);
-    }
-    #[test]
-    fn local_prefix_does_not_capture_remote_control_keys() {
-        assert!(prefix(KeyEvent::new(
-            KeyCode::Char(']'),
-            KeyModifiers::CONTROL
-        )));
-        assert!(prefix(KeyEvent::new(
-            KeyCode::Char('5'),
-            KeyModifiers::CONTROL
-        )));
-        assert!(!prefix(KeyEvent::new(
-            KeyCode::Char('5'),
-            KeyModifiers::CONTROL | KeyModifiers::ALT
-        )));
-        assert!(!prefix(KeyEvent::new(
-            KeyCode::Char('c'),
-            KeyModifiers::CONTROL
-        )));
-        assert!(!prefix(KeyEvent::new(
-            KeyCode::Char('d'),
-            KeyModifiers::CONTROL
-        )));
-        let mut keys = std::collections::HashSet::new();
-        for (key, _, _) in BINDINGS {
-            assert!(keys.insert(key));
-        }
     }
     #[test]
     fn visible_labels_never_forward_terminal_control_sequences() {
@@ -1629,7 +2540,11 @@ mod tests {
         app.resize(Rect::new(0, 0, 100, 30));
         let mut terminal =
             ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
-        terminal.draw(|frame| draw(&app, frame)).unwrap();
+        terminal
+            .draw(|frame| {
+                app.hits = draw(&app, frame);
+            })
+            .unwrap();
         let text = terminal
             .backend()
             .buffer()
@@ -1682,5 +2597,190 @@ mod tests {
         assert!(matches!(app.modal, Some(Modal::Host(_))));
         app.stop().await;
         backend.shutdown().await;
+    }
+    async fn test_app() -> (tempfile::TempDir, Backend, App) {
+        let directory = tempfile::Builder::new()
+            .prefix("art-term-ui-mouse-")
+            .permissions(std::os::unix::fs::PermissionsExt::from_mode(0o700))
+            .tempdir_in("/tmp")
+            .unwrap();
+        let paths =
+            crate::vault::VaultPaths::resolve(Some(directory.path().join("connections.toml")))
+                .unwrap();
+        let backend = Backend::start(crate::vault::Vault::open_account(paths).unwrap()).unwrap();
+        let app = App::new(backend.clone());
+        (directory, backend, app)
+    }
+    fn draw_test(app: &mut App, width: u16, height: u16) -> String {
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(width, height)).unwrap();
+        app.resize(Rect::new(0, 0, width, height));
+        terminal
+            .draw(|frame| {
+                app.hits = draw(app, frame);
+            })
+            .unwrap();
+        terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect()
+    }
+    fn click(app: &mut App, x: u16, y: u16) {
+        app.mouse(MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: x,
+            row: y,
+            modifiers: KeyModifiers::NONE,
+        });
+    }
+    #[test]
+    fn hit_regions_ignore_empty_cells_and_choose_topmost_visible_control() {
+        let mut hits = HitMap::default();
+        hits.add(Rect::new(0, 0, 0, 5), HitAction::Confirm);
+        hits.add(Rect::new(2, 2, 5, 3), HitAction::Focus(Focus::Terminal));
+        hits.add(Rect::new(4, 3, 2, 1), HitAction::Cancel);
+        assert!(hits.at(1, 2).is_none());
+        assert!(hits.at(7, 2).is_none());
+        assert!(matches!(
+            hits.at(3, 3),
+            Some(HitAction::Focus(Focus::Terminal))
+        ));
+        assert!(matches!(hits.at(4, 3), Some(HitAction::Cancel)));
+    }
+    #[tokio::test]
+    async fn tree_is_permanently_expanded_and_selection_survives_inserted_children() {
+        let (_directory, backend, mut app) = test_app().await;
+        app.profiles.screens.push(DesktopProfile {
+            id: "screen-a".into(),
+            revision: 1,
+            name: "Screen A".into(),
+            mcp_url: "http://127.0.0.1:9/mcp".into(),
+            token_present: true,
+        });
+        app.tree_selected = Some("screen:screen-a".into());
+        let before = app
+            .rows()
+            .iter()
+            .position(|r| r.key == "screen:screen-a")
+            .unwrap();
+        app.profiles.hosts.push(HostProfile {
+            id: "host-a".into(),
+            revision: 1,
+            name: "Host A".into(),
+            base_url: "https://fixture.invalid".into(),
+            credential_present: true,
+            metadata: None,
+        });
+        let rows = app.rows();
+        assert!(
+            rows.iter()
+                .position(|r| r.key == "screen:screen-a")
+                .unwrap()
+                > before
+        );
+        assert_eq!(app.tree_selected.as_deref(), Some("screen:screen-a"));
+        for header in ["Computer", "Agent", "Screen"] {
+            assert!(rows.iter().any(|r| r.label == header && r.action.is_none()));
+        }
+        assert!(rows.iter().any(|r| r.key == "new-shell:host-a"));
+        assert!(rows.iter().any(|r| r.key == "refresh:host-a"));
+        let mut keys = HashSet::new();
+        assert!(rows.iter().all(|row| keys.insert(row.key.clone())));
+        app.tree_selected = Some("new-host".into());
+        app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert!(matches!(app.modal, Some(Modal::Host(_))));
+        app.stop().await;
+        backend.shutdown().await;
+    }
+    #[tokio::test]
+    async fn mouse_focus_and_form_controls_are_local_and_modal_exclusive() {
+        let (_directory, backend, mut app) = test_app().await;
+        draw_test(&mut app, 100, 30);
+        click(&mut app, 80, 10);
+        assert_eq!(app.focus, Focus::Terminal);
+        draw_test(&mut app, 100, 30);
+        click(&mut app, 5, 24);
+        assert_eq!(app.focus, Focus::Preview);
+        app.show_modal(Modal::Host(HostForm::new(None)));
+        draw_test(&mut app, 100, 30);
+        click(&mut app, 1, 0);
+        assert!(matches!(app.modal, Some(Modal::Host(_))));
+        assert!(!app.quit);
+        let field = app
+            .hits
+            .regions
+            .iter()
+            .find_map(|(rect, action)| matches!(action, HitAction::Field(2)).then_some(*rect))
+            .unwrap();
+        click(&mut app, field.x, field.y);
+        app.paste("private-fixture-token".into());
+        let Some(Modal::Host(form)) = &app.modal else {
+            panic!("form lost")
+        };
+        assert_eq!(form.active, 2);
+        assert_eq!(&*form.fields[2].value, "private-fixture-token");
+        assert!(!draw_test(&mut app, 100, 30).contains("private-fixture-token"));
+        let cancel = app
+            .hits
+            .regions
+            .iter()
+            .find_map(|(rect, action)| matches!(action, HitAction::Cancel).then_some(*rect))
+            .unwrap();
+        click(&mut app, cancel.x, cancel.y);
+        assert!(app.modal.is_none());
+        app.stop().await;
+        backend.shutdown().await;
+    }
+    #[tokio::test]
+    async fn mouse_action_menu_reaches_every_command_and_narrow_desktop_remains_visible() {
+        let (_directory, backend, mut app) = test_app().await;
+        let tiny = draw_test(&mut app, 20, 14);
+        assert!(tiny.contains("[Actions]"));
+        assert!(tiny.contains("[Desktop]"));
+        let text = draw_test(&mut app, 60, 14);
+        assert!(text.contains("[Desktop]"));
+        assert!(text.contains("[Actions]"));
+        for row in 0..COMMANDS.len() {
+            app.show_modal(Modal::Actions { row });
+            draw_test(&mut app, 60, 14);
+            assert!(
+                app.hits
+                    .regions
+                    .iter()
+                    .any(|(_, a)| matches!(a,HitAction::ModalRow(i) if *i==row)),
+                "action {} is unreachable",
+                COMMANDS[row].1
+            );
+            assert!(app
+                .hits
+                .regions
+                .iter()
+                .all(|(r, _)| r.right() <= 60 && r.bottom() <= 14));
+        }
+        app.show_modal(Modal::Actions {
+            row: COMMANDS.len() - 1,
+        });
+        draw_test(&mut app, 60, 14);
+        let quit = app
+            .hits
+            .regions
+            .iter()
+            .find_map(|(r, a)| {
+                matches!(a,HitAction::ModalRow(i) if *i==COMMANDS.len()-1).then_some(*r)
+            })
+            .unwrap();
+        click(&mut app, quit.x, quit.y);
+        assert!(app.quit);
+        app.stop().await;
+        backend.shutdown().await;
+    }
+    #[test]
+    fn unicode_tab_labels_are_clipped_in_terminal_cells() {
+        assert_eq!(elide("中文abc", 4), "中…");
+        assert_eq!(elide("abc", 3), "abc");
+        assert_eq!(elide("中文", 0), "");
     }
 }

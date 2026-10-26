@@ -27,6 +27,10 @@
 
 ARM64 手機、現場網路／MCP、實際 Codex CLI 與 AI 模型各自需要明確結果；固定 client E2E、命令契約或舊 helper 案例不替代它們。無授權不操作 Owner 手機或既有共享服務。
 
+## Ubuntu TUI 的對應案例
+
+TUI 以獨立的 [TUI 功能回歸](../platforms/tui-regression.md)與 [cases.json](../../scripts/tui-regression/cases.json)對照上述功能。實際 TUI／PTY 的清單、滑鼠、快捷鍵、搬移與歷史測試，另加 TUI → 官方 Runtime → 真 Shell broker → 正式 stdio client → HTTP 工具的完整路徑。圖片顯示、configure 回覆或共用核心單元測試不能取代這條功能驗證。每次來源、執行檔與結果獨立記錄；不把測試存在當成已通過。
+
 ## 既有操作保護（歷史 helper 流程）
 
 | 功能／風險 | Windows 原生 E2E | Android APK 原生 E2E | Linux／單元測試補強 |

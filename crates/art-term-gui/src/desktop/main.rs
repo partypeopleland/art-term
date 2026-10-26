@@ -7,8 +7,7 @@ mod browser;
 mod dpapi;
 #[path = "../shared/instance_desktops.rs"]
 mod instance_desktops;
-#[path = "../shared/instance_restore.rs"]
-mod instance_restore;
+use art_term_core::instance_restore;
 #[path = "../shared/runtime_bootstrap.rs"]
 mod runtime_bootstrap;
 #[path = "../shared/runtime_hosts.rs"]

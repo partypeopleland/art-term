@@ -1,5 +1,4 @@
-#[path = "../../art-term-gui/src/shared/instance_restore.rs"]
-mod instance_restore;
+use art_term_core::instance_restore;
 
 use art_term_core::{
     instance_mcp::DesktopProfile,

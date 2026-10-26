@@ -18,6 +18,7 @@ import sys
 import tempfile
 import termios
 import time
+import tomllib
 import zlib
 
 import aiohttp
@@ -123,8 +124,85 @@ class Terminal:
 
     def shells(self):
         self.prefix("s")
-        self.wait(lambda: "選擇Shell並按Enter" in "".join(self.text().split()), "Shell tree expanded")
+        self.wait_text("Refresh Shells")
         self.idle()
+
+    def action(self, label):
+        self.click_text("[Actions]")
+        self.wait_text("Actions / ")
+        width, height = min(self.screen.columns - 4, 88), min(self.screen.lines - 4, 24)
+        left, top = (self.screen.columns - width) // 2, (self.screen.lines - height) // 2
+        region = (left + 1, top + 1, left + width - 1, top + height - 1)
+        for _ in range(30):
+            hits = self.locations(label, region)
+            if hits:
+                self.click(*hits[0])
+                for _ in range(3): self.pump()
+                return
+            self.wheel(left + width // 2, top + height // 2, 1)
+        raise AssertionError("Action is not mouse accessible: " + label)
+
+    def settle(self, seconds=0.12):
+        until = time.monotonic() + seconds
+        while time.monotonic() < until:
+            self.pump(min(0.03, max(0, until - time.monotonic())))
+
+    def selected_tree(self):
+        for row in range(2, self.screen.lines - 3):
+            text = "".join(self.screen.buffer[row][column].data for column in range(min(40, self.screen.columns)))
+            if text.lstrip("│ ").startswith("▶"):
+                return text
+        return ""
+
+    def select_tree(self, label):
+        self.click_text("[Connections]", (0, 0, self.screen.columns, 1))
+        self.idle()
+        self.settle()
+        for _ in range(100):
+            before = self.selected_tree()
+            self.send(b"\x1b[A")
+            self.settle()
+            if self.selected_tree() == before:
+                break
+        for _ in range(100):
+            if label in self.selected_tree():
+                return
+            self.send(b"\x1b[B")
+            self.settle()
+        raise AssertionError("Tree selection is inaccessible: " + label)
+
+    def locations(self, label, region=None):
+        hits = []
+        for y in range(self.screen.lines):
+            chars, columns = [], []
+            for x in range(self.screen.columns):
+                for char in self.screen.buffer[y][x].data:
+                    chars.append(char)
+                    columns.append(x)
+            text = "".join(chars)
+            start = 0
+            while (position := text.find(label, start)) >= 0:
+                x = columns[position + len(label) // 2]
+                if region is None or region[0] <= x < region[2] and region[1] <= y < region[3]:
+                    hits.append((x, y))
+                start = position + len(label)
+        return hits
+
+    def click(self, x, y):
+        self.send(f"\x1b[<0;{x + 1};{y + 1}M\x1b[<0;{x + 1};{y + 1}m")
+
+    def click_text(self, label, region=None, occurrence=0):
+        self.wait(lambda: len(self.locations(label, region)) > occurrence, "mouse target " + label)
+        self.click(*self.locations(label, region)[occurrence])
+        for _ in range(3):
+            self.pump()
+
+    def wheel(self, x, y, lines):
+        button = 65 if lines > 0 else 64
+        for _ in range(abs(lines)):
+            self.send(f"\x1b[<{button};{x + 1};{y + 1}M")
+        for _ in range(3):
+            self.pump()
 
     def image_cells(self, color):
         return [(x, y) for y in range(self.screen.lines) for x in range(self.screen.columns)
@@ -250,8 +328,7 @@ def main():
             app = Terminal(binary, home, runtime.ca)
             terminals.append(app)
             app.start()
-            app.wait_text("n 新增 Host")
-            app.send("n")
+            app.click_text("New Host")
             app.wait_text("HTTPS Runtime URL")
             app.send("PTY fixture\t" + runtime.origin + "\t" + runtime.credential)
             app.send(b"\x13")
@@ -268,7 +345,7 @@ def main():
             passed("Prompt-free headless startup and masked Host form with encrypted persistence")
 
             app.shells()
-            app.send("n")
+            app.click_text("New Shell", region=(0, 1, 40, 24))
             app.wait(lambda: len(runtime.work()) == 1, "first remote work creation")
             first = next(iter(runtime.work()))
             app.wait(lambda: runtime.work()[first]["bootstrap"], "history bootstrap")
@@ -301,13 +378,12 @@ def main():
             frames_before = len(runtime.frames)
             app.prefix("h")
             app.idle()
-            app.send("g")
             for index, mcp in enumerate(mcps, 1):
-                app.send("n")
+                app.action("New Screen")
                 app.wait_text("新增 Screen")
                 app.send("Screen-" + mcp.name + "\t" + mcp.url + "\t" + mcp.token)
                 app.send(b"\x13")
-                app.wait(lambda: f"{index} Screens" in app.text() and "新增 Screen" not in app.text(), "Screen saved")
+                app.wait(lambda: len(tomllib.loads(config.read_text()).get("desktops", [])) == index and "新增 Screen" not in app.text(), "Screen saved")
                 app.idle()
             assert len(runtime.frames) == frames_before
             assert all(mcp.token not in config.read_text() and mcp.token.encode() not in app.raw for mcp in mcps)
@@ -321,7 +397,10 @@ def main():
             runtime.emit(first, b"\r\nOUTPUT-WITH-IMAGE\r\n")
             app.wait_text("OUTPUT-WITH-IMAGE")
             app.save(output, "three-panes-real-image")
+            app.wait(lambda: any(event.get("method") == "tools-control" and event.get("action") == "configure" and event.get("binding") == first for event in runtime.snapshot()["events"]), "selected Screen configures exact active Shell")
+            app.wait_text("Tools unconfirmed")
             passed("Actual PNG screenshot becomes colored Halfblocks in lower-left while terminal output continues")
+            passed("Actual Shell configure exchange occurs; zero-adapter fixture never claims tools ready")
 
             app.prefix("2")
             app.wait(lambda: not app.image_cells("f01e14"), "tab switch clears previous screenshot")
@@ -374,8 +453,9 @@ def main():
             app.wait(lambda: bool(app.image_cells("f01e14")), "A binding before revision edit")
             app.prefix("h")
             app.idle()
-            app.send("g")
-            app.send("e")
+            app.select_tree("Screen-A")
+            edited_screen = next(p for p in tomllib.loads(config.read_text())["desktops"] if p["name"] == "Screen-A")
+            app.action("Edit")
             app.wait_text("編輯 Screen")
             app.wait(lambda: not app.image_cells("f01e14"), "edit overlay clears image")
             mcps[0].token = "rotated-synthetic-fixture-token-A"
@@ -384,18 +464,21 @@ def main():
             app.send(b"\x13")
             app.wait(lambda: "Screen-A-renamed" in app.text() and "編輯 Screen" not in app.text(), "edited Screen revision saved")
             app.idle()
-            app.wait(lambda: "Desktop / 停止" in app.text() and not app.image_cells("f01e14"), "revision edit removes old binding")
+            app.wait(lambda: "桌面設定已變更" in "".join(app.text().split()) and not app.image_cells("f01e14"), "revision edit removes old binding")
+            edited_profiles = tomllib.loads(config.read_text())["desktops"]
+            assert next(p for p in edited_profiles if p["id"] == edited_screen["id"])["name"] == "Screen-A-renamed"
+            assert any(p["name"] == "Screen-B" for p in edited_profiles)
             app.prefix("1")
             app.bind_screen(1)
             app.wait(lambda: bool(app.image_cells("f01e14")), "updated Screen token and revision capture")
             app.prefix("h")
             app.idle()
-            app.send("g")
-            app.send("d")
+            app.select_tree("Screen-A-renamed")
+            app.action("Delete")
             app.wait_text("確認 / Confirm")
             app.send("y")
-            app.wait(lambda: "1 Screens" in app.text() and "Screen-A-renamed" not in app.text(), "Screen deletion completed")
-            app.wait(lambda: "Desktop / 停止" in app.text() and not app.image_cells("f01e14"), "deleted Screen binding cleared")
+            app.wait(lambda: len(tomllib.loads(config.read_text()).get("desktops", [])) == 1 and "Screen-A-renamed" not in app.text(), "Screen deletion completed")
+            app.wait(lambda: "桌面設定已變更" in "".join(app.text().split()) and not app.image_cells("f01e14"), "deleted Screen binding cleared")
             assert "Screen-B" in app.text()
             passed("Screen edit rotates token and invalidates old revision; confirmed deletion clears bindings")
             app.idle()
@@ -450,11 +533,12 @@ def main():
             assert not any(event["method"] == "DELETE" and event["name"] == first for event in runtime.snapshot()["events"])
 
             first_generation = runtime.work()[first]["generation"]
-            app.shells()
+            app.select_tree(first)
             app.send("\r")
             app.wait_text("確認 / Confirm")
             app.send("y")
             app.wait(lambda: runtime.work()[first]["generation"] == first_generation + 1 and runtime.work()[first]["attached"], "explicit existing Shell attach")
+            app.wait_text("2:")
             app.wait_text("Live")
             app.send("REATTACHED-FIRST")
             app.wait(lambda: "REATTACHED-FIRST" in runtime.work()[first]["input"], "reattached Shell input")
@@ -465,20 +549,21 @@ def main():
             runtime.call(runtime.attach_external(second))
             app.wait(lambda: runtime.work()[second]["attached"], "external client attached")
             second_generation = runtime.work()[second]["generation"]
-            app.shells()
-            app.send(b"\x1b[B\r")
+            app.select_tree(second)
+            app.send(b"\r")
             app.wait_text("確認 / Confirm")
             app.wait_text("接管")
             app.send("y")
             app.wait(lambda: runtime.work()[second]["generation"] == second_generation + 1 and runtime.work()[second]["attached"], "explicit attached Shell takeover")
+            app.wait_text("2:")
             app.wait_text("Live")
             app.send("TAKEN-SECOND")
             app.wait(lambda: "TAKEN-SECOND" in runtime.work()[second]["input"], "takeover input")
             assert len(runtime.work()) == 2
             passed("Existing Shell attach and explicit attached Shell takeover through confirmation UI")
 
-            app.shells()
-            app.send("d")
+            app.select_tree(first)
+            app.action("Delete")
             app.wait_text("確認 / Confirm")
             app.send("y")
             app.wait(lambda: first not in runtime.work(), "explicit remote deletion")

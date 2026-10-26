@@ -1,8 +1,8 @@
+use crate::instance_mcp::DesktopProfile;
 use anyhow::Context;
-use art_term_core::instance_mcp::DesktopProfile;
 use serde_json::Value;
 
-pub(crate) struct RestoreSelection {
+pub struct RestoreSelection {
     pub profile: DesktopProfile,
     pub broker_targets: Vec<Value>,
     broker_urls: Value,
@@ -28,7 +28,7 @@ impl RestoreSelection {
     }
 }
 
-pub(crate) fn resolve(
+pub fn resolve(
     status: &Value,
     desktops: &[DesktopProfile],
 ) -> anyhow::Result<Option<RestoreSelection>> {

@@ -63,6 +63,8 @@ class McpFixture:
                 else:
                     if self.headers.get('Mcp-Session-Id') not in outer.sessions: return self.reply({}, 400)
                     if method == 'notifications/initialized': return self.reply({}, 202)
+                    if method == 'tools/list':
+                        return self.reply({'jsonrpc': '2.0', 'id': body.get('id'), 'result': {'tools': [{'name': 'screenshot', 'inputSchema': {'type': 'object'}}]}})
                     if method != 'tools/call' or body.get('params', {}).get('name') != 'screenshot': return self.reply({}, 400)
                     outer.capture_started.set()
                     if not outer.capture_gate.wait(timeout=15): return self.reply({}, 503)

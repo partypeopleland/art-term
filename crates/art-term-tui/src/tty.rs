@@ -1,6 +1,6 @@
 use crossterm::{
     cursor::{Hide, Show},
-    event::{DisableBracketedPaste, EnableBracketedPaste},
+    event::{DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -78,6 +78,7 @@ fn restore() {
         let _ = execute!(
             io::stdout(),
             DisableBracketedPaste,
+            DisableMouseCapture,
             Show,
             LeaveAlternateScreen
         );
@@ -100,7 +101,8 @@ impl Tty {
             io::stdout(),
             EnterAlternateScreen,
             Hide,
-            EnableBracketedPaste
+            EnableBracketedPaste,
+            EnableMouseCapture
         ) {
             restore();
             return Err(error);

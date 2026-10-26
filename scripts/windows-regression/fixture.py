@@ -245,6 +245,7 @@ class Fixture:
                             match = re.fullmatch(rb'exec python3 "\$HOME/\.local/share/art-term/tools/instance_bridge\.py" control --binding (th2-[a-f0-9]{24}) --nonce ([a-f0-9]{32})\n', s['previewInput'])
                             if match:
                                 s['controlNonce'] = match[2].decode()
+                                s['controlBinding'] = match[1].decode()
                                 s['previewInput'] = b''
                                 await self.output(s, ('ARTTERM_TOOLS_READY:' + s['controlNonce'] + '\r\n').encode())
                             else:
@@ -261,9 +262,9 @@ class Fixture:
                                 raise ValueError('configure frame too large')
                             if len(s['previewInput']) == size + 4:
                                 payload = json.loads(base64.b64decode(s['previewInput'][4:], validate=True))
-                                if payload.get('op') not in ('configure', 'clear'):
+                                if payload.get('op') not in ('configure', 'clear', 'current', 'verify'):
                                     raise ValueError('unsupported configure operation')
-                                self.events.append({'method': 'tools-control', 'name': name, 'action': payload['op']})
+                                self.events.append({'method': 'tools-control', 'name': name, 'action': payload['op'], 'binding': s['controlBinding']})
                                 # No adapter/model exists. Explicitly report zero adapters.
                                 answer = {'ok': True, 'adapters': 0, 'targets': []}
                                 s['previewInput'] = b''

@@ -25,6 +25,7 @@ class Fixture:
         self.delay = 0
         self.pause = False
         self.pause_list = False
+        self.list_error = False
         self.list_started, self.list_release = threading.Event(), threading.Event()
         self.started, self.release = threading.Event(), threading.Event()
         self.image = png((240, 30, 20) if name == 'A' else (20, 30, 240))
@@ -63,6 +64,7 @@ class Fixture:
                     if self.headers.get('Mcp-Session-Id') not in outer.sessions: return self.reply({}, 400)
                     if method == 'notifications/initialized': return self.reply({}, 202)
                     if method == 'tools/list':
+                        if outer.list_error: return self.reply({'jsonrpc': '2.0', 'id': body.get('id'), 'error': {'code': -32000, 'message': 'fixture tools unavailable'}}, 500)
                         if outer.pause_list:
                             outer.pause_list = False; outer.list_started.set()
                             if not outer.list_release.wait(5): return self.reply({}, 504)
