@@ -91,6 +91,12 @@ SSH / local TTY -> text UI -> backend -> shared HostStore / AdminClient
                                            |
                                            +-> VT parser -> immutable screen -> text UI
                                            +-> shared HistoryChannel -> existing helper
+                                  |
+                                  +-> per-tab desktop worker
+                                           +-> shared configure -> temporary control PTY -> Shell broker
+                                           +-> shared instance_restore -> source/generation validation
+
+text UI -> visible preview worker -> shared MCP screenshot -> Halfblocks image
 ```
 
 每個本機分頁只有一個 actor 修改連線與 VT 終端模型。背景分頁同樣解析輸出並確認 exact batch；畫面可以略過中間繪製，不能略過遠端輸出。解析器完成一批內容後才呼叫核心 ACK，遇到 Gap 先重設終端狀態。遠端終端查詢的回覆送回來源分頁，不能因使用者切換分頁而送錯工作。
@@ -99,9 +105,13 @@ SSH / local TTY -> text UI -> backend -> shared HostStore / AdminClient
 
 文字介面讀取不可變畫面，透過有界命令入口發出操作。網路、搬移檔密碼雜湊與圖片處理不在畫面繪製迴圈執行。Host 及加密搬移沿用核心交易規則；帳號金鑰儲存持有程序間寫入鎖，避免兩個 TUI 同時修改同一份設定。啟動不要求密碼，金鑰由私有檔案與 Unix 帳號權限保護，見[憑證保存](credential-storage.md)。
 
-工作區固定分成左上 Host／Agent／Shell 與 Screens、左下實際桌面圖片、右側分頁終端。單一 layout 計算繪製與 PTY 內容尺寸；窄視窗顯示焦點區域。只有終端焦點且沒有 modal 時送出一般按鍵與貼上。
+工作區左上固定展開 Computer／Agent／Screen 與工作／新增操作，左下顯示實際桌面圖片，右側保留分頁終端。滑鼠 hit region 與畫面一起產生，經同一操作入口執行；表單遮住下層控制，本機滑鼠不送入遠端。快捷鍵由連線設定旁的 `keybindings.toml` 解析，畫面提示讀取目前綁定。單一 layout 計算繪製與 PTY 內容尺寸；窄視窗顯示焦點區域。只有終端焦點且沒有 modal 時送出一般按鍵與貼上。
 
-每個穩定 TabId 各自選擇或停止 Screen，只有當前可見分頁擷取。preview worker 沿用核心 `instance_mcp::screenshot`，在背景逐次完成 MCP 請求與有界圖片處理，以保留比例的 Halfblocks 彩色字元呈現 PNG／JPEG。沒有原生圖片協定偵測。切換、停止或錯誤立即清圖；TabId、generation、Screen id／revision 與區域尺寸共同拒絕晚到圖片。最多一個擷取與一個圖片處理工作，取消時等待既有請求正常清理，不累積佇列。
+每個分頁的桌面狀態由 backend 擁有，有界入口啟動最多一個配置／恢復／取消工作，畫面只讀取非秘密狀態。工作 Shell 名稱、Host／Screen revision 與存活狀態在交換前後核對，憑證只經核心 raw／no-echo 管理通道。關閉分頁等待自有管理工作清理；停止預覽、detach 與 App 結束不清除 Shell broker。純 `instance_restore` 身分／generation 核對已移至核心，圖形與文字客戶端共用同一規則。
+
+工具狀態以 broker configure／verify 的實際結果確認；預覽以獨立圖片 worker 確認。TUI 的來源前置驗證只初始化 MCP 認證與協定，不要求先截圖或工具清單成功，避免桌面尚未啟動時無法配置工具，也避免工具清單失敗使有效預覽消失。
+
+每個穩定 TabId 各自選擇或停止預覽，只有當前可見分頁擷取。preview worker 沿用核心 `instance_mcp::screenshot`，在背景逐次完成 MCP 請求與有界圖片處理，以保留比例的 Halfblocks 彩色字元呈現 PNG／JPEG。沒有原生圖片協定偵測。切換、停止或錯誤立即清圖；TabId、generation、Screen id／revision 與區域尺寸共同拒絕晚到圖片。最多一個擷取與一個圖片處理工作，取消時等待既有請求正常清理，不累積佇列。
 
 ## 受控端提供固定介面
 
