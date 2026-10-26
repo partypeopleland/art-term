@@ -207,6 +207,7 @@ dependencies = [
  "crossterm",
  "futures-util",
  "getrandom 0.3.4",
+ "icy_sixel",
  "image",
  "libc",
  "ratatui",

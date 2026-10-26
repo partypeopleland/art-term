@@ -4,8 +4,6 @@ use crate::{
 };
 use art_term_core::{image as image_limits, openab::screenshot::ShotImage};
 use base64::{engine::general_purpose::STANDARD, Engine};
-use ratatui::layout::Rect;
-use ratatui_image::{picker::Picker, protocol::Protocol, Resize};
 use std::{
     future::Future,
     io::Cursor,
@@ -15,15 +13,12 @@ use std::{
 use tokio::{sync::watch, task::JoinHandle, time::Instant};
 
 const CAPTURE_INTERVAL: Duration = Duration::from_secs(1);
-const MAX_PREVIEW_COLUMNS: u16 = 160;
-const MAX_PREVIEW_ROWS: u16 = 80;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct PreviewTarget {
     pub tab: TabId,
     pub generation: u64,
     pub screen: ScreenSelection,
-    pub area: Rect,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,10 +44,16 @@ pub(crate) enum PreviewStatus {
     Failed(PreviewError),
 }
 
+pub(crate) struct CapturedFrame {
+    pub target: PreviewTarget,
+    pub sequence: u64,
+    pub pixels: image::DynamicImage,
+}
+
 pub(crate) struct PreviewUpdate {
     pub target: PreviewTarget,
     pub status: PreviewStatus,
-    pub image: Option<Protocol>,
+    pub frame: Option<Arc<CapturedFrame>>,
 }
 
 type Latest = Arc<Mutex<Option<PreviewUpdate>>>;
@@ -160,6 +161,7 @@ async fn run(
 ) {
     let mut next_capture = Instant::now();
     let mut announced_target = None;
+    let mut sequence = 0u64;
     loop {
         if *stopping.borrow() || requests.has_changed().is_err() {
             break;
@@ -173,13 +175,6 @@ async fn run(
             }
             continue;
         };
-        if target.area.is_empty() {
-            tokio::select! {
-                _ = stopping.changed() => (),
-                changed = requests.changed() => if changed.is_err() { break; },
-            }
-            continue;
-        }
         tokio::select! {
             _ = stopping.changed() => continue,
             changed = requests.changed() => { if changed.is_err() { break; } continue; },
@@ -188,26 +183,13 @@ async fn run(
         if !matches_target(&requests, &target) || *stopping.borrow() {
             continue;
         }
-        let admissible = valid_area(target.area);
-        if let Err(error) = admissible {
-            publish(
-                &latest,
-                PreviewUpdate {
-                    target,
-                    status: PreviewStatus::Failed(error),
-                    image: None,
-                },
-            );
-            next_capture = Instant::now() + CAPTURE_INTERVAL;
-            continue;
-        }
         if !source.current(&target.screen) {
             publish(
                 &latest,
                 PreviewUpdate {
                     target,
                     status: PreviewStatus::Failed(PreviewError::Unavailable),
-                    image: None,
+                    frame: None,
                 },
             );
             next_capture = Instant::now() + CAPTURE_INTERVAL;
@@ -219,7 +201,7 @@ async fn run(
                 PreviewUpdate {
                     target: target.clone(),
                     status: PreviewStatus::Capturing,
-                    image: None,
+                    frame: None,
                 },
             );
             announced_target = Some(target.clone());
@@ -233,9 +215,8 @@ async fn run(
                     && !*stopping.borrow()
                     && source.current(&target.screen) =>
             {
-                let area = target.area;
                 // Blocking preparation is joined, including when the selection changes.
-                tokio::task::spawn_blocking(move || prepare(shot, area))
+                tokio::task::spawn_blocking(move || decode(shot))
                     .await
                     .unwrap_or(Err(PreviewError::InvalidImage))
             }
@@ -251,8 +232,18 @@ async fn run(
         } else {
             Err(PreviewError::Unavailable)
         };
-        let (status, image) = match result {
-            Ok(image) => (PreviewStatus::Live, Some(image)),
+        let (status, frame) = match result {
+            Ok(pixels) => {
+                sequence = sequence.saturating_add(1);
+                (
+                    PreviewStatus::Live,
+                    Some(Arc::new(CapturedFrame {
+                        target: target.clone(),
+                        sequence,
+                        pixels,
+                    })),
+                )
+            }
             Err(error) => (PreviewStatus::Failed(error), None),
         };
         publish(
@@ -260,22 +251,13 @@ async fn run(
             PreviewUpdate {
                 target,
                 status,
-                image,
+                frame,
             },
         );
     }
 }
 
-fn valid_area(area: Rect) -> Result<(), PreviewError> {
-    if area.is_empty() || area.width > MAX_PREVIEW_COLUMNS || area.height > MAX_PREVIEW_ROWS {
-        Err(PreviewError::AreaTooLarge)
-    } else {
-        Ok(())
-    }
-}
-
-fn prepare(shot: ShotImage, area: Rect) -> Result<Protocol, PreviewError> {
-    valid_area(area)?;
+fn decode(shot: ShotImage) -> Result<image::DynamicImage, PreviewError> {
     if shot.image_base64.len() > image_limits::MAX_BASE64_LEN
         || shot.width == 0
         || shot.height == 0
@@ -305,15 +287,12 @@ fn prepare(shot: ShotImage, area: Rect) -> Result<Protocol, PreviewError> {
     if image.width() != shot.width || image.height() != shot.height {
         return Err(PreviewError::InvalidImage);
     }
-    Picker::halfblocks()
-        .new_protocol(image, area.as_size(), Resize::Fit(None))
-        .map_err(|_| PreviewError::InvalidImage)
+    Ok(image)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::{buffer::Buffer, style::Color, widgets::Widget};
     use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     use tokio::sync::Semaphore;
 
@@ -346,77 +325,19 @@ mod tests {
                 id: id.into(),
                 revision: 1,
             },
-            area: Rect::new(2, 2, 8, 4),
         }
     }
 
     #[test]
-    fn real_image_preserves_colors_aspect_and_render_bounds() {
-        let area = Rect::new(2, 2, 8, 4);
-        let protocol = prepare(shot(), area).unwrap();
-        // A square image occupies twice as many cell columns as cell rows.
-        assert_eq!(protocol.size(), ratatui::layout::Size::new(4, 2));
-        let bounds = Rect::new(0, 0, 12, 8);
-        let mut buffer = Buffer::empty(bounds);
-        ratatui_image::Image::new(&protocol).render(area, &mut buffer);
-        let mut colors = Vec::new();
-        for y in 0..bounds.height {
-            for x in 0..bounds.width {
-                let cell = &buffer[(x, y)];
-                if !area.contains((x, y).into()) {
-                    assert_eq!(cell.symbol(), " ");
-                    assert_eq!(cell.fg, Color::Reset);
-                } else {
-                    colors.push(cell.fg);
-                    colors.push(cell.bg);
-                }
-            }
-        }
-        assert!(colors.contains(&Color::Rgb(255, 0, 0)));
-        assert!(colors.contains(&Color::Rgb(0, 0, 255)));
-        assert!(
-            colors.iter().any(
-                |color| matches!(color, Color::Rgb(r, g, b) if *g > 180 && *r < 80 && *b < 80)
-            ),
-            "{colors:?}"
-        );
-    }
-
-    #[test]
-    fn preparation_rejects_untrusted_images_and_oversized_areas() {
-        let area = Rect::new(0, 0, 8, 4);
-        let mut malformed = shot();
-        malformed.image_base64 = STANDARD.encode(b"not PNG");
-        assert!(matches!(
-            prepare(malformed, area),
-            Err(PreviewError::InvalidImage)
-        ));
-        let mut wrong_dimensions = shot();
-        wrong_dimensions.width += 1;
-        assert!(matches!(
-            prepare(wrong_dimensions, area),
-            Err(PreviewError::InvalidImage)
-        ));
-        let mut unsupported = shot();
-        unsupported.mime = "image/gif".into();
-        assert!(matches!(
-            prepare(unsupported, area),
-            Err(PreviewError::InvalidImage)
-        ));
-        assert!(matches!(
-            prepare(shot(), Rect::new(0, 0, 161, 80)),
-            Err(PreviewError::AreaTooLarge)
-        ));
-        assert!(matches!(
-            prepare(shot(), Rect::new(0, 0, 160, 81)),
-            Err(PreviewError::AreaTooLarge)
-        ));
-        assert!(matches!(
-            prepare(shot(), Rect::default()),
-            Err(PreviewError::AreaTooLarge)
-        ));
-        let maximum = prepare(shot(), Rect::new(0, 0, 160, 80)).unwrap();
-        assert!(maximum.size().width <= 160 && maximum.size().height <= 80);
+    fn decode_preserves_source_and_rejects_invalid_images() {
+        let decoded = decode(shot()).unwrap();
+        assert_eq!((decoded.width(), decoded.height()), (40, 40));
+        let mut invalid = shot();
+        invalid.width += 1;
+        assert!(matches!(decode(invalid), Err(PreviewError::InvalidImage)));
+        let mut invalid = shot();
+        invalid.image_base64 = STANDARD.encode(b"not PNG");
+        assert!(matches!(decode(invalid), Err(PreviewError::InvalidImage)));
     }
 
     #[test]
@@ -428,17 +349,14 @@ mod tests {
         let mut jpeg = shot();
         jpeg.mime = "image/jpeg".into();
         jpeg.image_base64 = STANDARD.encode(bytes.into_inner());
-        assert!(prepare(jpeg, Rect::new(0, 0, 8, 4)).is_ok());
+        assert!(decode(jpeg).is_ok());
         let mut excessive = shot();
         excessive.width = image_limits::MAX_DIMENSION + 1;
-        assert!(matches!(
-            prepare(excessive, Rect::new(0, 0, 8, 4)),
-            Err(PreviewError::InvalidImage)
-        ));
+        assert!(matches!(decode(excessive), Err(PreviewError::InvalidImage)));
     }
 
     #[test]
-    fn publication_identity_includes_tab_generation_screen_revision_and_area() {
+    fn publication_identity_includes_tab_generation_and_screen_revision() {
         let original = target("screen", 1);
         let (sender, receiver) = watch::channel(Some(original.clone()));
         assert!(matches_target(&receiver, &original));
@@ -454,12 +372,6 @@ mod tests {
         alternatives.push(changed);
         let mut changed = original.clone();
         changed.screen.revision += 1;
-        alternatives.push(changed);
-        let mut changed = original.clone();
-        changed.area.width += 1;
-        alternatives.push(changed);
-        let mut changed = original.clone();
-        changed.area.x += 1;
         alternatives.push(changed);
         for changed in alternatives {
             sender.send_replace(Some(changed));
@@ -559,7 +471,7 @@ mod tests {
         let update = live(&mut worker).await;
         assert_eq!(update.target, target("second", 2));
         assert_eq!(update.status, PreviewStatus::Live);
-        assert!(update.image.is_some());
+        assert!(update.frame.is_some());
         worker.stop().await;
         assert_eq!(state.max_active.load(Ordering::SeqCst), 1);
     }
@@ -577,7 +489,7 @@ mod tests {
             update.status,
             PreviewStatus::Failed(PreviewError::Unavailable)
         );
-        assert!(update.image.is_none());
+        assert!(update.frame.is_none());
         worker.stop().await;
     }
 
@@ -601,25 +513,5 @@ mod tests {
         assert_eq!(state.completed.load(Ordering::SeqCst), 1);
         assert_eq!(state.active.load(Ordering::SeqCst), 0);
         assert_eq!(state.started.load(Ordering::SeqCst), 1);
-    }
-
-    #[tokio::test]
-    async fn hidden_and_huge_previews_do_not_capture() {
-        let (source, state) = MockSource::new();
-        let mut worker = PreviewWorker::start_source(source);
-        let mut hidden = target("screen", 1);
-        hidden.area = Rect::default();
-        worker.set_target(Some(hidden));
-        tokio::time::sleep(Duration::from_millis(30)).await;
-        assert_eq!(state.started.load(Ordering::SeqCst), 0);
-        let mut huge = target("screen", 2);
-        huge.area = Rect::new(0, 0, 200, 100);
-        worker.set_target(Some(huge));
-        assert_eq!(
-            live(&mut worker).await.status,
-            PreviewStatus::Failed(PreviewError::AreaTooLarge)
-        );
-        assert_eq!(state.started.load(Ordering::SeqCst), 0);
-        worker.stop().await;
     }
 }

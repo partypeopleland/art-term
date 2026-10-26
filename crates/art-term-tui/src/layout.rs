@@ -64,6 +64,16 @@ impl WorkspaceLayout {
         result.terminal_inner.height = result.terminal_inner.height.min(240);
         result
     }
+    pub(crate) fn viewer_inner(self) -> Rect {
+        let mut area = Block::default().borders(Borders::ALL).inner(self.terminal);
+        let width = area.width.min(160);
+        let height = area.height.min(80);
+        area.x += (area.width - width) / 2;
+        area.y += (area.height - height) / 2;
+        area.width = width;
+        area.height = height;
+        area
+    }
     pub(crate) fn terminal_size(self) -> Option<TerminalSize> {
         let area = self.terminal_inner;
         (area.width > 0 && area.height > 0).then(|| TerminalSize::new(area.height, area.width))
@@ -92,5 +102,27 @@ mod tests {
                 } > 0
             );
         }
+    }
+    #[test]
+    fn expanded_raster_is_centered_bounded_and_does_not_change_remote_size() {
+        let layout = WorkspaceLayout::new(Rect::new(0, 0, 900, 300), Focus::Terminal);
+        let size = layout.terminal_size();
+        let canvas = layout.viewer_inner();
+        assert_eq!((canvas.width, canvas.height), (160, 80));
+        assert!(canvas.x > layout.terminal_inner.x);
+        assert!(canvas.y > layout.terminal_inner.y);
+        assert!(canvas.right() < layout.terminal.right());
+        assert!(canvas.bottom() < layout.terminal.bottom());
+        assert_eq!(
+            canvas.x - layout.terminal.x,
+            layout.terminal.right() - canvas.right()
+        );
+        assert_eq!(
+            canvas.y - layout.terminal.y,
+            layout.terminal.bottom() - canvas.bottom()
+        );
+        assert_eq!(layout.terminal_size(), size);
+        let normal = WorkspaceLayout::new(Rect::new(0, 0, 100, 30), Focus::Terminal);
+        assert_eq!(normal.viewer_inner(), normal.terminal_inner);
     }
 }

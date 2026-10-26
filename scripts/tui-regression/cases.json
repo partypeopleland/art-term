@@ -67,6 +67,21 @@
       "candidate_artifact_check": false
     },
     {
+      "id": "T-VIEWER",
+      "runner": "viewer.py",
+      "candidate_artifact_check": false
+    },
+    {
+      "id": "T-INPUT",
+      "runner": "viewer.py",
+      "candidate_artifact_check": false
+    },
+    {
+      "id": "T-IMAGE",
+      "runner": "viewer.py",
+      "candidate_artifact_check": false
+    },
+    {
       "id": "T-RELEASE",
       "runner": null,
       "candidate_artifact_check": true

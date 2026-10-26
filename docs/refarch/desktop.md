@@ -6,11 +6,11 @@ Screen 是保存在 App 的獨立 instance-mcp 桌面入口，與 Computers／Ag
 
 TUI 的左上固定展開 Computer／Agent／Screen 樹狀選單，左下顯示桌面圖片，右側保留分頁與終端。方向鍵／Enter 或滑鼠執行清單操作；Actions 提供編輯／刪除等入口，分頁可點選切換與關閉。token 輸入遮罩，空白編輯仍須符合核心 URL 與 revision 規則。
 
-每個分頁透過右上 Desktop 或可自訂的快捷鍵選擇 Screen。TUI 先透過共用 MCP 初始化驗證目前來源與認證，沿用受保護 configure 通道配置該工作 Shell 的 broker，不以截圖成功作為工具設定或恢復的前提；分別顯示預覽與工具狀態；沒有 adapter 或無法確認時不顯示 Tools ready。重新連入沿用下方共同的 current／verify／來源核對恢復流程，不改寫既有指派。Stop 只停本機取圖；Clear tools 才明確取消該 Shell 工具，關頁與程式結束不取消。背景分頁不擷取。
+每個分頁透過右上 Desktop 或可自訂的快捷鍵選擇 Screen。TUI 先透過共用 MCP 初始化驗證目前來源與認證，沿用受保護 configure 通道配置該工作 Shell 的 broker，不以截圖成功作為工具設定或恢復的前提；分別顯示預覽與工具狀態；沒有 adapter 或無法確認時不顯示 Tools ready。重新連入沿用下方共同的 current／verify／來源核對恢復流程，不改寫既有指派。Stop 只停本機取圖；Clear tools 才明確取消該 Shell 工具，關頁與程式結束不取消。背景分頁不擷取。點左下縮圖可在右側展開桌面，以拖曳與滾輪控制本機平移縮放；`[Fit]` 還原縮放，`[X]` 或再次點縮圖收回右側展開。操作不送入遠端桌面或改動 Shell 尺寸；圖片模式與終端相容限制見 [Ubuntu 終端機客戶端](../platforms/linux.md#桌面設定工具與預覽)。
 
-預覽沿用核心直接 MCP `screenshot` 與相同的 URL、token、TLS、圖片驗證規則。PNG／JPEG 解碼後，以 Halfblocks 的字元前景與背景色呈現真實截圖，保留圖片比例。固定使用 Halfblocks，不發出能力查詢或啟用 Kitty、Sixel、iTerm2 原生圖片協定；不需要本機圖形桌面。圖片不提供遠端桌面輸入。
+預覽沿用核心直接 MCP `screenshot` 與相同的 URL、token、TLS、圖片驗證規則。PNG／JPEG 解碼後保留原圖，預設以 Halfblocks 彩色字格呈現。已確認支援 Sixel 的直接終端可明確設定原生圖片模式及實際字格像素；不發送圖片能力或字格像素的 stdin 查詢，不修改 multiplexer。Kitty／iTerm2 未啟用，不需要本機圖形桌面。圖片不提供遠端桌面輸入。
 
-網路與圖片處理在背景依序完成，同時最多一個擷取請求與一個有界處理工作。目標變更先清除舊圖，既有請求仍正常完成 MCP session 清理；TabId、generation、Screen id／revision 與預覽尺寸共同排除晚到結果。解碼受 PNG／JPEG、8 MiB 圖片、4096 像素邊長與 64 MiB 配置上限限制，預覽區最多 160×80 字元。錯誤清除舊圖並顯示安全訊息。操作見 [Ubuntu 終端機版](../platforms/linux.md)。
+capture worker 在背景依序完成擷取與解碼，獨立 render worker 最多處理一個已加入等待結束的工作，只保留最新待處理要求。來源變更先清圖，既有請求仍正常完成 MCP session 清理；TabId、generation、Screen id／revision 排除舊來源，sequence、區域與 viewport 排除舊呈現結果。解碼受 PNG／JPEG、8 MiB 圖片、4096 像素邊長與 64 MiB 配置上限限制；縮圖與展開表面各最多 160×80 字格，原生表面各最多 4 百萬輸出像素。錯誤清除舊圖並顯示安全訊息。操作見 [Ubuntu 終端機版](../platforms/linux.md)。
 
 ## 共用預覽與工具路徑
 

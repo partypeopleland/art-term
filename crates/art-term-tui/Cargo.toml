@@ -32,6 +32,9 @@ uuid = { version = "1", features = ["v4"] }
 tempfile = "3"
 libc = "0.2"
 
+[target.'cfg(unix)'.dev-dependencies]
+icy_sixel = "=0.5.1"
+
 [features]
 default = []
 openab-fixture = ["art-term-core/openab-fixture"]

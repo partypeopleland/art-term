@@ -1,0 +1,455 @@
+#!/usr/bin/env python3
+"""Actual PTY viewer regression against isolated loopback Runtime/MCP fixtures.
+
+Committed UTF-8 and physical cursor positioning are covered; physical OS IME
+composition and rendering by an actual Sixel-capable client are not exercised.
+"""
+import argparse
+import hashlib
+import importlib.util
+import json
+import os
+from pathlib import Path
+import re
+import select
+import struct
+import tempfile
+import tomllib
+import traceback
+import zlib
+
+spec = importlib.util.spec_from_file_location("tui_driver", Path(__file__).with_name("run.py"))
+driver = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(driver)
+
+
+class ObservedTerminal(driver.Terminal):
+    watch_instructions = False
+    instruction_frames = 0
+
+    def pump(self, timeout=0.05):
+        super().pump(timeout)
+        if self.watch_instructions and "點擊右上 [Desktop]" in self.text():
+            self.instruction_frames += 1
+
+
+class NativeTerminal(driver.Terminal):
+    """Keep actual DCS payloads, excluding graphics from the text-only emulator."""
+    def __init__(self, *args, **kwargs):
+        self.pending = bytearray()
+        self.sixels = []
+        inherited = {key: os.environ.pop(key) for key in ("TMUX", "STY") if key in os.environ}
+        try:
+            super().__init__(*args, **kwargs)
+        finally:
+            os.environ.update(inherited)
+
+    def pump(self, timeout=0.05):
+        if not select.select([self.master], [], [], timeout)[0]:
+            return
+        try:
+            data = os.read(self.master, 65536)
+        except OSError:
+            return
+        self.raw.extend(data)
+        # Answer DSR so a querying build reaches the remaining diagnosis; the
+        # final assertion rejects it. The fixed fullscreen path needs no query.
+        if b"\x1b[6n" in data:
+            self.send(b"\x1b[1;1R")
+        self.pending.extend(data)
+        while self.pending:
+            start = self.pending.find(b"\x1bP")
+            if start < 0:
+                count = len(self.pending) - int(self.pending.endswith(b"\x1b"))
+                self.stream.feed(self.decoder.decode(bytes(self.pending[:count])))
+                del self.pending[:count]
+                return
+            if start:
+                self.stream.feed(self.decoder.decode(bytes(self.pending[:start])))
+                del self.pending[:start]
+            end = self.pending.find(b"\x1b\\", 2)
+            if end < 0:
+                return
+            payload = bytes(self.pending[:end + 2])
+            assert re.match(rb"\x1bP[0-9;]*q", payload), "Unexpected terminal DCS query"
+            self.sixels.append(payload)
+            del self.pending[:end + 2]
+
+
+def decode_sixel(payload):
+    """Decode emitted RGB Sixel runs into real RGB pixels, under raster bounds."""
+    content = re.sub(rb"^\x1bP[0-9;]*q", b"", payload)[:-2].decode("ascii")
+    raster = re.search(r'"(\d+);(\d+);(\d+);(\d+)', content)
+    assert raster, "Sixel payload has no raster attributes"
+    width, height = int(raster[3]), int(raster[4])
+    assert 0 < width <= 1280 and 0 < height <= 1280 and width * height <= 4_000_000, (width, height)
+    pixels = bytearray(width * height * 3)
+    palette, selected, x, y, index = {}, 0, 0, 0, 0
+    while index < len(content):
+        char = content[index]
+        if char == '"':
+            match = re.match(r'"[0-9;]+', content[index:])
+            index += len(match[0])
+            continue
+        if char == "#":
+            match = re.match(r"#(\d+)(?:;2;(\d+);(\d+);(\d+))?", content[index:])
+            assert match, "Unsupported Sixel palette encoding"
+            selected = int(match[1])
+            if match[2] is not None:
+                palette[selected] = bytes(round(int(match[n]) * 255 / 100) for n in (2, 3, 4))
+            index += len(match[0])
+            continue
+        if char == "$":
+            x = 0
+        elif char == "-":
+            x, y = 0, y + 6
+        elif char == "!" or "?" <= char <= "~":
+            repeat = 1
+            if char == "!":
+                match = re.match(r"!(\d+)([?-~])", content[index:])
+                assert match
+                repeat, char = int(match[1]), match[2]
+                index += len(match[0]) - 1
+            bits = ord(char) - 63
+            assert repeat <= 1280 and x + repeat <= width, "Sixel run exceeds bounded raster"
+            for bit in range(6):
+                if bits & (1 << bit):
+                    assert y + bit < height, "Sixel pixels exceed raster height"
+                    color = palette.get(selected, b"\0\0\0")
+                    for column in range(x, x + repeat):
+                        offset = ((y + bit) * width + column) * 3
+                        pixels[offset:offset + 3] = color
+            x += repeat
+        else:
+            assert char in "\r\n", ("Unknown Sixel token", char)
+        index += 1
+    colors = {tuple(pixels[index:index + 3]) for index in range(0, len(pixels), 3)}
+    assert len(colors) >= 4, "Encoded image lost the known source colors"
+    for expected in ((240, 30, 20), (30, 40, 240)):
+        assert any(all(abs(a - b) <= 4 for a, b in zip(color, expected)) for color in colors), ("Missing source corner", expected)
+    return {"width": width, "height": height, "rgb_sha256": hashlib.sha256(pixels).hexdigest(), "colors": len(colors)}
+
+
+def native_probe(binary, output):
+    result = {"binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "mode": "sixel-protocol-only",
+              "checks": [], "physical_os_ime": "NOT_RUN", "actual_sixel_client": "NOT_RUN"}
+    app = runtime = mcp = None
+    with tempfile.TemporaryDirectory(prefix="art-term-viewer-native-") as directory:
+        root = Path(directory)
+        home, fixtures = root / "home", root / "fixtures"
+        home.mkdir(mode=0o700)
+        fixtures.mkdir(mode=0o700)
+        settings = home / "config/art-term-tui/display.toml"
+        settings.parent.mkdir(parents=True, mode=0o700)
+        config = "# isolated protocol fixture: explicit cell pixels\nimage_mode='sixel'\ncell_width=8\ncell_height=16\n"
+        settings.write_text(config)
+        settings.chmod(0o600)
+        try:
+            runtime = driver.Runtime(fixtures)
+            mcp = driver.McpFixture("A")
+            mcp.image = detailed_png()
+            app = NativeTerminal(binary, home, runtime.ca)
+            app.start()
+            assert settings.read_text() == config, "existing display config overwritten"
+            app.click_text("New Host")
+            app.wait_text("HTTPS Runtime URL")
+            app.send("Native fixture\t" + runtime.origin + "\t" + runtime.credential)
+            app.send(b"\x13")
+            app.wait(lambda: "HTTPS Runtime URL" not in app.text(), "Host saved")
+            app.idle()
+            app.action("New Screen")
+            app.wait_text("新增 Screen")
+            app.send("Native\t" + mcp.url + "\t" + mcp.token)
+            app.send(b"\x13")
+            app.wait(lambda: "新增 Screen" not in app.text(), "Screen saved")
+            app.idle()
+            app.click_text("New Shell", (0, 1, 40, 24))
+            app.wait(lambda: len(runtime.work()) == 1, "work created")
+            app.wait_text("Live")
+            app.bind_screen(1)
+            app.wait(lambda: bool(app.sixels), "actual thumbnail Sixel")
+            result["thumbnail_raster"] = decode_sixel(app.sixels[-1])
+            mcp.capture_started.clear()
+            mcp.capture_gate.clear()
+            app.wait(mcp.capture_started.is_set, "native gated capture")
+
+            def open_viewer():
+                before = len(app.sixels)
+                app.click(15, 27)
+                app.wait_text("[X]")
+                def raster_width(payload):
+                    return int(re.search(rb'"\d+;\d+;(\d+);', payload)[1])
+                app.wait(lambda: any(raster_width(payload) > result["thumbnail_raster"]["width"] for payload in app.sixels[before:]), "actual expanded Sixel")
+                largest = max(app.sixels[before:], key=raster_width)
+                result["expanded_raster"] = decode_sixel(largest)
+
+            def cleared(action, label):
+                start = len(app.raw)
+                action()
+                app.wait(lambda: b"\x1b[2J" in app.raw[start:], label + " erases native raster")
+
+            open_viewer()
+            assert result["expanded_raster"]["width"] > result["thumbnail_raster"]["width"]
+            cleared(lambda: app.click_text("[X]", (40, 1, 120, 4)), "X")
+            open_viewer()
+            cleared(lambda: app.prefix("c"), "modal")
+            app.wait_text("Stop")
+            app.send(b"\x1b")
+            app.wait(lambda: "Stop" not in app.text(), "modal dismissed")
+            open_viewer()
+            cleared(lambda: app.resize(32, 110), "resize")
+            app.resize(36, 120)
+            app.settle(.3)
+            cleared(lambda: app.prefix("q"), "exit")
+            app.finish()
+            assert not re.search(rb"\x1b\[[?>]?[0-9;]*[cn]|\x1b\[(?:14|16|18)t|\x1b_G", app.raw), "stdin cursor/image capability/pixel query emitted"
+            assert b"allow-passthrough" not in app.raw
+            assert settings.read_text() == config
+            result["checks"].append({"id": "T-IMAGE-02", "result": "PASS", "description": "Actual PTY Sixel RGB raster decoded within bounds; original colors; explicit config preserved; X/modal/resize/exit erase; no stdin cursor/image capability/pixel query"})
+            app.save(output, "native-protocol")
+            print("PASS T-IMAGE-02 actual Sixel protocol and cleanup (client rendering NOT_RUN)", flush=True)
+        except Exception:
+            result["failure"] = traceback.format_exc()
+            print(result["failure"], flush=True)
+            if app:
+                app.save(output, "native-failure")
+        finally:
+            if app:
+                result["standard_cursor_dsr_queries"] = app.raw.count(b"\x1b[6n")
+            if mcp:
+                mcp.capture_gate.set()
+            if app:
+                app.close()
+            if mcp:
+                mcp.close()
+            if runtime:
+                runtime.close()
+    (output / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
+    return int("failure" in result)
+
+
+def detailed_png():
+    """Original 640x320 source: colored corners and a four-pixel central grating."""
+    def chunk(kind, data):
+        return struct.pack("!I", len(data)) + kind + data + struct.pack("!I", zlib.crc32(kind + data) & 0xffffffff)
+    rows = []
+    for y in range(320):
+        row = bytearray(b"\0")
+        for x in range(640):
+            color = ((240, 30, 20), (20, 220, 30), (30, 40, 240), (240, 210, 20))[(y >= 160) * 2 + (x >= 320)]
+            if 192 <= x < 448 and 96 <= y < 224:
+                color = (250, 0, 250) if (x // 4) % 2 else (0, 250, 250)
+            row.extend(color)
+        rows.append(row)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack("!IIBBBBB", 640, 320, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(b"".join(rows))) + chunk(b"IEND", b"")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--binary", type=Path, required=True)
+    parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--mode", choices=("compatible", "sixel"), default="compatible")
+    args = parser.parse_args()
+    binary = args.binary.resolve(strict=True)
+    output = args.output_dir.resolve()
+    output.mkdir(parents=True, exist_ok=False)
+    if args.mode == "sixel":
+        return native_probe(binary, output)
+    result = {"binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "checks": [],
+              "mode": "compatible", "physical_os_ime": "NOT_RUN", "actual_sixel_client": "NOT_RUN"}
+    app = runtime = None
+    mcps = []
+
+    def passed(case, description):
+        result["checks"].append({"id": case, "result": "PASS", "description": description})
+        print("PASS " + case + " " + description, flush=True)
+
+    def cursor():
+        return (app.screen.cursor.x, app.screen.cursor.y, app.screen.cursor.hidden)
+
+    def signature(region):
+        left, top, right, bottom = region
+        return tuple((app.screen.buffer[y][x].data, app.screen.buffer[y][x].fg, app.screen.buffer[y][x].bg)
+                     for y in range(top, bottom) for x in range(left, right))
+
+    def expanded():
+        return bool(app.locations("[X]", (40, 1, app.screen.columns, 4)))
+
+    def toggle():
+        app.click(15, 27)
+        app.settle(.25)
+
+    def drag(start, end):
+        app.send(f"\x1b[<0;{start[0]+1};{start[1]+1}M\x1b[<32;{end[0]+1};{end[1]+1}M\x1b[<0;{end[0]+1};{end[1]+1}m")
+        app.settle(.08)
+
+    with tempfile.TemporaryDirectory(prefix="art-term-viewer-test-") as directory:
+        root = Path(directory)
+        home, fixtures = root / "home", root / "fixtures"
+        home.mkdir(mode=0o700)
+        fixtures.mkdir(mode=0o700)
+        try:
+            runtime = driver.Runtime(fixtures)
+            mcps = [driver.McpFixture("A"), driver.McpFixture("B", sse=True)]
+            mcps[0].image = detailed_png()
+            mcps[1].image = driver.screenshot_png((20, 30, 240))
+            app = ObservedTerminal(binary, home, runtime.ca)
+            app.start()
+            settings = home / "config/art-term-tui/display.toml"
+            assert tomllib.loads(settings.read_text())["image_mode"] == "compatible"
+            assert settings.stat().st_mode & 0o777 == 0o600
+            passed("T-IMAGE-03", "Fresh startup creates private compatible display configuration")
+            app.click_text("New Host")
+            app.wait_text("HTTPS Runtime URL")
+            app.send("中文")
+            app.wait_text("中文")
+            app.settle(.15)
+            anchor = app.locations("中文")[0]
+            assert cursor() == (anchor[0] + 2, anchor[1], False), ("form CJK insertion cursor", cursor(), anchor)
+            passed("T-INPUT-03", "Local form exposes exact visible CJK insertion anchor")
+            app.send("Viewer fixture\t" + runtime.origin + "\t" + runtime.credential)
+            app.send(b"\x13")
+            app.wait(lambda: "HTTPS Runtime URL" not in app.text(), "Host saved")
+            app.idle()
+            for label, mcp in zip(("Detailed", "Blue"), mcps):
+                app.action("New Screen")
+                app.wait_text("新增 Screen")
+                app.send(label + "\t" + mcp.url + "\t" + mcp.token)
+                app.send(b"\x13")
+                app.wait(lambda: "新增 Screen" not in app.text(), "Screen saved")
+                app.idle()
+            app.click_text("New Shell", (0, 1, 40, 24))
+            app.wait(lambda: len(runtime.work()) == 1, "first work")
+            first = next(iter(runtime.work()))
+            app.wait(lambda: runtime.work()[first]["bootstrap"], "first bootstrap")
+            app.wait_text("Live")
+            app.prefix("t")
+            runtime.emit(first, b"\x1b[2J\x1b[3;5H")
+            app.settle(.2)
+            assert cursor() == (45, 5, False), ("remote insertion cursor", cursor())
+            borders = signature((0, 1, 1, 34)) + signature((39, 1, 40, 34))
+            app.send("中文輸入測試")
+            app.wait(lambda: "中文輸入測試" in runtime.work()[first]["input"], "committed CJK received")
+            app.wait_text("中文輸入測試")
+            app.settle(.15)
+            assert cursor() == (57, 5, False), ("CJK-width insertion cursor", cursor())
+            assert borders == signature((0, 1, 1, 34)) + signature((39, 1, 40, 34)), "left borders moved"
+            app.save(output, "cjk-cursor")
+            passed("T-INPUT-01", "Committed CJK reaches work; visible physical cursor uses exact display-cell anchor; left borders stable")
+
+            app.bind_screen(1)
+            app.wait(lambda: bool(app.image_cells("f01e14")), "source thumbnail")
+            mcps[0].capture_started.clear()
+            mcps[0].capture_gate.clear()
+            app.wait(mcps[0].capture_started.is_set, "gated next capture")
+            thumbnail = signature((1, 24, 39, 33))
+            before_frames = len(runtime.frames)
+            before_resizes = list(runtime.work()[first]["resizes"])
+            before_calls = len(mcps[0].events)
+            app.watch_instructions = True
+            toggle()
+            app.wait(expanded, "right viewer opens")
+            app.wait(lambda: bool([p for p in app.image_cells("f01e14") if p[0] > 40]), "right image prepared")
+            assert thumbnail == signature((1, 24, 39, 33)), "thumbnail changed during gated click"
+            assert app.instruction_frames == 0, "desktop instructions flashed in observed PTY frame"
+            assert "Connections" in app.text() and "1:" in app.text(), "left pane or tabs lost"
+            passed("T-VIEWER-01", "Cached thumbnail survives gated capture; click expands only right pane and preserves tabs")
+
+            region = (42, 4, 118, 32)
+            fit = signature(region)
+            assert not app.image_cells("fa00fa") and not app.image_cells("00fafa"), "test source detail was already resolved at Fit"
+            app.send(b"LOCAL-VIEWER\x1b[200~PASTED-VIEWER\x1b[201~")
+            app.settle(.1)
+            app.wheel(80, 18, -16)
+            app.wait(lambda: signature(region) != fit, "zoom changes original source crop")
+            zoomed = signature(region)
+            assert len(app.image_cells("fa00fa")) + len(app.image_cells("00fafa")) > 10, "high-frequency source detail did not resolve at zoom"
+            drag((80, 18), (102, 23))
+            app.wait(lambda: signature(region) != zoomed, "drag changes crop")
+            for _ in range(32):
+                drag((80, 18), (117, 31))
+            app.settle(.2)
+            clamped = signature(region)
+            drag((80, 18), (117, 31))
+            app.settle(.2)
+            assert signature(region) == clamped, "image did not clamp at edge"
+            app.click_text("[Fit]", (40, 1, 120, 4))
+            app.wait(lambda: signature(region) == fit, "Fit restores full original source")
+            assert len(runtime.frames) == before_frames, "viewer gestures sent work PTY bytes"
+            assert runtime.work()[first]["resizes"] == before_resizes, "viewer gestures resized remote PTY"
+            assert len(mcps[0].events) == before_calls, "presentation caused MCP capture"
+            assert app.instruction_frames == 0, "desktop instructions flashed during gestures"
+            app.save(output, "expanded-fit")
+            passed("T-IMAGE-01", "Original high-frequency PNG resolves when zoomed; drag, clamp and Fit affect local crop only")
+
+            runtime.emit(first, b"\r\nBACKGROUND-VIEWER-OUTPUT\r\n")
+            app.settle(.15)
+            app.click_text("[X]", (40, 1, 120, 4))
+            app.wait(lambda: not expanded(), "X closes")
+            app.wait_text("BACKGROUND-VIEWER-OUTPUT")
+            toggle()
+            app.wait(expanded, "reopen")
+            toggle()
+            app.wait(lambda: not expanded(), "thumbnail closes")
+            passed("T-VIEWER-02", "X and repeated thumbnail click close; background terminal output is retained")
+            app.watch_instructions = False
+            mcps[0].capture_gate.set()
+
+            toggle()
+            app.wait(expanded, "open before modal")
+            app.prefix("c")
+            app.wait_text("Stop")
+            assert not expanded(), "screen modal retained viewer"
+            app.send(b"\x1b")
+            app.wait(lambda: "Stop" not in app.text(), "modal dismissed")
+            app.wait(lambda: bool(app.image_cells("f01e14")), "thumbnail after modal")
+            toggle()
+            app.wait(expanded, "open before tab switch")
+            app.prefix("n")
+            app.wait(lambda: len(runtime.work()) == 2, "second work")
+            app.wait_text("2:")
+            app.idle()
+            app.wait(lambda: not app.image_cells("f01e14"), "new tab clears old source")
+            assert not expanded() and not app.image_cells("f01e14"), "new tab retained old source"
+            app.bind_screen(2)
+            app.wait(lambda: bool(app.image_cells("141ef0")), "second source")
+            toggle()
+            app.wait(expanded, "blue viewer")
+            app.prefix("c")
+            app.wait_text("Stop")
+            app.send(b"\x1b[B\r")
+            app.wait(lambda: bool(app.image_cells("f01e14")), "source switch to detailed")
+            assert not expanded() and not app.image_cells("141ef0"), "source switch retained old image"
+            toggle()
+            app.wait(expanded, "open before resize")
+            app.resize(32, 110)
+            app.settle(.4)
+            assert "Connections" in app.text() and "2:" in app.text(), "resize corrupted panes"
+            app.resize(36, 120)
+            app.settle(.4)
+            app.bind_screen(0)
+            app.wait(lambda: not expanded() and not app.image_cells("f01e14"), "Stop clears viewer")
+            passed("T-VIEWER-03", "Modal, tab, source, resize and Stop lifecycle preserve pane boundaries and discard stale source")
+            app.prefix("q")
+            app.finish()
+            passed("T-INPUT-02", "Clean exit restores original terminal modes")
+        except Exception:
+            result["failure"] = traceback.format_exc()
+            print(result["failure"], flush=True)
+            if app:
+                app.save(output, "failure")
+        finally:
+            for mcp in mcps:
+                mcp.capture_gate.set()
+            if app:
+                app.close()
+            for mcp in mcps:
+                mcp.close()
+            if runtime:
+                runtime.close()
+    (output / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
+    return int("failure" in result)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

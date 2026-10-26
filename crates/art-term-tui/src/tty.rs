@@ -1,8 +1,12 @@
+use crate::image_view::ImageMode;
 use crossterm::{
     cursor::{Hide, Show},
     event::{DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{
+        disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen,
+        LeaveAlternateScreen,
+    },
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 use std::{
@@ -16,6 +20,7 @@ use std::{
 };
 
 static ACTIVE: AtomicBool = AtomicBool::new(false);
+static NATIVE_IMAGES: AtomicBool = AtomicBool::new(false);
 static PANIC_HOOK: Once = Once::new();
 
 pub(crate) struct Tty {
@@ -75,6 +80,9 @@ impl Drop for StartupSignals {
 
 fn restore() {
     if ACTIVE.swap(false, Ordering::SeqCst) {
+        if NATIVE_IMAGES.swap(false, Ordering::SeqCst) {
+            let _ = execute!(io::stdout(), Clear(ClearType::All));
+        }
         let _ = execute!(
             io::stdout(),
             DisableBracketedPaste,
@@ -87,7 +95,8 @@ fn restore() {
 }
 
 impl Tty {
-    pub(crate) fn enter() -> io::Result<Self> {
+    pub(crate) fn enter_with_mode(mode: ImageMode) -> io::Result<Self> {
+        NATIVE_IMAGES.store(matches!(mode, ImageMode::Sixel { .. }), Ordering::SeqCst);
         PANIC_HOOK.call_once(|| {
             let previous = std::panic::take_hook();
             std::panic::set_hook(Box::new(move |panic| {

@@ -40,6 +40,8 @@ pub(crate) enum BindingAction {
     NewHost,
     NewAgent,
     NewScreen,
+    ViewerToggle,
+    ViewerFit,
     FocusNext,
     TreeUp,
     TreeDown,

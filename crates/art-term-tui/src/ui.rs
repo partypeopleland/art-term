@@ -3,9 +3,10 @@ use crate::{
         Backend, DesktopRequest, DesktopState, HostEdit, HostSelection, ImportView, OpenShell,
         ProfileView, ScreenEdit, ScreenSelection, ShellListView, ShellView, ToolReadiness,
     },
+    image_view::{ImageMode, ImageViewport, RenderRequest, RenderWorker, SurfacePlan},
     keybindings::{BindingAction, Bindings},
     layout::{Focus, WorkspaceLayout},
-    preview::{PreviewStatus, PreviewTarget, PreviewWorker},
+    preview::{CapturedFrame, PreviewStatus, PreviewTarget, PreviewWorker},
     tab::{HistoryStatus, TabAction, TabClient, TabId, TabStatus, TerminalSize},
     tty::Tty,
 };
@@ -28,10 +29,11 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     future::Future,
     path::PathBuf,
+    sync::Arc,
     time::Duration,
 };
 use tokio::task::JoinHandle;
-use tui_term::widget::PseudoTerminal;
+use tui_term::widget::{Cursor, PseudoTerminal};
 use zeroize::Zeroizing;
 
 use BindingAction as LocalCommand;
@@ -66,6 +68,10 @@ const COMMANDS: &[(LocalCommand, &str)] = &[
 enum HitAction {
     Command(LocalCommand),
     Focus(Focus),
+    ViewerToggle,
+    ViewerClose,
+    ViewerFit,
+    ViewerCanvas,
     Tab(usize),
     CloseTab(usize),
     Tree(String),
@@ -343,6 +349,16 @@ struct App {
     preview: Option<PreviewWorker>,
     preview_target: Option<PreviewTarget>,
     preview_image: Option<Protocol>,
+    source_frame: Option<Arc<CapturedFrame>>,
+    renderer: Option<RenderWorker>,
+    render_request: Option<(u64, SurfacePlan)>,
+    expanded_image: Option<Protocol>,
+    image_mode: ImageMode,
+    expanded: bool,
+    viewport: ImageViewport,
+    drag: Option<(u16, u16)>,
+    image_damage: bool,
+    images_visible: bool,
     preview_status: Option<PreviewStatus>,
     generation: u64,
     profiles: ProfileView,
@@ -367,7 +383,11 @@ impl App {
     fn new(backend: Backend) -> Self {
         Self::with_bindings(backend, Bindings::default())
     }
+    #[cfg(test)]
     fn with_bindings(backend: Backend, bindings: Bindings) -> Self {
+        Self::with_image_mode(backend, bindings, ImageMode::Compatible)
+    }
+    fn with_image_mode(backend: Backend, bindings: Bindings, image_mode: ImageMode) -> Self {
         let preview = PreviewWorker::start(backend.clone());
         Self {
             focus: Focus::Connections,
@@ -384,6 +404,16 @@ impl App {
             preview: Some(preview),
             preview_target: None,
             preview_image: None,
+            source_frame: None,
+            renderer: Some(RenderWorker::start(image_mode)),
+            render_request: None,
+            expanded_image: None,
+            image_mode,
+            expanded: false,
+            viewport: ImageViewport::default(),
+            drag: None,
+            image_damage: false,
+            images_visible: true,
             preview_status: None,
             generation: 0,
             backend,
@@ -425,6 +455,14 @@ impl App {
     fn invalidate_preview(&mut self) {
         self.generation = self.generation.wrapping_add(1);
         self.preview_target = None;
+        self.close_viewer();
+        self.damage_images();
+        self.source_frame = None;
+        self.render_request = None;
+        self.expanded_image = None;
+        if let Some(renderer) = &mut self.renderer {
+            renderer.set_request(None);
+        }
         self.preview_image = None;
         self.preview_status = None;
         if let Some(worker) = &mut self.preview {
@@ -432,7 +470,10 @@ impl App {
         }
     }
     fn navigate(&mut self, page: Page) {
-        self.invalidate_preview();
+        self.close_viewer();
+        if matches!(page, Page::Help) || matches!(self.page, Page::Help) {
+            self.damage_images();
+        }
         self.focus = if matches!(page, Page::Terminal) {
             Focus::Terminal
         } else {
@@ -453,7 +494,8 @@ impl App {
     }
     fn show_modal(&mut self, modal: Modal) {
         self.confirm_yes = false;
-        self.invalidate_preview();
+        self.close_viewer();
+        self.damage_images();
         self.dismiss_modal();
         self.modal = Some(modal);
         self.epoch = self.epoch.wrapping_add(1);
@@ -708,6 +750,9 @@ impl App {
     }
     fn select_tab(&mut self, index: usize) {
         if index < self.tabs.len() {
+            if self.tab != index {
+                self.invalidate_preview();
+            }
             self.tab = index;
             self.navigate(Page::Terminal);
         }
@@ -719,7 +764,6 @@ impl App {
             }
             LocalCommand::Preview => {
                 self.focus = Focus::Preview;
-                self.invalidate_preview();
             }
             LocalCommand::Screens => self.show_modal(Modal::Screens { row: 0 }),
             LocalCommand::Hosts => {
@@ -790,6 +834,10 @@ impl App {
         if key.kind == KeyEventKind::Release {
             return;
         }
+        if self.expanded && key.code == KeyCode::Esc && key.modifiers.is_empty() {
+            self.close_viewer();
+            return;
+        }
         if self.modal.is_some() {
             self.prefix = false;
             let key = self.bindings.navigation_key(key);
@@ -835,6 +883,9 @@ impl App {
             self.status = "未知快捷鍵；點擊 Help 查看目前設定。".into();
             return;
         }
+        if self.expanded {
+            return;
+        }
         if self.focus == Focus::Terminal && matches!(self.page, Page::Terminal) {
             self.send(TabAction::Key(key));
             return;
@@ -873,6 +924,15 @@ impl App {
     }
     fn binding_action(&mut self, action: BindingAction) {
         match action {
+            BindingAction::ViewerToggle => {
+                self.toggle_viewer();
+                return;
+            }
+            BindingAction::ViewerFit => {
+                self.viewport.reset();
+                self.refresh_surfaces();
+                return;
+            }
             BindingAction::FocusNext => {
                 self.focus = match self.focus {
                     Focus::Connections => Focus::Preview,
@@ -884,7 +944,6 @@ impl App {
                 } else {
                     Page::Hosts
                 };
-                self.invalidate_preview();
                 return;
             }
             BindingAction::TreeUp => {
@@ -1235,6 +1294,61 @@ impl App {
     }
     fn mouse(&mut self, event: MouseEvent) {
         self.prefix = false;
+        if self.expanded && self.modal.is_none() && !matches!(self.page, Page::Help) {
+            let canvas = self.layout.viewer_inner();
+            match event.kind {
+                MouseEventKind::Down(MouseButton::Left) => {
+                    if matches!(
+                        self.hits.at(event.column, event.row),
+                        Some(HitAction::ViewerCanvas)
+                    ) {
+                        self.drag = Some((event.column, event.row));
+                        return;
+                    }
+                }
+                MouseEventKind::Drag(MouseButton::Left) => {
+                    if let Some((x, y)) = self.drag.replace((event.column, event.row)) {
+                        if let Some(source) = &self.source_frame {
+                            self.viewport.pan_cells(
+                                event.column as i16 - x as i16,
+                                event.row as i16 - y as i16,
+                                canvas,
+                                (source.pixels.width(), source.pixels.height()),
+                                self.image_mode,
+                            );
+                            self.refresh_surfaces();
+                        }
+                    } else {
+                        self.drag = None;
+                    }
+                    return;
+                }
+                MouseEventKind::Up(MouseButton::Left) => {
+                    self.drag = None;
+                    return;
+                }
+                MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+                    if contains(canvas, event.column, event.row) =>
+                {
+                    if let Some(source) = &self.source_frame {
+                        self.viewport.zoom_at(
+                            if event.kind == MouseEventKind::ScrollUp {
+                                1
+                            } else {
+                                -1
+                            },
+                            (event.column, event.row),
+                            canvas,
+                            (source.pixels.width(), source.pixels.height()),
+                            self.image_mode,
+                        );
+                        self.refresh_surfaces();
+                    }
+                    return;
+                }
+                _ => (),
+            }
+        }
         match event.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 if let Some(action) = self.hits.at(event.column, event.row) {
@@ -1271,7 +1385,8 @@ impl App {
                     self.focus = Focus::Connections;
                     self.page = Page::Hosts;
                     self.move_tree(amount as i16);
-                } else if contains(self.layout.terminal, event.column, event.row) {
+                } else if !self.expanded && contains(self.layout.terminal, event.column, event.row)
+                {
                     self.focus = Focus::Terminal;
                     self.page = Page::Terminal;
                     self.send(TabAction::Scroll(amount as i16 * 3));
@@ -1290,8 +1405,15 @@ impl App {
                 } else {
                     Page::Hosts
                 };
-                self.invalidate_preview();
             }
+            HitAction::ViewerToggle => self.toggle_viewer(),
+            HitAction::ViewerClose => self.close_viewer(),
+            HitAction::ViewerFit => {
+                self.viewport.reset();
+                self.drag = None;
+                self.refresh_surfaces();
+            }
+            HitAction::ViewerCanvas => (),
             HitAction::Tab(index) => self.select_tab(index),
             HitAction::CloseTab(index) => {
                 self.select_tab(index);
@@ -1338,7 +1460,10 @@ impl App {
                 Some(Modal::Transfer(form)) => form.fields[form.active].paste(&text),
                 _ => (),
             }
-        } else if self.focus == Focus::Terminal && matches!(self.page, Page::Terminal) {
+        } else if !self.expanded
+            && self.focus == Focus::Terminal
+            && matches!(self.page, Page::Terminal)
+        {
             self.send(TabAction::Paste(text));
         }
     }
@@ -1421,7 +1546,6 @@ impl App {
         };
         match result {
             JobResult::Profiles(Ok(profiles)) => {
-                self.invalidate_preview();
                 self.catalog.retain(|id, list| {
                     profiles
                         .hosts
@@ -1503,10 +1627,20 @@ impl App {
         }
     }
     fn resize(&mut self, area: Rect) {
+        let visible = self.modal.is_none() && !matches!(self.page, Page::Help);
+        if visible != self.images_visible {
+            self.damage_images();
+            self.images_visible = visible;
+        }
         let layout = WorkspaceLayout::new(area, self.focus);
         if layout != self.layout {
-            self.invalidate_preview();
+            self.damage_images();
+            self.drag = None;
+            self.expanded_image = None;
             self.layout = layout;
+            if self.layout.terminal_inner.width == 0 || self.layout.terminal_inner.height == 0 {
+                self.close_viewer();
+            }
         }
         self.update_preview();
         let Some(size) = self.layout.terminal_size() else {
@@ -1521,30 +1655,95 @@ impl App {
             }
         }
     }
-    fn update_preview(&mut self) {
-        let target = if self.modal.is_none()
-            && !matches!(self.page, Page::Help)
-            && self.layout.preview_inner.width > 0
-            && self.layout.preview_inner.height > 0
-        {
-            self.tabs.get(self.tab).and_then(|tab| {
-                self.selected_screen().map(|screen| PreviewTarget {
-                    tab: tab.id(),
-                    generation: self.generation,
-                    screen,
-                    area: self.layout.preview_inner,
-                })
-            })
+    fn damage_images(&mut self) {
+        if matches!(self.image_mode, ImageMode::Sixel { .. }) {
+            self.image_damage = true;
+        }
+    }
+    fn close_viewer(&mut self) {
+        if self.expanded {
+            self.damage_images();
+        }
+        self.expanded = false;
+        self.expanded_image = None;
+        self.drag = None;
+        self.viewport.reset();
+    }
+    fn toggle_viewer(&mut self) {
+        if self.expanded {
+            self.close_viewer();
+        } else if self.source_frame.is_none() {
+            self.focus = Focus::Preview;
+            self.status = "請先在 [Desktop] 選擇桌面並等待截圖。".into();
+        } else if self.layout.terminal_inner.width == 0 || self.layout.terminal_inner.height == 0 {
+            self.status = "請放大終端視窗，以在右側開啟桌面預覽。".into();
         } else {
-            None
+            self.expanded = true;
+            self.viewport.reset();
+            self.damage_images();
+        }
+        self.refresh_surfaces();
+    }
+    fn surface_plan(&self) -> SurfacePlan {
+        let visible = self.modal.is_none() && !matches!(self.page, Page::Help);
+        SurfacePlan {
+            thumbnail: if visible {
+                self.layout.preview_inner
+            } else {
+                Rect::default()
+            },
+            expanded: (visible && self.expanded)
+                .then(|| (self.layout.viewer_inner(), self.viewport.clone())),
+        }
+    }
+    fn refresh_surfaces(&mut self) {
+        if self.modal.is_some() || matches!(self.page, Page::Help) {
+            return;
+        }
+        let Some(source) = self.source_frame.clone() else {
+            return;
         };
-        if target != self.preview_target {
-            self.preview_image = None;
-            self.preview_status = None;
-            self.preview_target = target.clone();
-            if let Some(worker) = &mut self.preview {
-                worker.set_target(target);
+        let plan = self.surface_plan();
+        let identity = (source.sequence, plan.clone());
+        if self.render_request.as_ref() != Some(&identity) {
+            if self.render_request.as_ref().is_some_and(|(_, old)| {
+                old.expanded.as_ref().map(|(area, _)| area)
+                    != plan.expanded.as_ref().map(|(area, _)| area)
+            }) {
+                self.damage_images();
+                self.expanded_image = None;
             }
+            self.render_request = Some(identity);
+            if let Some(renderer) = &mut self.renderer {
+                renderer.set_request(Some(RenderRequest {
+                    frame: source,
+                    plan,
+                }));
+            }
+        }
+    }
+    fn update_preview(&mut self) {
+        let target = self.tabs.get(self.tab).and_then(|tab| {
+            self.selected_screen().map(|screen| PreviewTarget {
+                tab: tab.id(),
+                generation: self.generation,
+                screen,
+            })
+        });
+        if target != self.preview_target {
+            self.invalidate_preview();
+            self.preview_target = target.map(|mut target| {
+                target.generation = self.generation;
+                target
+            });
+        }
+        let visible = self.modal.is_none() && !matches!(self.page, Page::Help);
+        if let Some(worker) = &mut self.preview {
+            worker.set_target(if visible {
+                self.preview_target.clone()
+            } else {
+                None
+            });
         }
         if let Some(update) = self
             .preview
@@ -1557,8 +1756,44 @@ impl App {
                     .screen_is_current(&update.target.screen)
                     .unwrap_or(false)
             {
-                self.preview_image = update.image;
+                if let Some(frame) = update.frame {
+                    self.source_frame = Some(frame);
+                } else if matches!(update.status, PreviewStatus::Failed(_)) {
+                    self.close_viewer();
+                    self.damage_images();
+                    self.source_frame = None;
+                    self.preview_image = None;
+                    self.render_request = None;
+                    if let Some(renderer) = &mut self.renderer {
+                        renderer.set_request(None);
+                    }
+                }
                 self.preview_status = Some(update.status);
+            }
+        }
+        self.refresh_surfaces();
+        if let Some(prepared) = self
+            .renderer
+            .as_mut()
+            .and_then(|worker| worker.take_latest())
+        {
+            if self.preview_target.as_ref() == Some(&prepared.target)
+                && self.render_request.as_ref() == Some(&(prepared.sequence, prepared.plan))
+            {
+                self.preview_image = prepared.thumbnail;
+                self.expanded_image = prepared.expanded;
+                if let Some(error) = prepared.error {
+                    self.close_viewer();
+                    self.damage_images();
+                    self.source_frame = None;
+                    self.preview_image = None;
+                    self.render_request = None;
+                    self.preview_status = Some(PreviewStatus::Failed(error));
+                    if let Some(renderer) = &mut self.renderer {
+                        renderer.set_request(None);
+                    }
+                    self.status = error.to_string();
+                }
             }
         }
     }
@@ -1570,6 +1805,9 @@ impl App {
         }
         if let Some(worker) = self.preview.take() {
             worker.stop().await;
+        }
+        if let Some(renderer) = self.renderer.take() {
+            renderer.stop().await;
         }
         if let Some(pending) = self.pending.take() {
             pending.task.abort();
@@ -1745,17 +1983,25 @@ fn draw(app: &App, frame: &mut Frame) -> HitMap {
             border(format!("Desktop / {name}"), Focus::Preview),
             layout.preview,
         );
-        hits.add(layout.preview, HitAction::Focus(Focus::Preview));
-        if let Some(image) = &app.preview_image {
+        hits.add(layout.preview, HitAction::ViewerToggle);
+        if let Some(image) = app
+            .preview_image
+            .as_ref()
+            .filter(|_| app.modal.is_none() && !matches!(app.page, Page::Help))
+        {
             frame.render_widget(Image::new(image), layout.preview_inner);
         } else {
-            let message = match app.preview_status {
-                Some(PreviewStatus::Capturing) => "擷取中…".into(),
-                Some(PreviewStatus::Failed(error)) => error.to_string(),
-                _ => format!(
-                    "點擊右上 [Desktop]\n選擇此 Shell 使用的桌面。\n{}",
-                    app.desktop_status()
-                ),
+            let message = if app.source_frame.is_some() {
+                "準備圖片…".into()
+            } else {
+                match app.preview_status {
+                    Some(PreviewStatus::Capturing) => "擷取中…".into(),
+                    Some(PreviewStatus::Failed(error)) => error.to_string(),
+                    _ => format!(
+                        "點擊右上 [Desktop]\n選擇此 Shell 使用的桌面。\n{}",
+                        app.desktop_status()
+                    ),
+                }
             };
             frame.render_widget(
                 Paragraph::new(message).wrap(Wrap { trim: false }),
@@ -1807,14 +2053,44 @@ fn draw(app: &App, frame: &mut Frame) -> HitMap {
     }
     if layout.terminal.width > 0 {
         let title = elide(
-            &format!("Terminal | {}", app.desktop_status()),
+            &if app.expanded {
+                "Desktop | 拖曳平移 · 滾輪縮放".into()
+            } else {
+                format!("Terminal | {}", app.desktop_status())
+            },
             layout.terminal.width.saturating_sub(2),
         );
         frame.render_widget(border(title, Focus::Terminal), layout.terminal);
         hits.add(layout.terminal, HitAction::Focus(Focus::Terminal));
-        if let Some(tab) = app.tabs.get(app.tab) {
+        if app.expanded {
+            let canvas = layout.viewer_inner();
+            hits.add(canvas, HitAction::ViewerCanvas);
+            if let Some(image) = &app.expanded_image {
+                frame.render_widget(Image::new(image), canvas);
+            } else {
+                frame.render_widget(Paragraph::new("準備圖片…"), canvas);
+            }
+            let x = layout.terminal.right().saturating_sub(4);
+            button(
+                frame,
+                &mut hits,
+                Rect::new(x, layout.terminal.y, 3, 1),
+                "[X]",
+                HitAction::ViewerClose,
+            );
+            if layout.terminal.width >= 14 {
+                button(
+                    frame,
+                    &mut hits,
+                    Rect::new(x - 6, layout.terminal.y, 5, 1),
+                    "[Fit]",
+                    HitAction::ViewerFit,
+                );
+            }
+        } else if let Some(tab) = app.tabs.get(app.tab) {
             frame.render_widget(
-                PseudoTerminal::new(tab.view().screen.as_ref()),
+                PseudoTerminal::new(tab.view().screen.as_ref())
+                    .cursor(Cursor::default().visibility(false)),
                 layout.terminal_inner,
             );
         } else {
@@ -1828,6 +2104,15 @@ fn draw(app: &App, frame: &mut Frame) -> HitMap {
         let mut lines = vec![
             Line::from("滑鼠點選區塊與分頁；連線樹固定展開，↑↓移動、Enter執行。"),
             Line::from("[Actions] 包含新增／編輯／刪除、匯入匯出及歷史操作。"),
+            Line::from(
+                "點擊左下桌面圖片切換右側預覽；拖曳平移、滾輪縮放、[Fit] 還原、[X] 或 Esc 關閉。",
+            ),
+            Line::from(match app.image_mode {
+                ImageMode::Compatible => "Compatible 圖片模式以終端色塊呈現，解析度受字元格限制。",
+                ImageMode::Sixel { .. } => {
+                    "Sixel 圖片模式需要支援 Sixel 的終端機與正確字元格像素設定。"
+                }
+            }),
             Line::from(format!(
                 "快捷鍵可在 keybindings.toml 自訂；目前前綴 {}。",
                 app.bindings.leader_label()
@@ -1919,8 +2204,54 @@ fn draw(app: &App, frame: &mut Frame) -> HitMap {
     );
     if let Some(modal) = &app.modal {
         hits = draw_modal(app, modal, frame);
+    } else if let Some(position) = terminal_cursor(app, layout.terminal_inner) {
+        frame.set_cursor_position(position);
     }
     hits
+}
+
+fn terminal_cursor(app: &App, area: Rect) -> Option<(u16, u16)> {
+    if app.focus != Focus::Terminal
+        || !matches!(app.page, Page::Terminal)
+        || app.expanded
+        || app.modal.is_some()
+    {
+        return None;
+    }
+    let view = app.tabs.get(app.tab)?.view();
+    if !matches!(view.status, TabStatus::Live)
+        || matches!(
+            view.history,
+            HistoryStatus::Held { .. } | HistoryStatus::Uncertain
+        )
+        || view.screen.hide_cursor()
+        || view.screen.scrollback() > 0
+    {
+        return None;
+    }
+    screen_cursor(&view.screen, area)
+}
+fn screen_cursor(screen: &vt100::Screen, area: Rect) -> Option<(u16, u16)> {
+    let (row, column) = screen.cursor_position();
+    (!screen.hide_cursor() && screen.scrollback() == 0 && row < area.height && column < area.width)
+        .then_some((area.x + column, area.y + row))
+}
+fn field_cursor(field: &Field, region: Rect, bordered: bool) -> Option<(u16, u16)> {
+    let area = if bordered {
+        panel("").inner(region)
+    } else {
+        region
+    };
+    if area.width == 0 || area.height == 0 {
+        return None;
+    }
+    let width = Span::raw(field.visible()).width()
+        + if bordered {
+            0
+        } else {
+            Span::raw(format!("{}: ", field.label)).width()
+        };
+    Some((area.x + (width as u16).min(area.width - 1), area.y))
 }
 
 fn status(value: &TabStatus) -> String {
@@ -2279,6 +2610,11 @@ fn draw_fields(
             );
         }
         hits.add(region, HitAction::Field(index));
+        if index == active {
+            if let Some(position) = field_cursor(field, region, field_height == 3) {
+                frame.set_cursor_position(position);
+            }
+        }
     }
     if inner.height > 0 {
         button(
@@ -2324,21 +2660,28 @@ pub(crate) async fn run(
     backend: Backend,
     startup_signals: crate::tty::StartupSignals,
     bindings: Bindings,
+    image_mode: ImageMode,
 ) -> anyhow::Result<()> {
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     let mut interrupt = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
     startup_signals.disarm();
-    let mut tty = Tty::enter()?;
+    let mut tty = Tty::enter_with_mode(image_mode)?;
     let mut events = EventStream::new();
     let mut tick = tokio::time::interval(Duration::from_millis(40));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    let mut app = App::with_bindings(backend, bindings);
+    let mut app = App::with_image_mode(backend, bindings, image_mode);
     app.profiles();
     let result = async {
         while !app.quit {
             app.complete().await;
+            tty.terminal.autoresize()?;
+            app.resize(tty.terminal.get_frame().area());
+            if std::mem::take(&mut app.image_damage) {
+                // Fullscreen resize resets both buffers without clear()'s stdin cursor query.
+                let area = tty.terminal.get_frame().area();
+                tty.terminal.resize(area)?;
+            }
             tty.terminal.draw(|frame| {
-                app.resize(frame.area());
                 app.hits = draw(&app, frame);
             })?;
             tokio::select! {
@@ -2782,5 +3125,216 @@ mod tests {
         assert_eq!(elide("中文abc", 4), "中…");
         assert_eq!(elide("abc", 3), "abc");
         assert_eq!(elide("中文", 0), "");
+    }
+    fn seed_frame(app: &mut App) -> Arc<CapturedFrame> {
+        app.layout = WorkspaceLayout::new(Rect::new(0, 0, 100, 30), app.focus);
+        let target = PreviewTarget {
+            tab: TabId(1),
+            generation: app.generation,
+            screen: ScreenSelection {
+                id: "fixture".into(),
+                revision: 1,
+            },
+        };
+        let frame = Arc::new(CapturedFrame {
+            target: target.clone(),
+            sequence: 1,
+            pixels: image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+                800,
+                400,
+                image::Rgb([20, 120, 240]),
+            )),
+        });
+        app.preview_target = Some(target);
+        app.source_frame = Some(frame.clone());
+        app.preview_status = Some(PreviewStatus::Live);
+        app.preview_image = Some(Protocol::Halfblocks(
+            ratatui_image::protocol::halfblocks::Halfblocks::new(
+                image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+                    31,
+                    14,
+                    image::Rgb([20, 120, 240]),
+                )),
+                app.layout.preview_inner.as_size(),
+            )
+            .unwrap(),
+        ));
+        frame
+    }
+    fn draw_without_update(app: &mut App) -> String {
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+        terminal.draw(|frame| app.hits = draw(app, frame)).unwrap();
+        terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|c| c.symbol())
+            .collect()
+    }
+    fn mouse_event(app: &mut App, kind: MouseEventKind, x: u16, y: u16) {
+        app.mouse(MouseEvent {
+            kind,
+            column: x,
+            row: y,
+            modifiers: KeyModifiers::NONE,
+        });
+    }
+    #[tokio::test]
+    async fn cached_thumbnail_survives_focus_and_viewer_gestures_without_instruction_flash() {
+        let (_directory, backend, mut app) = test_app().await;
+        let source = seed_frame(&mut app);
+        draw_without_update(&mut app);
+        let generation = app.generation;
+        app.hit(HitAction::Focus(Focus::Terminal));
+        assert!(Arc::ptr_eq(&source, app.source_frame.as_ref().unwrap()));
+        assert!(app.preview_image.is_some());
+        assert_eq!(app.generation, generation);
+        let text = draw_without_update(&mut app);
+        assert!(!text.contains("選擇此 Shell 使用的桌面"));
+        click(&mut app, 4, 23);
+        assert!(app.expanded);
+        assert_eq!(app.focus, Focus::Terminal);
+        let text = draw_without_update(&mut app);
+        assert!(text.contains("[X]"));
+        assert!(text.contains("[Fit]"));
+        assert!(!text.contains("選擇此 Shell 使用的桌面"));
+        let canvas = app.layout.viewer_inner();
+        let point = (canvas.x + canvas.width / 2, canvas.y + canvas.height / 2);
+        let before = app.viewport.clone();
+        mouse_event(&mut app, MouseEventKind::ScrollUp, point.0, point.1);
+        assert_ne!(app.viewport, before);
+        let zoomed = app.viewport.clone();
+        click(&mut app, point.0, point.1);
+        assert_eq!(app.drag, Some(point));
+        mouse_event(
+            &mut app,
+            MouseEventKind::Drag(MouseButton::Left),
+            point.0 + 3,
+            point.1 + 2,
+        );
+        assert_ne!(app.viewport, zoomed);
+        mouse_event(
+            &mut app,
+            MouseEventKind::Up(MouseButton::Left),
+            point.0 + 3,
+            point.1 + 2,
+        );
+        assert!(app.drag.is_none());
+        assert!(Arc::ptr_eq(&source, app.source_frame.as_ref().unwrap()));
+        assert_eq!(app.generation, generation);
+        app.hit(HitAction::ViewerFit);
+        assert_eq!(app.viewport, ImageViewport::default());
+        let close = app
+            .hits
+            .regions
+            .iter()
+            .find_map(|(r, a)| matches!(a, HitAction::ViewerClose).then_some(*r))
+            .unwrap();
+        click(&mut app, close.x, close.y);
+        assert!(!app.expanded);
+        assert!(app.preview_image.is_some());
+        click(&mut app, 4, 23);
+        assert!(app.expanded);
+        click(&mut app, 4, 23);
+        assert!(!app.expanded);
+        app.stop().await;
+        backend.shutdown().await;
+    }
+    #[tokio::test]
+    async fn viewer_closes_on_modal_help_source_stop_and_narrow_layout_without_resizing_remote() {
+        let (_directory, backend, mut app) = test_app().await;
+        let source = seed_frame(&mut app);
+        let size = app.layout.terminal_size();
+        app.toggle_viewer();
+        assert!(app.expanded);
+        assert_eq!(app.layout.terminal_size(), size);
+        app.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(!app.expanded);
+        app.toggle_viewer();
+        app.show_modal(Modal::Host(HostForm::new(None)));
+        assert!(!app.expanded);
+        assert!(app.drag.is_none());
+        assert!(Arc::ptr_eq(&source, app.source_frame.as_ref().unwrap()));
+        app.dismiss_modal();
+        app.toggle_viewer();
+        app.navigate(Page::Help);
+        assert!(!app.expanded);
+        assert!(app.source_frame.is_some());
+        app.navigate(Page::Terminal);
+        app.toggle_viewer();
+        app.invalidate_preview();
+        assert!(!app.expanded);
+        assert!(app.source_frame.is_none());
+        assert!(app.preview_image.is_none());
+        seed_frame(&mut app);
+        app.layout = WorkspaceLayout::new(Rect::new(0, 0, 50, 12), Focus::Preview);
+        app.toggle_viewer();
+        assert!(!app.expanded);
+        assert!(app.status.contains("放大"));
+        app.stop().await;
+        backend.shutdown().await;
+    }
+    #[tokio::test]
+    async fn native_damage_tracks_visibility_geometry_and_source_without_clearing_focus() {
+        let (_directory, backend, mut app) = test_app().await;
+        seed_frame(&mut app);
+        app.image_mode = ImageMode::Sixel {
+            cell_width: 8,
+            cell_height: 16,
+        };
+        app.image_damage = false;
+        app.hit(HitAction::Focus(Focus::Terminal));
+        assert!(!app.image_damage);
+        app.toggle_viewer();
+        assert!(std::mem::take(&mut app.image_damage));
+        app.close_viewer();
+        assert!(std::mem::take(&mut app.image_damage));
+        app.show_modal(Modal::Host(HostForm::new(None)));
+        assert!(std::mem::take(&mut app.image_damage));
+        app.invalidate_preview();
+        assert!(app.image_damage);
+        app.stop().await;
+        backend.shutdown().await;
+    }
+    #[test]
+    fn native_cursor_uses_remote_cells_and_respects_hide_history_and_bounds() {
+        let area = Rect::new(41, 3, 50, 20);
+        let mut parser = vt100::Parser::new(20, 50, 100);
+        parser.process(b"abc");
+        assert_eq!(screen_cursor(parser.screen(), area), Some((44, 3)));
+        parser.process("中文".as_bytes());
+        assert_eq!(screen_cursor(parser.screen(), area), Some((48, 3)));
+        parser.process(b"\x1b[5;7H");
+        assert_eq!(screen_cursor(parser.screen(), area), Some((47, 7)));
+        assert_eq!(screen_cursor(parser.screen(), Rect::new(0, 0, 6, 4)), None);
+        parser.process(b"\x1b[?25l");
+        assert_eq!(screen_cursor(parser.screen(), area), None);
+        parser.process(b"\x1b[?25h");
+        for _ in 0..30 {
+            parser.process(b"line\r\n");
+        }
+        parser.screen_mut().set_scrollback(3);
+        assert_eq!(screen_cursor(parser.screen(), area), None);
+    }
+    #[test]
+    fn form_caret_uses_visible_unicode_or_mask_cells_and_stays_inside_field() {
+        let field = Field::new("名稱", "ab中文".into(), false);
+        assert_eq!(
+            field_cursor(&field, Rect::new(5, 8, 20, 3), true),
+            Some((12, 9))
+        );
+        let masked = Field::new("密碼", "ab中文".into(), true);
+        assert_eq!(
+            field_cursor(&masked, Rect::new(5, 8, 20, 3), true),
+            Some((10, 9))
+        );
+        assert_eq!(
+            field_cursor(&field, Rect::new(5, 8, 10, 1), false),
+            Some((14, 8))
+        );
+        assert_eq!(field_cursor(&field, Rect::new(5, 8, 2, 3), true), None);
+        assert_eq!(field_cursor(&field, Rect::new(5, 8, 0, 1), false), None);
     }
 }

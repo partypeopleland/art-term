@@ -39,6 +39,10 @@ pub(crate) struct VaultPaths {
 }
 
 impl VaultPaths {
+    pub(crate) fn display_path(&self) -> PathBuf {
+        self.config.with_file_name("display.toml")
+    }
+
     pub(crate) fn keybindings_path(&self) -> PathBuf {
         self.config.with_file_name("keybindings.toml")
     }

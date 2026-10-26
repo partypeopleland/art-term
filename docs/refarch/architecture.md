@@ -16,7 +16,9 @@ crates/
     src/terminal.rs              VT 終端模型、鍵盤編碼及查詢回覆
     src/ui.rs                    三區工作區、焦點、表單與分頁選擇
     src/layout.rs                共同區域尺寸與窄視窗配置
-    src/preview.rs               直接 MCP 截圖與彩色圖片處理
+    src/preview.rs               直接 MCP 截圖與原始圖片解碼
+    src/image_view.rs            有界圖片渲染與本機平移縮放
+    src/display.rs               圖片模式與實際字格像素設定
     src/tty.rs                   本機終端模式與退出還原
     src/vault.rs                 私有帳號金鑰與儲存鎖
   art-term-gui/
@@ -96,7 +98,9 @@ SSH / local TTY -> text UI -> backend -> shared HostStore / AdminClient
                                            +-> shared configure -> temporary control PTY -> Shell broker
                                            +-> shared instance_restore -> source/generation validation
 
-text UI -> visible preview worker -> shared MCP screenshot -> Halfblocks image
+text UI -> visible capture worker -> shared MCP screenshot -> decoded source frame
+         -> latest render request -> bounded thumbnail + right viewer
+                                  -> Halfblocks / explicit Sixel
 ```
 
 每個本機分頁只有一個 actor 修改連線與 VT 終端模型。背景分頁同樣解析輸出並確認 exact batch；畫面可以略過中間繪製，不能略過遠端輸出。解析器完成一批內容後才呼叫核心 ACK，遇到 Gap 先重設終端狀態。遠端終端查詢的回覆送回來源分頁，不能因使用者切換分頁而送錯工作。
@@ -111,7 +115,9 @@ text UI -> visible preview worker -> shared MCP screenshot -> Halfblocks image
 
 工具狀態以 broker configure／verify 的實際結果確認；預覽以獨立圖片 worker 確認。TUI 的來源前置驗證只初始化 MCP 認證與協定，不要求先截圖或工具清單成功，避免桌面尚未啟動時無法配置工具，也避免工具清單失敗使有效預覽消失。
 
-每個穩定 TabId 各自選擇或停止預覽，只有當前可見分頁擷取。preview worker 沿用核心 `instance_mcp::screenshot`，在背景逐次完成 MCP 請求與有界圖片處理，以保留比例的 Halfblocks 彩色字元呈現 PNG／JPEG。沒有原生圖片協定偵測。切換、停止或錯誤立即清圖；TabId、generation、Screen id／revision 與區域尺寸共同拒絕晚到圖片。最多一個擷取與一個圖片處理工作，取消時等待既有請求正常清理，不累積佇列。
+每個穩定 TabId 各自選擇或停止預覽，只有當前可見分頁擷取。capture worker 沿用核心 `instance_mcp::screenshot`，依序完成請求與有界解碼，發布帶 sequence 的原始圖片。來源身分包含 TabId、generation、Screen id／revision，不包含焦點或區域尺寸。獨立 render worker 由原圖裁切、縮放，最多準備縮圖與右側展開圖兩個有界表面；身分再包含完整區域及 viewport，拒絕舊來源、舊圖序與舊幾何結果。每個 worker 只保留最新待處理要求並等待既有工作完成，不使用無限佇列或取消後脫離的工作。
+
+UI 持有同一來源的最新圖片與本機 viewport，切焦點與平移縮放不清除來源，也不影響遠端 PTY 尺寸或送出輸入。來源切換、停止與錯誤清圖；表單與說明遮罩不顯示圖片。預設 Halfblocks 保留彩色字格相容性；明確設定的 Sixel 以已知字格像素處理原生圖片，不向 stdin 發送圖片能力／字格像素查詢，也不修改 multiplexer。原生表面消失、換來源、改幾何與退出時清除圖片；繪製後單獨定位實體游標，避免以畫出的游標代替輸入法插入點。
 
 ## 受控端提供固定介面
 
