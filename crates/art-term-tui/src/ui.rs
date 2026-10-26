@@ -5,8 +5,8 @@ use crate::{
         Backend, DesktopRequest, DesktopState, HostEdit, HostSelection, ImportView, OpenShell,
         ProfileView, ScreenEdit, ScreenSelection, ShellListView, ShellView, ToolReadiness,
     },
-    display::DisplaySelection,
-    image_view::{ImageViewport, RenderRequest, RenderWorker, SurfacePlan},
+    display::{DisplayPreferences, DisplaySelection, TerminalProbe},
+    image_view::{ImageViewport, PreparedSurfaces, RenderRequest, RenderWorker, SurfacePlan},
     keybindings::{BindingAction, Bindings},
     layout::{Focus, WorkspaceLayout},
     preview::{CapturedFrame, PreviewStatus, PreviewTarget, PreviewWorker},
@@ -33,7 +33,7 @@ use std::{
     future::Future,
     path::PathBuf,
     sync::Arc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::task::JoinHandle;
 use tui_term::widget::{Cursor, PseudoTerminal};
@@ -355,6 +355,7 @@ struct App {
     source_frame: Option<Arc<CapturedFrame>>,
     renderer: Option<RenderWorker>,
     render_request: Option<(u64, SurfacePlan)>,
+    last_rendered_sequence: Option<u64>,
     expanded_image: Option<Protocol>,
     display: DisplaySelection,
     expanded: bool,
@@ -415,6 +416,7 @@ impl App {
             source_frame: None,
             renderer: pixels.map(RenderWorker::start),
             render_request: None,
+            last_rendered_sequence: None,
             expanded_image: None,
             display,
             expanded: false,
@@ -445,6 +447,21 @@ impl App {
             quit: false,
         }
     }
+    async fn set_display(&mut self, display: DisplaySelection) {
+        let pixels = display.pixels();
+        if self.display.pixels() != pixels {
+            self.invalidate_preview();
+            if let Some(worker) = self.preview.take() {
+                worker.stop().await;
+            }
+            if let Some(renderer) = self.renderer.take() {
+                renderer.stop().await;
+            }
+            self.preview = pixels.map(|_| PreviewWorker::start(self.backend.clone()));
+            self.renderer = pixels.map(RenderWorker::start);
+        }
+        self.display = display;
+    }
     fn job(&mut self, future: impl Future<Output = JobResult> + Send + 'static) {
         if self.pending.is_some() {
             self.status = "操作進行中，請稍候。終端分頁仍可切換與輸入。".into();
@@ -463,6 +480,7 @@ impl App {
     fn invalidate_preview(&mut self) {
         self.generation = self.generation.wrapping_add(1);
         self.preview_target = None;
+        self.last_rendered_sequence = None;
         self.close_viewer();
         self.damage_images();
         self.source_frame = None;
@@ -1796,24 +1814,37 @@ impl App {
             .as_mut()
             .and_then(|worker| worker.take_latest())
         {
-            if self.preview_target.as_ref() == Some(&prepared.target)
-                && self.render_request.as_ref() == Some(&(prepared.sequence, prepared.plan))
-            {
-                self.preview_image = prepared.thumbnail;
-                self.expanded_image = prepared.expanded;
-                if let Some(error) = prepared.error {
-                    self.close_viewer();
-                    self.damage_images();
-                    self.source_frame = None;
-                    self.preview_image = None;
-                    self.render_request = None;
-                    self.preview_status = Some(PreviewStatus::Failed(error));
-                    if let Some(renderer) = &mut self.renderer {
-                        renderer.set_request(None);
-                    }
-                    self.status = error.to_string();
-                }
+            self.apply_surfaces(prepared);
+        }
+    }
+    fn apply_surfaces(&mut self, prepared: PreparedSurfaces) {
+        if self.preview_target.as_ref() != Some(&prepared.target)
+            || !self
+                .render_request
+                .as_ref()
+                .is_some_and(|(sequence, plan)| {
+                    prepared.sequence <= *sequence && prepared.plan == *plan
+                })
+            || self
+                .last_rendered_sequence
+                .is_some_and(|sequence| prepared.sequence < sequence)
+        {
+            return;
+        }
+        self.last_rendered_sequence = Some(prepared.sequence);
+        self.preview_image = prepared.thumbnail;
+        self.expanded_image = prepared.expanded;
+        if let Some(error) = prepared.error {
+            self.close_viewer();
+            self.damage_images();
+            self.source_frame = None;
+            self.preview_image = None;
+            self.render_request = None;
+            self.preview_status = Some(PreviewStatus::Failed(error));
+            if let Some(renderer) = &mut self.renderer {
+                renderer.set_request(None);
             }
+            self.status = error.to_string();
         }
     }
     async fn stop(&mut self) {
@@ -2128,7 +2159,7 @@ fn draw(app: &App, frame: &mut Frame) -> HitMap {
             Line::from(
                 "點擊左下桌面圖片切換右側預覽；拖曳平移、滾輪縮放、[Fit] 還原、[X] 或 Esc 關閉。",
             ),
-            Line::from("本地預覽僅使用原生 Sixel 圖片；SSH 僅停預覽，桌面工具仍可使用。"),
+            Line::from("本機與 SSH 都偵測 Sixel 與實際像素；失敗只停預覽，桌面工具仍可使用。"),
             Line::from("display.toml 的舊 compatible 值視為 auto，不再使用字格圖片。"),
             Line::from(format!(
                 "快捷鍵可在 keybindings.toml 自訂；目前前綴 {}。",
@@ -2677,19 +2708,28 @@ pub(crate) async fn run(
     backend: Backend,
     startup_signals: crate::tty::StartupSignals,
     bindings: Bindings,
-    display: DisplaySelection,
+    preferences: Result<DisplayPreferences, String>,
 ) -> anyhow::Result<()> {
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     let mut interrupt = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())?;
     startup_signals.disarm();
-    let mut tty = Tty::enter_with_native_images(display.pixels().is_some())?;
+    let mut tty = Tty::enter_with_native_images(false)?;
     let mut events = EventStream::new();
+    let mut probe = TerminalProbe::new(preferences, Instant::now());
     let mut tick = tokio::time::interval(Duration::from_millis(40));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    let mut app = App::with_display(backend, bindings, display);
+    let mut app = App::with_display(backend, bindings, probe.initial_selection());
+    if let Some(selection) = probe.write_queries(tty.terminal.backend_mut()) {
+        app.set_display(selection).await;
+    }
     app.profiles();
     let result = async {
         while !app.quit {
+            if let Some(selection) = probe.expire(Instant::now()) {
+                let native = selection.pixels().is_some();
+                app.set_display(selection).await;
+                tty.set_native_images(native);
+            }
             app.complete().await;
             tty.terminal.autoresize()?;
             app.resize(tty.terminal.get_frame().area());
@@ -2707,6 +2747,13 @@ pub(crate) async fn run(
                     Some(Ok(Event::Paste(text))) => app.paste(text),
                     Some(Ok(Event::Mouse(event))) => app.mouse(event),
                     Some(Ok(Event::Resize(_, _))) => app.hits=HitMap::default(),
+                    Some(Ok(Event::TerminalResponse(reply))) => {
+                        if let Some(selection) = probe.observe(reply, Instant::now()) {
+                            let native = selection.pixels().is_some();
+                            app.set_display(selection).await;
+                            tty.set_native_images(native);
+                        }
+                    },
                     Some(Err(error)) => return Err(anyhow::Error::from(error)),
                     None => break,
                     _ => (),
@@ -3203,8 +3250,7 @@ mod tests {
     async fn unavailable_native_preview_has_no_workers_and_keeps_screen_controls_accessible() {
         let (_directory, backend, mut previous) = test_app().await;
         previous.stop().await;
-        let notice =
-            "此 SSH 工作階段僅停用桌面預覽；原生預覽限本地執行 art-term。桌面工具仍可使用。";
+        let notice = "原生桌面預覽未啟用；桌面工具仍可使用。終端未宣告支援 Sixel。";
         let mut app = App::with_display(
             backend.clone(),
             Bindings::default(),
@@ -3219,9 +3265,127 @@ mod tests {
         assert_eq!(app.status, notice);
         let text: String = draw_without_update(&mut app).split_whitespace().collect();
         assert!(text.contains("桌面工具仍可使用"));
-        assert!(text.contains("SSH工作階段僅停用桌面預覽"));
+        assert!(text.contains("終端未宣告支援Sixel"));
         app.local(LocalCommand::Screens);
         assert!(matches!(app.modal, Some(Modal::Screens { .. })));
+        app.stop().await;
+        backend.shutdown().await;
+    }
+    #[tokio::test]
+    async fn completing_native_probe_preserves_screen_selection_ui_and_existing_workers() {
+        let (_directory, backend, mut previous) = test_app().await;
+        previous.stop().await;
+        let mut app = App::with_display(
+            backend.clone(),
+            Bindings::default(),
+            DisplaySelection::Unavailable("正在偵測原生圖片能力".into()),
+        );
+        app.local(LocalCommand::Screens);
+        assert!(matches!(app.modal, Some(Modal::Screens { .. })));
+        app.set_display(DisplaySelection::Available(
+            CellPixels::new(10, 20).unwrap(),
+        ))
+        .await;
+        assert!(app.preview.is_some());
+        assert!(app.renderer.is_some());
+        assert!(matches!(app.modal, Some(Modal::Screens { .. })));
+        app.modal = None;
+        let original = seed_frame(&mut app);
+        let generation = app.generation;
+        app.set_display(DisplaySelection::Available(
+            CellPixels::new(10, 20).unwrap(),
+        ))
+        .await;
+        assert_eq!(app.generation, generation);
+        assert!(Arc::ptr_eq(app.source_frame.as_ref().unwrap(), &original));
+        app.set_display(DisplaySelection::Unavailable(
+            "偵測失敗；桌面工具仍可使用".into(),
+        ))
+        .await;
+        assert!(app.preview.is_none());
+        assert!(app.renderer.is_none());
+        assert!(app.source_frame.is_none());
+        app.local(LocalCommand::Screens);
+        assert!(matches!(app.modal, Some(Modal::Screens { .. })));
+        app.stop().await;
+        backend.shutdown().await;
+    }
+    fn prepared_frame(app: &App, sequence: u64, color: [u8; 3]) -> PreparedSurfaces {
+        let plan = app.render_request.as_ref().unwrap().1.clone();
+        let thumbnail = Protocol::Sixel(
+            ratatui_image::protocol::sixel::Sixel::new(
+                image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+                    6,
+                    6,
+                    image::Rgb(color),
+                )),
+                plan.thumbnail.as_size(),
+                false,
+            )
+            .unwrap(),
+        );
+        PreparedSurfaces {
+            target: app.preview_target.clone().unwrap(),
+            sequence,
+            plan,
+            thumbnail: Some(thumbnail),
+            expanded: None,
+            error: None,
+        }
+    }
+    fn thumbnail_bytes(app: &App) -> &str {
+        let Some(Protocol::Sixel(image)) = &app.preview_image else {
+            panic!("native thumbnail missing");
+        };
+        &image.data
+    }
+    #[tokio::test]
+    async fn completed_frames_stay_monotonic_while_capture_and_presentation_advance() {
+        let (_directory, backend, mut app) = test_app().await;
+        seed_frame(&mut app);
+        let plan = app.surface_plan();
+        app.render_request = Some((10, plan.clone()));
+        app.apply_surfaces(prepared_frame(&app, 8, [255, 0, 0]));
+        assert_eq!(app.last_rendered_sequence, Some(8));
+        let latest = thumbnail_bytes(&app).to_owned();
+        app.apply_surfaces(prepared_frame(&app, 7, [0, 255, 0]));
+        assert_eq!(thumbnail_bytes(&app), latest);
+        assert_eq!(app.last_rendered_sequence, Some(8));
+
+        let mut invalid = prepared_frame(&app, 9, [0, 255, 0]);
+        invalid.target.generation += 1;
+        app.apply_surfaces(invalid);
+        let mut invalid = prepared_frame(&app, 9, [0, 255, 0]);
+        invalid.plan.thumbnail.x += 1;
+        app.apply_surfaces(invalid);
+        app.apply_surfaces(prepared_frame(&app, 11, [0, 255, 0]));
+        assert_eq!(thumbnail_bytes(&app), latest);
+        assert_eq!(app.last_rendered_sequence, Some(8));
+
+        let mut changed = plan;
+        changed.thumbnail.x += 1;
+        app.render_request = Some((10, changed));
+        app.apply_surfaces(prepared_frame(&app, 7, [0, 255, 0]));
+        assert_eq!(thumbnail_bytes(&app), latest);
+        app.apply_surfaces(prepared_frame(&app, 8, [0, 255, 0]));
+        assert_ne!(thumbnail_bytes(&app), latest);
+        assert_eq!(app.last_rendered_sequence, Some(8));
+        app.apply_surfaces(prepared_frame(&app, 9, [0, 0, 255]));
+        assert_eq!(app.last_rendered_sequence, Some(9));
+
+        let mut old_error = prepared_frame(&app, 8, [0, 0, 0]);
+        old_error.error = Some(crate::preview::PreviewError::InvalidImage);
+        app.apply_surfaces(old_error);
+        assert!(app.source_frame.is_some());
+        assert!(app.preview_image.is_some());
+        let mut current_error = prepared_frame(&app, 9, [0, 0, 0]);
+        current_error.error = Some(crate::preview::PreviewError::InvalidImage);
+        app.apply_surfaces(current_error);
+        assert!(app.source_frame.is_none());
+        assert!(app.preview_image.is_none());
+        assert_eq!(app.last_rendered_sequence, Some(9));
+        app.invalidate_preview();
+        assert_eq!(app.last_rendered_sequence, None);
         app.stop().await;
         backend.shutdown().await;
     }

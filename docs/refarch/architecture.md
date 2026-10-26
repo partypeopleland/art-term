@@ -98,6 +98,9 @@ SSH / local TTY -> text UI -> backend -> shared HostStore / AdminClient
                                            +-> shared configure -> temporary control PTY -> Shell broker
                                            +-> shared instance_restore -> source/generation validation
 
+TTY -> one EventStream -> terminal reports -> one bounded image probe
+                       -> key/mouse/paste -> existing UI input handlers
+
 text UI -> visible capture worker -> shared MCP screenshot -> decoded source frame
          -> latest render request -> bounded thumbnail + right viewer
                                   -> native Sixel only
@@ -115,9 +118,9 @@ text UI -> visible capture worker -> shared MCP screenshot -> decoded source fra
 
 工具狀態以 broker configure／verify 的實際結果確認；預覽以獨立圖片 worker 確認。TUI 的來源前置驗證只初始化 MCP 認證與協定，不要求先截圖或工具清單成功，避免桌面尚未啟動時無法配置工具，也避免工具清單失敗使有效預覽消失。
 
-每個穩定 TabId 各自選擇或停止預覽，只有當前可見分頁擷取。capture worker 沿用核心 `instance_mcp::screenshot`，依序完成請求與有界解碼，發布帶 sequence 的原始圖片。來源身分包含 TabId、generation、Screen id／revision，不包含焦點或區域尺寸。獨立 render worker 由原圖裁切、縮放，最多準備縮圖與右側展開圖兩個有界表面；身分再包含完整區域及 viewport，拒絕舊來源、舊圖序與舊幾何結果。每個 worker 只保留最新待處理要求並等待既有工作完成，不使用無限佇列或取消後脫離的工作。
+每個穩定 TabId 各自選擇或停止預覽，只有當前可見分頁擷取。capture worker 沿用核心 `instance_mcp::screenshot`，依序完成請求與有界解碼，發布帶 sequence 的原始圖片。來源身分包含 TabId、generation、Screen id／revision，不包含焦點或區域尺寸。獨立 render worker 由原圖裁切、縮放，最多準備縮圖與右側展開圖兩個有界表面；身分再包含完整區域及 viewport，拒絕舊來源與舊幾何結果。同來源、同幾何的已完成圖可落後於最新擷取序號，但畫面只接受不低於已顯示序號的結果，避免慢速大圖因持續取圖而永遠無法發布。每個 worker 只保留最新待處理要求並等待既有工作完成，不使用無限佇列或取消後脫離的工作。
 
-UI 持有同一來源的最新圖片與本機 viewport，切焦點與平移縮放不清除來源，也不影響遠端 PTY 尺寸或送出輸入。來源切換、停止與錯誤清圖；表單與說明遮罩不顯示圖片。display 邊界以 Available／Unavailable 決定本機原生預覽；只有已驗證的字格像素能建立 Sixel renderer，沒有字格圖片備援。SSH、multiplexer、Linux 主控台或顯示設定失敗只停用預覽，不建立擷取與渲染 worker，既有 desktop broker 配置路徑照常執行。Sixel 以已知字格像素處理原生圖片，不向 stdin 發送圖片能力／字格像素查詢，也不修改 multiplexer。原生表面消失、換來源、改幾何與退出時清除圖片；繪製後單獨定位實體游標，避免以畫出的游標代替輸入法插入點。
+UI 持有同一來源的最新圖片與本機 viewport，切焦點與平移縮放不清除來源，也不影響遠端 PTY 尺寸或送出輸入。來源切換、停止與錯誤清圖；表單與說明遮罩不顯示圖片。display 邊界載入偏好，再由 UI 在 raw mode 與唯一 EventStream 建立後送出一次查詢。TerminalProbe 以固定截止時間收集實際 DA1 Sixel 宣告與像素回覆，產生 Available／Unavailable；一般輸入仍立即交給原有處理器。只有有效的 CellPixels 能建立 Sixel renderer，沒有字格圖片備援。晚到終端回覆保持為獨立事件並被忽略，不變成工作輸入。偵測失敗或設定錯誤不建立擷取與渲染 worker，既有 desktop broker 配置路徑照常執行。SSH 與終端品牌不決定能力，不使用系統 ioctl 的像素欄位，也不修改 multiplexer。原生表面消失、換來源、改幾何與退出時清除圖片；繪製後單獨定位實體游標，避免以畫出的游標代替輸入法插入點。
 
 ## 受控端提供固定介面
 
@@ -242,3 +245,5 @@ Android adapter 處理觸控、輸入法組字、快速鍵與背景生命週期�
 ## 附錄：實作與參考
 
 [GUI 註冊與 ACL 入口](../../crates/art-term-gui/src/lib.rs)、[前端控制器](../../apps/client/src/shared/state/controller.ts)、[Rust openab 核心](../../crates/art-term-core/src/openab/mod.rs)。
+
+本機終端事件使用保留上游輸入路徑的 [Crossterm 查詢擴充](../../vendor/crossterm/ART-TERM-PATCH.md)。原始來源與修改清單一同保存，避免另開 stdin reader 或在偵測結束時遺失部分輸入。

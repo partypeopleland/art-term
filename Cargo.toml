@@ -1,4 +1,5 @@
 [workspace]
+exclude = ["vendor/crossterm"]
 resolver = "2"
 members = ["crates/art-term-core", "crates/art-term-gui", "crates/art-term-tui", "crates/tauri-plugin-mobile-vault", "crates/tauri-plugin-mobile-voice", "crates/tauri-plugin-mobile-history"]
 
@@ -13,3 +14,6 @@ serde_json = "1"
 tokio-tungstenite = "0.24"
 sha2 = "0.10"
 anyhow = "1"
+
+[patch.crates-io]
+crossterm = { path = "vendor/crossterm" }

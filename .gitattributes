@@ -1,1 +1,6 @@
 *.sh text eol=lf
+
+# Preserve upstream bytes so vendor provenance hashes remain verifiable.
+vendor/crossterm/** -text whitespace=cr-at-eol
+vendor/crossterm/README.md whitespace=cr-at-eol,-blank-at-eol
+vendor/crossterm/examples/README.md whitespace=cr-at-eol,-blank-at-eol

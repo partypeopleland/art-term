@@ -94,6 +94,10 @@ fn restore() {
 }
 
 impl Tty {
+    pub(crate) fn set_native_images(&mut self, native: bool) {
+        NATIVE_IMAGES.store(native, Ordering::SeqCst);
+    }
+
     pub(crate) fn enter_with_native_images(native: bool) -> io::Result<Self> {
         NATIVE_IMAGES.store(native, Ordering::SeqCst);
         PANIC_HOOK.call_once(|| {

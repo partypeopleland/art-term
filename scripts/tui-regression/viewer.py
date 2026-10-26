@@ -115,10 +115,11 @@ def native_probe(binary, output, mode="sixel"):
             app.settle(.3)
             cleared(lambda: app.prefix("q"), "exit")
             app.finish()
-            assert not re.search(rb"\x1b\[[?>]?[0-9;]*[cn]|\x1b\[(?:14|16|18)t|\x1b_G", app.raw), "stdin cursor/image capability/pixel query emitted"
+            assert app.probe_queries == ["c", "16t", "14t", "18t"], app.probe_queries
+            assert b"\x1b[6n" not in app.raw and b"\x1b_G" not in app.raw, "unexpected cursor/Kitty query"
             assert b"allow-passthrough" not in app.raw
             assert settings.read_text() == config
-            result["checks"].append({"id": "T-IMAGE-02", "result": "PASS", "description": "Actual PTY Sixel RGB raster decoded within bounds; original colors; explicit config preserved; X/modal/resize/exit erase; no stdin cursor/image capability/pixel query"})
+            result["checks"].append({"id": "T-IMAGE-02", "result": "PASS", "description": "Actual PTY Sixel RGB raster decoded within bounds; original colors; explicit config preserved; X/modal/resize/exit erase; one bounded native capability/pixel probe and no cursor query"})
             app.save(output, "native-protocol")
             print("PASS T-IMAGE-02 actual Sixel protocol and cleanup (client rendering NOT_RUN)", flush=True)
         except Exception:
@@ -158,64 +159,89 @@ def detailed_png():
 
 
 def policy_probe(binary, output):
-    result = {"binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "checks": [], "mode": "preview-policy"}
-    runtime = app = mcp = None
-    with tempfile.TemporaryDirectory(prefix="art-term-preview-policy-") as directory:
+    result = {"binary_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "checks": [], "mode": "terminal-detection"}
+    app = runtime = mcp = None
+    with tempfile.TemporaryDirectory(prefix="art-term-preview-detection-") as directory:
         root = Path(directory)
         fixture = root / "fixture"; fixture.mkdir(mode=0o700)
+        no_pixels = {"16t": None, "14t": None, "18t": None}
         cases = [
-            ("SSH_CONNECTION", {"SSH_CONNECTION": ""}, "image_mode='sixel'\ncell_width=8\ncell_height=16\n", (8, 16), "SSH"),
-            ("SSH_CLIENT", {"SSH_CLIENT": "fixture"}, "image_mode='auto'\n", (8, 16), "SSH"),
-            ("SSH_TTY", {"SSH_TTY": "/dev/pts/fixture"}, "image_mode='compatible'\n", (8, 16), "SSH"),
-            ("tmux", {"TMUX": "fixture"}, "image_mode='sixel'\n", (8, 16), "tmux"),
-            ("screen", {"STY": "fixture"}, "image_mode='auto'\n", (8, 16), "screen"),
-            ("linux", {"TERM": "linux"}, "image_mode='sixel'\n", (8, 16), "主控台"),
-            ("unknown-local", {"TERM": "xterm-256color"}, "image_mode='auto'\n", (8, 16), "未確認"),
-            ("missing-pixels", {}, "image_mode='auto'\n", (0, 0), "像素"),
-            ("partial-pixels", {}, "image_mode='sixel'\ncell_width=8\n", (8, 16), "同時"),
-            ("invalid-settings", {}, "image_mode='unknown'\n", (8, 16), "設定"),
+            ("SSH-supported", {"SSH_CONNECTION": "fixture"}, "auto", {}, True),
+            ("SSH-client-supported", {"SSH_CLIENT": "fixture"}, "auto", {}, True),
+            ("SSH-legacy-supported", {"SSH_TTY": "/dev/pts/fixture"}, "compatible", {}, True),
+            ("generic-terminal-supported", {"TERM": "xterm-256color", "XTERM_VERSION": None}, "auto", {}, True),
+            ("negative-da", {"SSH_CONNECTION": "fixture"}, "sixel", {"c": b"\x1b[?61;6c"}, False),
+            ("class-is-not-capability", {}, "auto", {"c": b"\x1b[?4c"}, False),
+            ("timeout-no-da", {}, "auto", {"c": None}, False),
+            ("timeout-no-replies", {}, "auto", {name: None for name in ("c", "16t", "14t", "18t")}, False),
+            ("late-partial-da", {"SSH_TTY": "fixture"}, "auto", {"c": [(.2, b"\x1b[?61;"), (1.5, b"4c")]}, False),
+            ("missing-pixels", {}, "auto", no_pixels, False),
+            ("zero-pixels", {}, "auto", {**no_pixels, "16t": b"\x1b[6;0;0t"}, False),
+            ("area-fallback", {}, "auto", {"16t": None}, True),
+            ("inexact-area", {}, "auto", {"16t": None, "14t": b"\x1b[4;577;960t"}, False),
+            ("invalid-settings", {}, "unknown", {}, False),
         ]
         try:
             runtime = driver.Runtime(fixture)
             mcp = driver.McpFixture("A")
-            for index, (name, env, content, pixels, notice) in enumerate(cases):
+            for index, (name, env, mode, reports, supported) in enumerate(cases):
                 home = root / ("home-" + name); home.mkdir(mode=0o700)
                 settings = home / "config/art-term-tui/display.toml"
                 settings.parent.mkdir(parents=True, mode=0o700)
+                content = f"image_mode='{mode}'\n"
                 settings.write_text(content); settings.chmod(0o600)
-                app = driver.Terminal(binary, home, runtime.ca, env_overrides=env, cell_pixels=pixels)
+                app = driver.Terminal(binary, home, runtime.ca, env_overrides=env,
+                                      terminal_reports=reports, tty_pixels=(640, 480))
                 app.start()
-                app.wait(lambda: notice in app.text() and "桌面工具仍可使用" in "".join(app.text().replace("│", "").split()), "optional preview notice " + name, timeout=5)
+                if mode != "unknown":
+                    app.wait(lambda: len(app.probe_queries) == 4, "actual probe queries " + name, timeout=4)
+                    assert app.probe_queries == ["c", "16t", "14t", "18t"], app.probe_queries
+                if supported:
+                    app.settle(.15)
+                    app.wait(lambda: "正在偵測" not in app.text() and "未啟用" not in app.text(), "positive terminal detection " + name, timeout=4)
+                    assert "正在偵測" not in app.text() and "未啟用" not in app.text()
+                else:
+                    app.wait(lambda: "未啟用" in app.text() and "桌面工具仍可使用" in "".join(app.text().replace("│", "").split()), "unavailable preview notice " + name, timeout=4)
+                    if name == "late-partial-da":
+                        app.settle(1)
+                        assert "未啟用" in app.text(), "late DA changed closed probe result"
+                    assert not app.sixels
                 assert settings.read_text() == content, "existing display file changed"
-                assert not app.sixels
-                if index == 0:
+                if index in (0, 4):
                     app.click_text("New Host"); app.wait_text("HTTPS Runtime URL")
-                    app.send("SSH policy fixture\t" + runtime.origin + "\t" + runtime.credential); app.send(b"\x13")
+                    app.send("SSH detection fixture\t" + runtime.origin + "\t" + runtime.credential); app.send(b"\x13")
                     app.wait(lambda: "HTTPS Runtime URL" not in app.text(), "Host saved"); app.idle()
                     app.action("New Screen"); app.wait_text("新增 Screen")
                     app.send("SSH desktop\t" + mcp.url + "\t" + mcp.token); app.send(b"\x13")
                     app.wait(lambda: "新增 Screen" not in app.text(), "Screen saved"); app.idle()
                     app.click_text("New Shell", (0, 1, 40, 24)); app.wait_text("Live")
-                    app.bind_screen(1); app.idle(); app.settle(.5)
-                    assert not mcp.capture_started.is_set(), "unavailable preview requested screenshot"
-                    assert not app.sixels, "unavailable preview emitted image"
+                    captures = len([event for event in mcp.events if event.get("method") == "tools/call"])
+                    app.bind_screen(1); app.idle()
+                    if supported:
+                        app.wait(lambda: bool(app.sixels), "supported SSH native image")
+                        raster = __import__("native_images").decode_sixel(app.sixels[-1])
+                        assert raster.width == 38 * 8 and raster.height == (9 * 16 // 6 * 6), raster.summary()
+                    else:
+                        app.settle(.4)
+                        assert len([event for event in mcp.events if event.get("method") == "tools/call"]) == captures, "unavailable preview requested screenshot"
+                        assert not app.sixels, "unavailable preview emitted image"
                     app.prefix("t"); app.send("SSH-SHELL-STILL-USABLE")
                     app.wait(lambda: any("SSH-SHELL-STILL-USABLE" in state["input"] for state in runtime.work().values()), "ordinary SSH work input")
-                app.prefix("q"); app.finish(); app.save(output, "policy-" + name)
-                assert not re.search(rb"\x1b\[[?>]?[0-9;]*[cn]|\x1b\[(?:14|16|18)t|\x1b_G", app.raw), "preview refusal emitted terminal query"
+                app.prefix("q"); app.finish(); app.save(output, "detect-" + name)
+                if mode == "unknown": assert not app.probe_queries
+                assert b"\x1b[6n" not in app.raw and b"\x1b_G" not in app.raw
                 app.close(); app = None
-                result["checks"].append({"id": "T-IMAGE-POLICY", "result": "PASS", "description": name + " refuses only preview, preserves settings and TUI"})
-                print("PASS T-IMAGE-POLICY " + name, flush=True)
+                result["checks"].append({"id": "T-IMAGE-DETECT", "result": "PASS", "description": name + (" enables native preview" if supported else " refuses only preview") + ", preserves settings and TUI"})
+                print("PASS T-IMAGE-DETECT " + name, flush=True)
         except Exception:
             result["failure"] = traceback.format_exc(); print(result["failure"], flush=True)
-            if app: app.save(output, "policy-failure")
+            if app: app.save(output, "detection-failure")
         finally:
             if app: app.close()
             if mcp: mcp.close()
             if runtime: runtime.close()
     (output / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
     return int("failure" in result)
-
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)

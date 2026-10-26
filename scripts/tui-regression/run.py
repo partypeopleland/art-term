@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import pty
+import re
 import select
 import signal
 import ssl
@@ -59,8 +60,13 @@ class Screen(pyte.Screen):
 
 
 class Terminal:
-    def __init__(self, binary, home, ca=None, rows=36, columns=120, env_overrides=None, cell_pixels=(8, 16)):
+    def __init__(self, binary, home, ca=None, rows=36, columns=120, env_overrides=None, cell_pixels=(8, 16), terminal_reports=None, tty_pixels=None):
         self.cell_pixels = cell_pixels
+        self.tty_pixels = tty_pixels
+        self.terminal_reports = terminal_reports or {}
+        self.probe_queries = []
+        self._query_scanned = self._query_end = 0
+        self._scheduled_reports = []
         self.master, self.slave = pty.openpty()
         self.original = termios.tcgetattr(self.slave)
         self.screen = Screen(columns, rows)
@@ -89,10 +95,11 @@ class Terminal:
         self.process = subprocess.Popen([str(binary)], stdin=self.slave, stdout=self.slave, stderr=self.slave, env=env, preexec_fn=controlling_terminal, close_fds=True)
 
     def resize(self, rows, columns):
-        fcntl.ioctl(self.master, termios.TIOCSWINSZ, struct.pack("HHHH", rows, columns, columns * self.cell_pixels[0], rows * self.cell_pixels[1]))
+        fcntl.ioctl(self.master, termios.TIOCSWINSZ, struct.pack("HHHH", rows, columns, *(self.tty_pixels or (columns * self.cell_pixels[0], rows * self.cell_pixels[1]))))
         self.screen.resize(rows, columns)
 
     def pump(self, timeout=0.05):
+        self._send_due_reports()
         if select.select([self.master], [], [], timeout)[0]:
             try:
                 data = os.read(self.master, 65536)
@@ -100,8 +107,41 @@ class Terminal:
                 return
             self.raw.extend(data)
             self.images.feed(data)
+            self._answer_probes()
             if b"\x1b[6n" in data:
                 self.send(b"\x1b[1;1R")
+
+    def _send_due_reports(self):
+        now = time.monotonic()
+        due = [entry for entry in self._scheduled_reports if entry[0] <= now]
+        self._scheduled_reports = [entry for entry in self._scheduled_reports if entry[0] > now]
+        for _, data in sorted(due, key=lambda entry: entry[0]):
+            self.send(data)
+
+    def _answer_probes(self):
+        width, height = self.cell_pixels
+        defaults = {
+            "c": b"\x1b[?61;4;6;7c",
+            "16t": f"\x1b[6;{height};{width}t".encode(),
+            "14t": f"\x1b[4;{self.screen.lines * height};{self.screen.columns * width}t".encode(),
+            "18t": f"\x1b[8;{self.screen.lines};{self.screen.columns}t".encode(),
+        }
+        start = max(0, self._query_scanned - 8)
+        for match in re.finditer(rb"\x1b\[(c|16t|14t|18t)", self.raw[start:]):
+            end = start + match.end()
+            if end <= self._query_end:
+                continue
+            self._query_end = end
+            name = match[1].decode()
+            self.probe_queries.append(name)
+            response = self.terminal_reports.get(name, defaults[name])
+            if response is None:
+                continue
+            parts = [(0, response)] if isinstance(response, bytes) else response
+            now = time.monotonic()
+            self._scheduled_reports.extend((now + delay, data) for delay, data in parts)
+        self._query_scanned = len(self.raw)
+        self._send_due_reports()
 
     def text(self):
         return "\n".join(

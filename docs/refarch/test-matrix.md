@@ -29,7 +29,7 @@ ARM64 手機、現場網路／MCP、實際 Codex CLI 與 AI 模型各自需要�
 
 ## Ubuntu TUI 的對應案例
 
-TUI 以獨立的 [TUI 功能回歸](../platforms/tui-regression.md)與 [cases.json](../../scripts/tui-regression/cases.json)對照上述功能。實際 TUI／PTY 的清單、滑鼠、快捷鍵、搬移與歷史測試，另加 TUI → 官方 Runtime → 真 Shell broker → 正式 stdio client → HTTP 工具的完整路徑。圖片顯示、configure 回覆或共用核心單元測試不能取代這條功能驗證。每次來源、執行檔與結果獨立記錄；不把測試存在當成已通過。
+TUI 以獨立的 [TUI 功能回歸](../platforms/tui-regression.md)與 [cases.json](../../scripts/tui-regression/cases.json)對照上述功能。實際 TUI／PTY 的清單、滑鼠、快捷鍵、搬移與歷史測試，另加 TUI → 官方 Runtime → 真 Shell broker → 正式 stdio client → HTTP 工具的完整路徑。圖片顯示、configure 回覆或共用核心單元測試不能取代這條功能驗證。每次來源、執行檔與結果獨立記錄；不把測試存在當成已通過。原生圖片須驗證本機與 SSH 的實際能力回覆、像素優先序、逾時與晚到回覆、分段鍵盤／貼上／滑鼠不遺失，以及真正終端的可見像素。預覽停用時仍須執行正式 broker／stdio 桌面工具呼叫。
 
 ## 既有操作保護（歷史 helper 流程）
 

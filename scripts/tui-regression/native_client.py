@@ -88,7 +88,7 @@ def proxy(binary, control, recording, metadata):
         client, _ = server.accept()
         with client, open(recording, "wb", buffering=0) as record:
             while True:
-                ready, _, _ = select.select([master, client], [], [], .1)
+                ready, _, _ = select.select([master, client, 0], [], [], .1)
                 if master in ready:
                     try:
                         data = os.read(master, 65536)
@@ -98,6 +98,14 @@ def proxy(binary, control, recording, metadata):
                         break
                     record.write(data)
                     os.write(1, data)
+                if 0 in ready:
+                    data = os.read(0, 65536)
+                    if not data:
+                        stop_child(process)
+                        break
+                    with Path(metadata).with_suffix(".input.bin").open("ab") as input_record:
+                        input_record.write(data)
+                    os.write(master, data)
                 if client in ready:
                     data = client.recv(65536)
                     if not data:
@@ -210,7 +218,7 @@ def main():
             env["LD_LIBRARY_PATH"] = args.library_path
         recording, metadata, control = root / "terminal.ansi", output / "terminal.json", root / "input.sock"
         xterm_log = (output / "xterm.log").open("wb")
-        command = [str(args.xterm.resolve()), "-ti", "vt340", "-tn", "vt340", "-geometry", "120x36+0+0", "-b", "0", "-fn", "fixed", "-title", "ArtTermNativeVerify", "-e",
+        command = [str(args.xterm.resolve()), "-ti", "vt340", "-tn", "vt340", "-geometry", "120x36+0+0", "-b", "0", "-fn", "fixed", "-xrm", "XTerm*allowWindowOps: true", "-title", "ArtTermNativeVerify", "-e",
                    sys.executable, str(Path(__file__).resolve()), "--proxy", str(binary), str(control), str(recording), str(metadata)]
         result["xterm_arguments"] = command[:command.index("-e")]
         process = subprocess.Popen(command, env=env, stdout=xterm_log, stderr=xterm_log, start_new_session=True)
@@ -296,6 +304,8 @@ def main():
         terminal = LiveTerminal()
         terminal.start()
         result["terminal"] = json.loads(metadata.read_text())
+        input_record = metadata.with_suffix(".input.bin")
+        result["terminal_response_hex"] = input_record.read_bytes().hex() if input_record.exists() else ""
         rows, columns, width, height = result["terminal"]["winsize"]
         assert (rows, columns) == (36, 120)
         assert width and height and width % columns == 0 and height % rows == 0
@@ -367,6 +377,7 @@ def main():
         (output / "terminal.txt").write_text(terminal.text())
         result["checks"].append({"id": "T-IMAGE-CLIENT", "result": "PASS", "description": "Live TUI paints original native Sixel pixels in real xterm thumbnail and right viewer; X/modal clear the actual painted pixels"})
         result["actual_sixel_client"] = "PASS"
+        result["terminal_response_hex"] = metadata.with_suffix(".input.bin").read_bytes().hex()
         result["result"] = "PASS"
     except Exception:
         result["result"] = "FAIL"

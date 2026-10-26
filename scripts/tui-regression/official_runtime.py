@@ -433,10 +433,11 @@ def main():
             app.finish()
             before_captures = sum(event.get("method") == "tools/call" and event.get("params", {}).get("name") == "screenshot" for service in services for event in service.events)
             app = driver.Terminal(binary, home, gateway.ca, rows=44, columns=150,
-                                  env_overrides={"SSH_CONNECTION": "fixture-ssh-session"})
+                                  env_overrides={"SSH_CONNECTION": "fixture-ssh-session"},
+                                  terminal_reports={"c": b"\x1b[?61;6c"})
             apps.append(app)
             app.start()
-            wait(lambda: "SSH" in app.text() and "桌面工具仍可使用" in "".join(app.text().replace("│", "").split()), "SSH local-only preview notice")
+            wait(lambda: "未啟用" in app.text() and "桌面工具仍可使用" in "".join(app.text().replace("│", "").split()), "SSH terminal without Sixel preview notice")
             click(app, first)
             click(app, "[Yes]")
             wait(lambda: "Tools ready" in app.text(), "SSH reattach restores desktop tools without preview")
@@ -456,7 +457,7 @@ def main():
             assert not app.sixels, "SSH preview emitted native image"
             assert sum(event.get("method") == "tools/call" and event.get("params", {}).get("name") == "screenshot" for service in services for event in service.events) == before_captures, "SSH preview requested screenshot"
             assert two.target() == target_b, "SSH selection affected another Shell"
-            passed("T-CONFIGURE/T-TOOLS/T-IMAGE-POLICY", "SSH disables only local preview; actual Shell stdio discovers target/tools and invokes desktop A without screenshot")
+            passed("T-CONFIGURE/T-TOOLS/T-IMAGE-POLICY", "SSH terminal without Sixel disables only preview; actual Shell stdio discovers target/tools and invokes desktop A without screenshot")
 
             click(app, "[Desktop]")
             click(app, "Clear tools")

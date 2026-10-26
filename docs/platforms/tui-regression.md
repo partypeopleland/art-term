@@ -11,7 +11,7 @@ TUI 的功能移植必須有對應的實際操作測試。依[共同功能矩陣
 | T-TERM | 建立／附加／外部接管、多分頁 Unicode／ANSI／輸入隔離、尺寸、只脫離與遠端刪除分開 | run.py |
 | T-HISTORY | 共用 scroll／follow、閱讀中輸入與 VT 回覆、斷線原 token 恢復、不重播輸入 | run.py |
 | T-SCREEN | Screen CRUD／revision／token、真圖色彩與區域、來源切換、延遲舊圖、錯誤恢復與停止 | run.py、圖片核心／預覽測試 |
-| T-CONFIGURE | TUI 選擇配置正確工作 Shell，無 adapter 不假報 ready；截圖不可用或 SSH 預覽停用時仍能配置及實際呼叫工具 | run.py 負向、official_runtime.py 正向 |
+| T-CONFIGURE | TUI 選擇配置正確工作 Shell，無 adapter 不假報 ready；截圖不可用或 SSH 終端未宣告 Sixel 時仍能配置及實際呼叫工具 | run.py 負向、official_runtime.py 正向 |
 | T-TOOLS | 從該 Shell 裡晚啟動的正式 stdio client 實際探索／呼叫 HTTP 桌面工具，保留原參數及結果 | official_runtime.py |
 | T-TARGET | 兩 Shell A／B 隔離、切換中 A 呼叫仍回 A、舊 expected_target 拒絕且不送 B | official_runtime.py |
 | T-RESTORE | detach／重開後 current／verify 恢復；不重新 configure／clear，不改遠端 generation | official_runtime.py、共用 restore 核心測試 |
@@ -19,7 +19,9 @@ TUI 的功能移植必須有對應的實際操作測試。依[共同功能矩陣
 | T-MOUSE | 分頁切換／關閉、焦點、樹與表單／確認／選單、滾輪、窄視窗取消、本機操作不送工作輸入 | catalog.py、run.py、draw hit-map 測試 |
 | T-VIEWER | 點縮圖展開右側、X／再點收回、拖曳／滾輪／Fit／邊界、裁切原圖與背景輸出；操作不送遠端輸入／resize／額外截圖 | viewer.py |
 | T-INPUT | 中文字寬、遠端與表單的可見實體游標、左側邊框穩定；系統組字另行人工驗證 | viewer.py |
-| T-IMAGE | 慢截圖期間縮圖不閃說明、來源／停止／遮罩／resize 生命周期；原生 Sixel 編碼解碼與畫面邊界，停用時不取圖／不輸出圖片 | viewer.py、image_view／UI 測試 |
+| T-IMAGE | 慢截圖期間縮圖不閃說明、來源／停止／遮罩／resize 生命周期；原生 Sixel 編碼解碼與畫面邊界，停用時不取圖／不輸出圖片；持續取圖快於渲染時仍發布同來源／幾何的單調完成圖 | viewer.py、image_view／UI 測試 |
+| T-IMAGE-DETECT | 本機／SSH 實際 DA 與尺寸回覆、負向／逾時／晚到分段回覆、查詢尺寸優先於系統預設值，舊設定不改寫 | viewer.py --mode policy |
+| T-TERMINAL-REPORTS | 同一 EventStream 的回覆／鍵盤／貼上／滑鼠順序，分段、超長／錯誤回覆、ESC、resize、取消與 EOF 競態 | terminal_events.py |
 | T-IMAGE-CLIENT | 真正本機 XTerm 內執行候選 TUI，檢查縮圖／右側展開的螢幕 RGB、字格內圖片細節與 X／遮罩清圖 | native_client.py |
 | T-TRANSFER | 混合 Host／Screen 加密搬移、錯密碼不改檔、取消、重複略過／取代、重開後認證 | catalog.py、核心 transfer 測試 |
 | T-KEYS | 直接編輯檔案後自訂前導鍵／直接鍵生效、停用舊鍵、錯誤設定指出路徑並保留原檔 | catalog.py、keybindings 測試 |
@@ -43,6 +45,14 @@ official_runtime.py 操作相同 TUI，經已釘選、未修改的官方 Runtime
 
 工具案例先驗證圖片可用但工具清單失敗時仍可預覽且不假報工具 ready；再讓截圖不可用但保留工具服務，驗證 TUI 仍可配置及實際執行工具，再恢復圖片確認預覽恢復。這能防止「先有桌面才能設定開桌面的工具」的循環依賴。連線清單更新、背景請求、分頁關閉與資料 revision 邊界由精確單元測試補強。
 
+EventStream 範例與 Python 驅動直接操作真正的輸入事件流，兩種 Unix backend 分別執行；包含 20 次關閉 PTY 的競態回歸。它不測圖片渲染。
+
+```sh
+cargo build -p art-term-tui --example terminal_events --locked
+python3 scripts/tui-regression/terminal_events.py --binary /absolute/target/debug/examples/terminal_events --output-dir /tmp/art-term-terminal-events-result
+python3 scripts/tui-regression/viewer.py --mode policy --binary /absolute/target/debug/art-term --output-dir /tmp/art-term-detection-result
+```
+
 `native_client.py` 另外需要 Xvfb、支援 Sixel 的 XTerm 390，以及 `requirements-native-client.txt` 的 Python 套件。這些是驗證工具，不是 art-term 的執行依賴。它建立自己的顯示伺服器與終端，執行真正的候選 TUI，從該終端視窗讀取螢幕 RGB，不把解碼的 Sixel 像素當成螢幕截圖。
 
 ```sh
@@ -52,7 +62,7 @@ python3 scripts/tui-regression/native_client.py \
   --output-dir /tmp/art-term-native-client-result
 ```
 
-預設驗證新建 `auto` 設定，記錄實際終端版本、啟動參數、TTY 回報的字格像素及受測 ELF SHA。`--library-path` 可指定隔離驗證套件的函式庫位置。不要以顯示協定測試或其他終端版本的結果代替這項驗證。SSH 停用預覽的產品政策由 viewer／官方 Runtime 案例驗證，不宣稱遠端 SSH 本身不能傳圖片。
+預設驗證新建 `auto` 設定，記錄實際終端版本、啟動參數、終端查詢回覆的字格像素及受測 ELF SHA。`--library-path` 可指定隔離驗證套件的函式庫位置。不要以顯示協定測試或其他終端版本的結果代替這項驗證。本機與 SSH 的支援／不支援／逾時偵測由 viewer 案例驗證；官方 Runtime 另驗證未宣告 Sixel 時工具仍可呼叫。實際 SSH 終端繪圖須獨立記錄，不能用環境標記或模擬回覆代替。
 
 測試程序須在失敗時也關閉自建 PTY／官方 Runtime／tmux／broker／固定 client，移除自建暫存與測試 HOME。結果可保留少量紀錄，勿保存私人憑證或整個建置環境。
 

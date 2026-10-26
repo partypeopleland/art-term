@@ -139,10 +139,16 @@ pub(crate) struct RenderRequest {
     pub plan: SurfacePlan,
 }
 impl RenderRequest {
+    fn same_context(&self, other: &Self) -> bool {
+        self.frame.target == other.frame.target && self.plan == other.plan
+    }
     fn same(&self, other: &Self) -> bool {
-        self.frame.target == other.frame.target
-            && self.frame.sequence == other.frame.sequence
-            && self.plan == other.plan
+        self.same_context(other) && self.frame.sequence == other.frame.sequence
+    }
+    fn accepts(&self, prepared: &PreparedSurfaces) -> bool {
+        self.frame.target == prepared.target
+            && self.plan == prepared.plan
+            && prepared.sequence <= self.frame.sequence
     }
 }
 pub(crate) struct PreparedSurfaces {
@@ -161,6 +167,13 @@ pub(crate) struct RenderWorker {
 }
 impl RenderWorker {
     pub(crate) fn start(mode: CellPixels) -> Self {
+        Self::with_prepare(mode, prepare)
+    }
+    fn with_prepare(
+        mode: CellPixels,
+        prepare: impl Fn(RenderRequest, CellPixels) -> PreparedSurfaces + Send + Sync + 'static,
+    ) -> Self {
+        let prepare = Arc::new(prepare);
         let (request, mut receiver) = watch::channel::<Option<RenderRequest>>(None);
         let latest = Arc::new(Mutex::new(None));
         let output = latest.clone();
@@ -173,12 +186,11 @@ impl RenderWorker {
                     continue;
                 };
                 let active = request.clone();
+                let prepare = prepare.clone();
                 let prepared = tokio::task::spawn_blocking(move || prepare(request, mode)).await;
-                if receiver
-                    .borrow()
-                    .as_ref()
-                    .is_some_and(|current| current.same(&active))
-                {
+                if receiver.borrow().as_ref().is_some_and(|current| {
+                    current.same_context(&active) && active.frame.sequence <= current.frame.sequence
+                }) {
                     let prepared = prepared.unwrap_or_else(|_| PreparedSurfaces {
                         target: active.frame.target.clone(),
                         sequence: active.frame.sequence,
@@ -198,13 +210,15 @@ impl RenderWorker {
         }
     }
     pub(crate) fn set_request(&mut self, request: Option<RenderRequest>) {
-        let same = match (self.request.borrow().as_ref(), request.as_ref()) {
-            (Some(a), Some(b)) => a.same(b),
-            (None, None) => true,
-            _ => false,
+        let (same, same_context) = match (self.request.borrow().as_ref(), request.as_ref()) {
+            (Some(a), Some(b)) => (a.same(b), a.same_context(b)),
+            (None, None) => (true, true),
+            _ => (false, false),
         };
         if !same {
-            *self.latest.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            if !same_context {
+                *self.latest.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            }
             self.request.send_replace(request);
         }
     }
@@ -217,11 +231,7 @@ impl RenderWorker {
         self.request
             .borrow()
             .as_ref()
-            .filter(|current| {
-                current.frame.target == prepared.target
-                    && current.frame.sequence == prepared.sequence
-                    && current.plan == prepared.plan
-            })
+            .filter(|current| current.accepts(&prepared))
             .map(|_| prepared)
     }
     pub(crate) async fn stop(mut self) {
@@ -461,6 +471,124 @@ mod tests {
             .pixels
             .chunks_exact(4)
             .any(|p| p[1] > 240 && p[0] < 15 && p[2] < 15));
+    }
+
+    async fn next_prepared(worker: &mut RenderWorker) -> PreparedSurfaces {
+        tokio::time::timeout(std::time::Duration::from_secs(3), async {
+            loop {
+                if let Some(result) = worker.take_latest() {
+                    return result;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("renderer did not publish")
+    }
+
+    fn gated_worker() -> (
+        RenderWorker,
+        tokio::sync::mpsc::UnboundedReceiver<u64>,
+        std::sync::mpsc::Sender<()>,
+    ) {
+        let (entered, starts) = tokio::sync::mpsc::unbounded_channel();
+        let (release, permits) = std::sync::mpsc::channel();
+        let permits = Mutex::new(permits);
+        let worker = RenderWorker::with_prepare(cell_pixels(), move |request, pixels| {
+            let _ = entered.send(request.frame.sequence);
+            let _ = permits
+                .lock()
+                .unwrap()
+                .recv_timeout(std::time::Duration::from_secs(3));
+            prepare(request, pixels)
+        });
+        (worker, starts, release)
+    }
+
+    async fn next_start(starts: &mut tokio::sync::mpsc::UnboundedReceiver<u64>) -> u64 {
+        tokio::time::timeout(std::time::Duration::from_secs(3), starts.recv())
+            .await
+            .expect("renderer did not start")
+            .expect("renderer stopped")
+    }
+
+    #[tokio::test]
+    async fn slower_preparation_publishes_during_continuous_same_context_capture() {
+        let (mut worker, mut starts, release) = gated_worker();
+        let request = |sequence| RenderRequest {
+            frame: frame(sequence),
+            plan: plan(),
+        };
+        worker.set_request(Some(request(1)));
+        assert_eq!(next_start(&mut starts).await, 1);
+        worker.set_request(Some(request(2)));
+        release.send(()).unwrap();
+        assert_eq!(next_start(&mut starts).await, 2);
+        worker.set_request(Some(request(3)));
+        let first = next_prepared(&mut worker).await;
+        assert_eq!(first.sequence, 1);
+        assert!(first.thumbnail.is_some());
+        release.send(()).unwrap();
+        assert_eq!(next_start(&mut starts).await, 3);
+        assert_eq!(next_prepared(&mut worker).await.sequence, 2);
+        release.send(()).unwrap();
+        assert_eq!(next_prepared(&mut worker).await.sequence, 3);
+        drop(release);
+        worker.stop().await;
+    }
+
+    #[tokio::test]
+    async fn context_change_or_stop_discards_inflight_and_prepared_images() {
+        for change in 0..3 {
+            let (mut worker, mut starts, release) = gated_worker();
+            worker.set_request(Some(RenderRequest {
+                frame: frame(1),
+                plan: plan(),
+            }));
+            assert_eq!(next_start(&mut starts).await, 1);
+            worker.set_request(Some(RenderRequest {
+                frame: frame(2),
+                plan: plan(),
+            }));
+            release.send(()).unwrap();
+            assert_eq!(next_start(&mut starts).await, 2);
+            let next = match change {
+                0 => {
+                    let mut next_frame = frame(3);
+                    Arc::get_mut(&mut next_frame).unwrap().target.generation += 1;
+                    Some(RenderRequest {
+                        frame: next_frame,
+                        plan: plan(),
+                    })
+                }
+                1 => {
+                    let mut next_plan = plan();
+                    next_plan.thumbnail.x += 1;
+                    Some(RenderRequest {
+                        frame: frame(3),
+                        plan: next_plan,
+                    })
+                }
+                _ => None,
+            };
+            worker.set_request(next.clone());
+            assert!(worker.latest.lock().unwrap().is_none());
+            release.send(()).unwrap();
+            if next.is_some() {
+                assert_eq!(next_start(&mut starts).await, 3);
+                assert!(worker.take_latest().is_none());
+                release.send(()).unwrap();
+                let prepared = next_prepared(&mut worker).await;
+                assert_eq!(prepared.sequence, 3);
+                assert_eq!(prepared.target, next.as_ref().unwrap().frame.target);
+                assert_eq!(prepared.plan, next.unwrap().plan);
+                worker.set_request(None);
+                assert!(worker.take_latest().is_none());
+            }
+            drop(release);
+            assert!(worker.take_latest().is_none());
+            worker.stop().await;
+        }
     }
 
     #[tokio::test]

@@ -87,6 +87,16 @@
       "candidate_artifact_check": false
     },
     {
+      "id": "T-IMAGE-DETECT",
+      "runner": "viewer.py",
+      "candidate_artifact_check": false
+    },
+    {
+      "id": "T-TERMINAL-REPORTS",
+      "runner": "terminal_events.py",
+      "candidate_artifact_check": false
+    },
+    {
       "id": "T-RELEASE",
       "runner": null,
       "candidate_artifact_check": true

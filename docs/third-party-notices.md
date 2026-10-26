@@ -19,6 +19,6 @@ Runtime HTTPS／WSS 使用 rustls／ring；uuid 與 zeroize 為 Apache-2.0 OR MI
 
 ## 終端機客戶端
 
-文字介面使用 Ratatui 0.30.2、其 core／widgets／crossterm backend、Crossterm 0.29.0、tui-term 0.3.4 與 vt100 0.16.2，皆為 MIT。圖片呈現使用 ratatui-image 11.1.0，為 MIT；其依賴 icy_sixel 0.5.1 為 MIT OR Apache-2.0。目前 TUI 固定使用 Halfblocks，不啟用原生 Sixel 協定。實際來源版本由 Cargo.lock 鎖定。
+文字介面使用 Ratatui 0.30.2、其 core／widgets／crossterm backend、Crossterm 0.29.0、tui-term 0.3.4 與 vt100 0.16.2，皆為 MIT。圖片呈現使用 ratatui-image 11.1.0，為 MIT；其依賴 icy_sixel 0.5.1 為 MIT OR Apache-2.0。TUI 只使用原生 Sixel。Crossterm 0.29.0 的 MIT 原始碼保存在 `vendor/crossterm`，並有局部終端查詢事件與分段輸入處理修改；上游版本、原始雜湊及修改檔案清單一同保存。實際來源版本由 Cargo.lock 鎖定。
 
 上述新增依賴的完整授權文字從各已下載套件或對應版本的上游來源核對並保存在 `crates/art-term-tui/licenses`，TUI 壓縮套件原樣附帶該目錄。本次新增的 Linux 圖片依賴也隨附各自的 MIT 授權文字；self_cell 選用 Apache-2.0。檔名包含套件版本，對應 Cargo.lock。既有共用核心依賴仍適用原有授權；此段不表示已重新稽核整個相依圖。
