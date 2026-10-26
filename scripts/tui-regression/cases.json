@@ -22,6 +22,11 @@
       "candidate_artifact_check": false
     },
     {
+      "id": "T-WHEEL",
+      "runner": "wheel.py",
+      "candidate_artifact_check": false
+    },
+    {
       "id": "T-SCREEN",
       "runner": "run.py",
       "candidate_artifact_check": false

@@ -1415,11 +1415,16 @@ impl App {
                     self.focus = Focus::Connections;
                     self.page = Page::Hosts;
                     self.move_tree(amount as i16);
-                } else if !self.expanded && contains(self.layout.terminal, event.column, event.row)
+                } else if !self.expanded
+                    && contains(self.layout.terminal_inner, event.column, event.row)
                 {
                     self.focus = Focus::Terminal;
                     self.page = Page::Terminal;
-                    self.send(TabAction::Scroll(amount as i16 * 3));
+                    self.send(TabAction::Wheel(MouseEvent {
+                        column: event.column - self.layout.terminal_inner.x,
+                        row: event.row - self.layout.terminal_inner.y,
+                        ..event
+                    }));
                 }
             }
             _ => (),

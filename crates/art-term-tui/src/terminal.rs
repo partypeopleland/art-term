@@ -1,10 +1,17 @@
 use crate::tab::TerminalSize;
 use art_term_core::openab::session::SessionError;
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind};
 
 const INPUT_LIMIT: usize = 64 * 1024;
 const REPLY_LIMIT: usize = 8192;
 const OSC_LIMIT: usize = 16 * 1024;
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum WheelInput {
+    History(i16),
+    Bytes(Vec<u8>),
+    Ignored,
+}
 
 #[derive(Default)]
 enum OscAdmission {
@@ -188,6 +195,62 @@ impl Terminal {
         Ok(std::mem::take(&mut responses.bytes))
     }
 
+    pub(crate) fn wheel(&self, event: MouseEvent) -> WheelInput {
+        let (button, lines) = match event.kind {
+            MouseEventKind::ScrollUp => (64, -3),
+            MouseEventKind::ScrollDown => (65, 3),
+            _ => return WheelInput::Ignored,
+        };
+        let screen = self.screen();
+        let (rows, columns) = screen.size();
+        if event.row >= rows || event.column >= columns {
+            return WheelInput::Ignored;
+        }
+        match screen.mouse_protocol_mode() {
+            vt100::MouseProtocolMode::None => return WheelInput::History(lines),
+            vt100::MouseProtocolMode::Press => return WheelInput::Ignored,
+            _ => (),
+        }
+        let button = button
+            + 4 * u16::from(event.modifiers.contains(KeyModifiers::SHIFT))
+            + 8 * u16::from(event.modifiers.contains(KeyModifiers::ALT))
+            + 16 * u16::from(event.modifiers.contains(KeyModifiers::CONTROL));
+        let column = event.column + 1;
+        let row = event.row + 1;
+        let bytes = match screen.mouse_protocol_encoding() {
+            vt100::MouseProtocolEncoding::Sgr => {
+                format!("\x1b[<{button};{column};{row}M").into_bytes()
+            }
+            vt100::MouseProtocolEncoding::Default => {
+                if column > 223 || row > 223 {
+                    return WheelInput::Ignored;
+                }
+                vec![
+                    0x1b,
+                    b'[',
+                    b'M',
+                    (button + 32) as u8,
+                    (column + 32) as u8,
+                    (row + 32) as u8,
+                ]
+            }
+            vt100::MouseProtocolEncoding::Utf8 => {
+                let mut bytes = b"\x1b[M".to_vec();
+                for value in [button + 32, column + 32, row + 32] {
+                    let mut encoded = [0; 4];
+                    bytes.extend_from_slice(
+                        char::from_u32(value.into())
+                            .unwrap()
+                            .encode_utf8(&mut encoded)
+                            .as_bytes(),
+                    );
+                }
+                bytes
+            }
+        };
+        WheelInput::Bytes(bytes)
+    }
+
     pub(crate) fn key(&self, key: KeyEvent) -> Result<Option<Vec<u8>>, SessionError> {
         if key.kind == KeyEventKind::Release {
             return Ok(None);
@@ -291,6 +354,107 @@ impl Terminal {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn wheel(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    #[test]
+    fn wheel_uses_current_mouse_mode_and_returns_to_host_history_when_disabled() {
+        let mut terminal = Terminal::new(TerminalSize::new(24, 80));
+        let up = wheel(MouseEventKind::ScrollUp, 13, 7);
+        let down = wheel(MouseEventKind::ScrollDown, 13, 7);
+        assert_eq!(terminal.wheel(up), WheelInput::History(-3));
+        assert_eq!(terminal.wheel(down), WheelInput::History(3));
+        terminal.feed(b"\x1b[?1006h", false).unwrap();
+        assert_eq!(terminal.wheel(up), WheelInput::History(-3));
+        for mode in [1000, 1002, 1003] {
+            terminal
+                .feed(format!("\x1b[?{mode}h").as_bytes(), false)
+                .unwrap();
+            assert_eq!(
+                terminal.wheel(up),
+                WheelInput::Bytes(b"\x1b[<64;14;8M".to_vec())
+            );
+            assert_eq!(
+                terminal.wheel(down),
+                WheelInput::Bytes(b"\x1b[<65;14;8M".to_vec())
+            );
+            terminal
+                .feed(format!("\x1b[?{mode}l").as_bytes(), false)
+                .unwrap();
+            assert_eq!(terminal.wheel(up), WheelInput::History(-3));
+        }
+        terminal.feed(b"\x1b[?9h", false).unwrap();
+        assert_eq!(terminal.wheel(up), WheelInput::Ignored);
+        terminal.reset();
+        assert_eq!(terminal.wheel(up), WheelInput::History(-3));
+    }
+
+    #[test]
+    fn wheel_encodes_modifiers_and_legacy_coordinates_without_truncation() {
+        let mut terminal = Terminal::new(TerminalSize::new(240, 500));
+        terminal.feed(b"\x1b[?1000h\x1b[?1006h", false).unwrap();
+        let mut event = wheel(MouseEventKind::ScrollUp, 499, 239);
+        event.modifiers = KeyModifiers::SHIFT | KeyModifiers::ALT | KeyModifiers::CONTROL;
+        assert_eq!(
+            terminal.wheel(event),
+            WheelInput::Bytes(b"\x1b[<92;500;240M".to_vec())
+        );
+        terminal.feed(b"\x1b[?1006l", false).unwrap();
+        assert_eq!(terminal.wheel(event), WheelInput::Ignored);
+        assert_eq!(
+            terminal.wheel(wheel(MouseEventKind::ScrollDown, 222, 222)),
+            WheelInput::Bytes(vec![0x1b, b'[', b'M', 97, 255, 255])
+        );
+        assert_eq!(
+            terminal.wheel(wheel(MouseEventKind::ScrollDown, 223, 0)),
+            WheelInput::Ignored
+        );
+        terminal.feed(b"\x1b[?1005h", false).unwrap();
+        event.modifiers = KeyModifiers::NONE;
+        assert_eq!(
+            terminal.wheel(event),
+            WheelInput::Bytes("\x1b[M`\u{214}\u{110}".as_bytes().to_vec())
+        );
+    }
+
+    #[test]
+    fn wheel_rejects_non_wheel_and_outside_events_and_keeps_modes_per_terminal() {
+        let mut terminal = Terminal::new(TerminalSize::new(24, 80));
+        terminal.feed(b"\x1b[?1000h\x1b[?1006h", false).unwrap();
+        assert_eq!(
+            terminal.wheel(wheel(MouseEventKind::Moved, 0, 0)),
+            WheelInput::Ignored
+        );
+        assert_eq!(
+            terminal.wheel(wheel(MouseEventKind::ScrollUp, 80, 0)),
+            WheelInput::Ignored
+        );
+        assert_eq!(
+            terminal.wheel(wheel(MouseEventKind::ScrollUp, 0, 24)),
+            WheelInput::Ignored
+        );
+        terminal.resize(TerminalSize::new(10, 20));
+        assert_eq!(
+            terminal.wheel(wheel(MouseEventKind::ScrollUp, 20, 0)),
+            WheelInput::Ignored
+        );
+        assert_eq!(
+            terminal.wheel(wheel(MouseEventKind::ScrollUp, 19, 9)),
+            WheelInput::Bytes(b"\x1b[<64;20;10M".to_vec())
+        );
+        let other = Terminal::new(TerminalSize::new(24, 80));
+        assert_eq!(
+            other.wheel(wheel(MouseEventKind::ScrollUp, 19, 9)),
+            WheelInput::History(-3)
+        );
+    }
 
     #[test]
     fn queries_use_query_time_cursor_and_suppress_historical_prefixes() {

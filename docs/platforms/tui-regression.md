@@ -10,6 +10,7 @@ TUI 的功能移植必須有對應的實際操作測試。依[共同功能矩陣
 | T-SECRET | 遮罩、私有帳號金鑰、加密保存、context／權限／金鑰遺失拒絕 | run.py、TUI vault／backend 與核心測試 |
 | T-TERM | 建立／附加／外部接管、多分頁 Unicode／ANSI／輸入隔離、尺寸、只脫離與遠端刪除分開 | run.py |
 | T-HISTORY | 共用 scroll／follow、閱讀中輸入與 VT 回覆、斷線原 token 恢復、不重播輸入 | run.py |
+| T-WHEEL | 右側終端滾輪依遠端滑鼠模式分流；CLI 座標／修飾鍵、取消模式後歷史舊行與回到即時、分頁隔離 | wheel.py |
 | T-SCREEN | Screen CRUD／revision／token、真圖色彩與區域、來源切換、延遲舊圖、錯誤恢復與停止 | run.py、圖片核心／預覽測試 |
 | T-CONFIGURE | TUI 選擇配置正確工作 Shell，無 adapter 不假報 ready；截圖不可用或 SSH 終端未宣告 Sixel 時仍能配置及實際呼叫工具 | run.py 負向、official_runtime.py 正向 |
 | T-TOOLS | 從該 Shell 裡晚啟動的正式 stdio client 實際探索／呼叫 HTTP 桌面工具，保留原參數及結果 | official_runtime.py |
@@ -65,6 +66,16 @@ python3 scripts/tui-regression/native_client.py \
 預設驗證新建 `auto` 設定，記錄實際終端版本、啟動參數、終端查詢回覆的字格像素及受測 ELF SHA。`--library-path` 可指定隔離驗證套件的函式庫位置。不要以顯示協定測試或其他終端版本的結果代替這項驗證。本機與 SSH 的支援／不支援／逾時偵測由 viewer 案例驗證；官方 Runtime 另驗證未宣告 Sixel 時工具仍可呼叫。實際 SSH 終端繪圖須獨立記錄，不能用環境標記或模擬回覆代替。
 
 測試程序須在失敗時也關閉自建 PTY／官方 Runtime／tmux／broker／固定 client，移除自建暫存與測試 HOME。結果可保留少量紀錄，勿保存私人憑證或整個建置環境。
+
+可獨立執行終端滾輪案例：
+
+```sh
+python3 scripts/tui-regression/wheel.py \
+  --binary /absolute/target/debug/art-term \
+  --output-dir /tmp/art-term-wheel-result
+```
+
+Codex 等程式啟用滑鼠協定時，右側終端滾輪沿既有 PTY 傳給程式；未啟用時使用共用主機歷史介面。預覽圖片的滾輪仍只縮放圖片。此 fixture 案例不等於實際 Codex 模型驗收。
 
 ## 驗收界線
 

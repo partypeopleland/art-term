@@ -1,6 +1,6 @@
 use crate::{
     backend::{BackendError, Connector, Registration},
-    terminal::Terminal,
+    terminal::{Terminal, WheelInput},
 };
 use art_term_core::openab::{
     api::AdminClient,
@@ -11,7 +11,7 @@ use art_term_core::openab::{
     session::{OutputEvent, Recovery, SessionBinding, SessionError, SessionHandle},
 };
 use base64::{engine::general_purpose::STANDARD, Engine};
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyEvent, MouseEvent};
 use std::{
     collections::VecDeque,
     future::Future,
@@ -43,6 +43,7 @@ impl TerminalSize {
 }
 pub(crate) enum TabAction {
     Key(KeyEvent),
+    Wheel(MouseEvent),
     Paste(String),
     Resize(TerminalSize),
     Scroll(i16),
@@ -124,7 +125,7 @@ impl TabClient {
                 }
                 text.len() + 12
             }
-            TabAction::Key(_) => 32,
+            TabAction::Key(_) | TabAction::Wheel(_) => 32,
             _ => 0,
         };
         self.budget
@@ -495,6 +496,20 @@ impl Tab {
             self.status = TabStatus::InputUncertain;
         }
     }
+    fn scroll(&mut self, lines: i16, cancel: watch::Receiver<bool>) -> Result<(), SessionError> {
+        if self.terminal.screen().alternate_screen()
+            && history::key_from_name(&self.binding.name).is_none()
+        {
+            return Err(SessionError::UpgradeRequired);
+        }
+        self.history_request(
+            HistoryRequest::Scroll {
+                lines: lines.clamp(-256, 256),
+            },
+            HistoryPurpose::Control,
+            cancel,
+        )
+    }
     fn action(
         &mut self,
         action: Action,
@@ -512,20 +527,13 @@ impl Tab {
         let bytes = match action.value {
             TabAction::Key(key) => self.terminal.key(key)?,
             TabAction::Paste(text) => Some(self.terminal.paste(text)?),
+            TabAction::Wheel(event) => match self.terminal.wheel(event) {
+                WheelInput::Bytes(bytes) => Some(bytes),
+                WheelInput::Ignored => None,
+                WheelInput::History(lines) => return self.scroll(lines, cancel),
+            },
             TabAction::Scroll(lines) => {
-                if self.terminal.screen().alternate_screen()
-                    && history::key_from_name(&self.binding.name).is_none()
-                {
-                    return Err(SessionError::UpgradeRequired);
-                }
-                self.history_request(
-                    HistoryRequest::Scroll {
-                        lines: lines.clamp(-256, 256),
-                    },
-                    HistoryPurpose::Control,
-                    cancel,
-                )?;
-                return Ok(());
+                return self.scroll(lines, cancel);
             }
             TabAction::Follow => {
                 self.history_request(
@@ -831,5 +839,21 @@ mod tests {
             .unwrap();
         drop(client);
         assert!(*cancellation.borrow());
+    }
+
+    #[test]
+    fn wheel_reserves_input_budget_and_releases_it_when_consumed() {
+        let (client, mut receiver, _) = client();
+        client
+            .try_send(TabAction::Wheel(MouseEvent {
+                kind: crossterm::event::MouseEventKind::ScrollUp,
+                column: 1,
+                row: 2,
+                modifiers: KeyModifiers::NONE,
+            }))
+            .unwrap();
+        assert_eq!(client.budget.load(Ordering::SeqCst), 32);
+        drop(receiver.try_recv().unwrap());
+        assert_eq!(client.budget.load(Ordering::SeqCst), 0);
     }
 }
