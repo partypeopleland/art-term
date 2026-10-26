@@ -1,10 +1,10 @@
 # art-term
 
-[English](README.md) · [下載 Windows 與 Android 版](https://github.com/partypeopleland/art-term/releases/latest)
+[English](README.md) · [下載 Windows、Android 與 Ubuntu 版](https://github.com/partypeopleland/art-term/releases/latest)
 
-用 Windows 電腦或 Android 手機，接著操作 Linux 上的終端與 coding CLI。指令和工具都在 Linux 主機執行；art-term 提供 Shell 分頁、歷史捲動，也能選配遠端桌面預覽。
+用 Windows 電腦、Android 手機或 Ubuntu 終端機，接著操作 Linux 上的終端與 coding CLI。指令和工具都在 Linux 主機執行；art-term 提供 Shell 分頁、歷史捲動，也能選配遠端桌面預覽。
 
-Ubuntu 24.04 Server、Desktop 或 SSH 可使用 `art-term` 終端機客戶端，以文字介面管理同一套遠端 Host／Shell，無需圖形桌面。工作區分為 Host／Shell 側欄、實際 Screen 截圖預覽與多分頁終端，使用私有帳號金鑰直接啟動，不另設解鎖密碼。可用滑鼠選擇分頁及固定展開的連線樹，桌面工具狀態持續可見；快捷鍵可直接編輯 TOML 自訂。建置、保存與操作見 [Ubuntu 終端機版](docs/platforms/linux.md)。候選版本進度記錄於 [Issue 6](https://github.com/partypeopleland/art-term/issues/6)，尚未新增正式 Release 資產。
+Ubuntu 24.04 Server、Desktop 或 SSH 可使用 `art-term` 終端機客戶端，以文字介面管理同一套遠端 Host／Shell，無需圖形桌面。工作區分為 Host／Shell 側欄、實際 Screen 截圖預覽與多分頁終端，使用私有帳號金鑰直接啟動，不另設解鎖密碼。可用滑鼠選擇分頁及固定展開的連線樹，桌面工具狀態持續可見；快捷鍵可直接編輯 TOML 自訂。建置、保存與操作見 [Ubuntu 終端機版](docs/platforms/linux.md)。從 [Releases](https://github.com/partypeopleland/art-term/releases/latest) 下載 Linux x86_64 壓縮檔，解壓後執行 `./art-term`。
 
 ## 畫面預覽
 
@@ -28,7 +28,7 @@ Ubuntu 24.04 Server、Desktop 或 SSH 可使用 `art-term` 終端機客戶端，
 
 ## 開始使用
 
-1. 到 [Releases](https://github.com/partypeopleland/art-term/releases/latest) 下載 Windows ZIP 或 Android ARM64 APK。
+1. 到 [Releases](https://github.com/partypeopleland/art-term/releases/latest) 下載 Windows ZIP、Android ARM64 APK 或 Ubuntu x86_64 壓縮檔。
 2. 準備已安裝官方 openab-pty Runtime 的 Linux 主機，讓裝置能透過私人網路連線，例如 Tailscale。詳見[使用前準備](docs/openab-host-setup.md)。
 3. 在 App 新增 Runtime 網址與管理憑證，建立或選擇 Shell。想使用的 coding CLI 要先裝在主機上。
 
@@ -37,10 +37,8 @@ Ubuntu 24.04 Server、Desktop 或 SSH 可使用 `art-term` 終端機客戶端，
 ## 系統怎麼連在一起
 
 ```text
-Windows／Android App
-  Vue 介面 + 終端
-         |
-  Tauri 原生層 + 共用 Rust 核心
+Windows／Android 介面 -> Tauri 原生層 --+
+Ubuntu 文字介面 ----------------------+-> 共用 Rust 核心
          |-- HTTPS / WSS --> openab-pty Runtime --> tmux Shell --> coding CLI
          |
          +-- 直接 MCP --> instance-mcp --> 共享桌面截圖

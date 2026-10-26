@@ -14,7 +14,7 @@ while (($#)); do
     esac
 done
 [[ $(uname -s) == Linux && $(uname -m) == x86_64 ]] || {
-    echo 'Build this candidate on Ubuntu x86_64.' >&2
+    echo 'Build this package on Ubuntu x86_64.' >&2
     exit 1
 }
 mkdir -p -- "$output_dir"
@@ -53,7 +53,7 @@ with tempfile.TemporaryDirectory(prefix="art-term-package-") as directory:
     shutil.copytree(root / "crates/art-term-tui/licenses", bundle / "licenses")
     (bundle / "README.md").write_text(
         "# art-term Ubuntu 終端機版\n\n"
-        "候選目標 Ubuntu 24.04 x86_64，可在 Server、Desktop 或 SSH 終端執行 ./art-term，不需要圖形桌面。\n"
+        "支援 Ubuntu 24.04 x86_64，可在 Server、Desktop 或 SSH 終端執行 ./art-term，不需要圖形桌面。\n"
         "可將 art-term 複製至自己的 ~/.local/bin，勿以 sudo 啟動。\n"
         "登入目前 Linux 帳號後即可直接使用，不需另外設定或輸入解鎖密碼。\n"
         "預設設定在 ${XDG_CONFIG_HOME:-$HOME/.config}/art-term-tui；請保留整個目錄，尤其是 connections.toml.account-key-v1 帳號金鑰；請勿公開或分開搬移。\n"

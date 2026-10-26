@@ -1,10 +1,10 @@
 # Ubuntu 終端機客戶端
 
-`art-term` 在 Ubuntu Server、Ubuntu Desktop 或 SSH 的終端機中管理既有遠端 Host／Shell。候選套件以 Ubuntu 24.04 x86_64 為建置與相容目標，不能推定較舊版本也能執行。三區工作區、表單和多分頁終端不需要 X、Wayland、GTK、WebKit、瀏覽器或桌面 keyring。受控端使用相同 Runtime 與通用 helper，沒有 TUI 專用安裝機制。
+`art-term` 在 Ubuntu Server、Ubuntu Desktop 或 SSH 的終端機中管理既有遠端 Host／Shell。發布套件以 Ubuntu 24.04 x86_64 為建置與相容目標，不能推定較舊版本也能執行。三區工作區、表單和多分頁終端不需要 X、Wayland、GTK、WebKit、瀏覽器或桌面 keyring。受控端使用相同 Runtime 與通用 helper，沒有 TUI 專用安裝機制。
 
 ## 啟動與保存
 
-解開候選套件，在互動式終端執行 `./art-term`。也可將執行檔放入自己的 `~/.local/bin`。不要以 `sudo` 啟動，設定與金鑰應屬於實際操作帳號。
+從 [Releases](https://github.com/partypeopleland/art-term/releases/latest) 下載 `linux-x86_64.tar.gz` 套件並解壓，在互動式終端執行 `./art-term`。也可將執行檔放入自己的 `~/.local/bin`。不要以 `sudo` 啟動，設定與金鑰應屬於實際操作帳號。
 
 登入自己的 Unix 帳號後，執行 `art-term` 即可使用，不另設啟動或解鎖密碼。啟動需要互動式 TTY；`--help` 與 `--version` 可在管線中使用。
 
@@ -86,7 +86,7 @@ Sixel 編碼已內建，不需安裝外部轉圖程式。能力與尺寸回覆�
 ```sh
 cargo build -p art-term-tui --bin art-term --release --locked
 ./target/release/art-term --help
-bash scripts/package-tui.sh --output-dir ./dist/tui/ubuntu-candidate
+bash scripts/package-tui.sh --output-dir ./dist/tui/ubuntu-package
 ```
 
 打包輸出 `.tar.gz`、manifest 與 SHA-256 清單。壓縮檔內含執行檔、說明、LICENSE、第三方說明及新增終端依賴授權，不含私人設定。只建置 `art-term-tui` 不會編譯 GUI crate。

@@ -1,10 +1,10 @@
 # art-term
 
-[繁體中文](README.zh-TW.md) · [Download Windows & Android](https://github.com/partypeopleland/art-term/releases/latest)
+[繁體中文](README.zh-TW.md) · [Download Windows, Android & Ubuntu](https://github.com/partypeopleland/art-term/releases/latest)
 
-Use your Linux terminal and coding CLIs from a Windows PC or Android phone. Your commands keep running on the Linux host; art-term gives you Shell tabs, terminal history, and an optional view of the remote desktop.
+Use your Linux terminal and coding CLIs from a Windows PC, Android phone, or Ubuntu terminal. Your commands keep running on the Linux host; art-term gives you Shell tabs, terminal history, and an optional view of the remote desktop.
 
-For Ubuntu 24.04 Server, Desktop, or SSH sessions, the `art-term` terminal client manages the same remote Hosts and Shells without a graphical desktop. Its workspace has a Host/Shell sidebar, a live Screen screenshot pane, and tabbed terminals. Startup uses a private account key without an extra password. Mouse controls cover the expanded connection tree, tabs, forms and desktop selection. Keyboard bindings are editable in TOML, and desktop tool readiness is shown separately from the screenshot. See [Ubuntu terminal client](docs/platforms/linux.md) for building, storage, and keyboard controls. Candidate builds are tracked in the development issue; this does not add a published release asset.
+For Ubuntu 24.04 Server, Desktop, or SSH sessions, the `art-term` terminal client manages the same remote Hosts and Shells without a graphical desktop. Its workspace has a Host/Shell sidebar, a live Screen screenshot pane, and tabbed terminals. Startup uses a private account key without an extra password. Mouse controls cover the expanded connection tree, tabs, forms and desktop selection. Keyboard bindings are editable in TOML, and desktop tool readiness is shown separately from the screenshot. See [Ubuntu terminal client](docs/platforms/linux.md) for building, storage, and keyboard controls. Download the Linux x86_64 archive from [Releases](https://github.com/partypeopleland/art-term/releases/latest), extract it, and run `./art-term`.
 
 ## Preview
 
@@ -28,7 +28,7 @@ To explore the demo locally, see [UI preview](docs/platforms/ui-preview.md). It 
 
 ## Get started
 
-1. Download the Windows ZIP or Android ARM64 APK from [Releases](https://github.com/partypeopleland/art-term/releases/latest).
+1. Download the Windows ZIP, Android ARM64 APK, or Ubuntu x86_64 archive from [Releases](https://github.com/partypeopleland/art-term/releases/latest).
 2. Prepare a Linux host with the official openab-pty Runtime, reachable through your private network, such as Tailscale. See [host setup](docs/openab-host-setup.md).
 3. Add the Runtime URL and management credential in the app, then create or select a Shell. Install any coding CLI you want to use on the host.
 
@@ -37,10 +37,8 @@ Desktop preview is optional and needs a separately configured shared desktop wit
 ## How the pieces connect
 
 ```text
-Windows / Android app
-  Vue UI + terminal
-         |
-  Tauri native layer + shared Rust core
+Windows / Android UI -> Tauri native layer --+
+Ubuntu terminal UI ------------------------+-> shared Rust core
          |-- HTTPS / WSS --> openab-pty Runtime --> tmux Shell --> coding CLI
          |
          +-- direct MCP --> instance-mcp --> shared desktop screenshots

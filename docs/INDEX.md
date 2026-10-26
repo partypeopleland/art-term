@@ -19,7 +19,7 @@
 | Windows 工具鏈、操作差異、打包與驗收 | [Windows](platforms/windows.md) |
 | Ubuntu Server／Desktop 的三區終端客戶端、帳號金鑰與打包 | [Ubuntu 終端機版](platforms/linux.md) |
 | TUI 功能對等、滑鼠／快捷鍵、正式 broker 與工具呼叫回歸 | [TUI 功能回歸](platforms/tui-regression.md) |
-| GitHub Actions、EXE／APK 自動建置、簽章 Secrets 與 Release | [自動發布](platforms/releases.md) |
+| GitHub Actions、EXE／APK／Linux TUI 自動建置、簽章 Secrets 與 Release | [自動發布](platforms/releases.md) |
 | 功能回歸、unit／原生 E2E、測試計畫與本機執行 | [Windows 回歸測試](platforms/windows-regression.md) |
 | 哪些操作受保護、跨平台案例與驗收界線 | [功能測試矩陣](refarch/test-matrix.md) |
 | 真 APK／模擬器／Keystore／系統選檔／跨裝置搬移 | [Android APK 原生 E2E](platforms/android-regression.md) |
@@ -32,7 +32,7 @@
 | 原生 Runtime 邊界的決策理由 | [ADR-001](adr/ADR-001-client-boundaries.md) |
 | Android 語音輸入現況、決策與待觀察事項 | [BDR-001](bdr/BDR-001-android-voice-input.md) |
 | 未排程候選及保護條件 | [BDR-002](bdr/BDR-002-future-directions.md) |
-| 版本差異、遷移與本版驗證限制 | [0.1.32 release note](report/0.1.32.md)（前一版紀錄 [0.1.31](report/0.1.31.md)） |
+| 版本差異、遷移與本版驗證限制 | [0.1.33 release note](report/0.1.33.md)（前一版紀錄 [0.1.32](report/0.1.32.md)） |
 | 文件寫法、拆篇與載入原則 | [文件規則](steering/documentation.md) |
 | 第三方散布義務 | [第三方說明](third-party-notices.md) |
 

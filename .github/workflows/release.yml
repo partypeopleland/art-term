@@ -34,9 +34,10 @@ jobs:
         run: |
           $desktop = Get-Content crates/art-term-gui/tauri.conf.json -Raw | ConvertFrom-Json
           $android = Get-Content crates/art-term-gui/tauri.android.conf.json -Raw | ConvertFrom-Json
+          $tui = [regex]::Match((Get-Content crates/art-term-tui/Cargo.toml -Raw), '(?m)^version\s*=\s*"([^"]+)"').Groups[1].Value
           $version = $desktop.version
-          if ($version -notmatch '^\d+\.\d+\.\d+$' -or $android.version -ne $version) {
-            throw 'Desktop and Android must have the same major.minor.patch version.'
+          if ($version -notmatch '^\d+\.\d+\.\d+$' -or $android.version -ne $version -or $tui -ne $version) {
+            throw 'Desktop, Android and TUI must have the same major.minor.patch version.'
           }
           if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") {
             throw "Tag must match the configured app version: v$version"
@@ -55,6 +56,19 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Rust installation failed' }
           rustup default stable
           if ($LASTEXITCODE -ne 0) { throw 'Rust toolchain selection failed' }
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.platform }}
+
+      - uses: actions/cache@v4
+        if: matrix.platform == 'android'
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: ${{ runner.os }}-gradle-
 
       - name: Build Windows EXE and portable ZIP
         if: matrix.platform == 'windows'
@@ -135,9 +149,53 @@ jobs:
           path: dist/release/*.apk
           if-no-files-found: error
 
+  build-linux:
+    name: Build Linux TUI
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Check release version
+        run: |
+          python3 - <<'PY'
+          import json, os, re, tomllib
+          from pathlib import Path
+          desktop = json.loads(Path('crates/art-term-gui/tauri.conf.json').read_text())['version']
+          android = json.loads(Path('crates/art-term-gui/tauri.android.conf.json').read_text())['version']
+          tui = tomllib.loads(Path('crates/art-term-tui/Cargo.toml').read_text())['package']['version']
+          assert re.fullmatch(r'\d+\.\d+\.\d+', desktop) and desktop == android == tui, 'App versions must match'
+          if os.environ['GITHUB_REF_TYPE'] == 'tag':
+              assert os.environ['GITHUB_REF_NAME'] == 'v' + desktop, 'Tag must match app version'
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              output.write('ART_TERM_VERSION=' + desktop + '\n')
+          PY
+
+      - name: Set up Rust
+        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-linux
+
+      - name: Build Ubuntu terminal package
+        run: |
+          bash scripts/package-tui.sh --output-dir dist/release
+          mv dist/release/manifest.json "dist/release/art-term-$ART_TERM_VERSION-linux-x86_64.manifest.json"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            dist/release/*.tar.gz
+            dist/release/*.manifest.json
+          if-no-files-found: error
+
   publish:
     if: startsWith(github.ref, 'refs/tags/')
-    needs: build
+    needs: [build, build-linux]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -159,8 +217,17 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         working-directory: release
         run: |
-          sha256sum ./*.exe ./*.zip ./*.apk > SHA256SUMS.txt
+          version="${RELEASE_TAG#v}"
+          assets=(
+            "art-term-$version-windows-x64.exe"
+            "art-term-$version-windows-x64.zip"
+            "art-term-$version-android-arm64.apk"
+            "art-term-$version-linux-x86_64.tar.gz"
+            "art-term-$version-linux-x86_64.manifest.json"
+          )
+          for asset in "${assets[@]}"; do test -s "$asset"; done
+          sha256sum "${assets[@]}" > SHA256SUMS.txt
           notes="$GITHUB_WORKSPACE/docs/report/${RELEASE_TAG#v}.md"
           test -s "$notes"
-          gh release create "$RELEASE_TAG" ./*.exe ./*.zip ./*.apk SHA256SUMS.txt \
+          gh release create "$RELEASE_TAG" "${assets[@]}" SHA256SUMS.txt \
             --verify-tag --title "art-term $RELEASE_TAG" --notes-file "$notes"
