@@ -89,7 +89,7 @@ struct Action {
 pub(crate) struct TabClient {
     id: TabId,
     label: String,
-    host: String,
+    binding: SessionBinding,
     actions: mpsc::Sender<Action>,
     views: watch::Receiver<Arc<TabView>>,
     sizes: watch::Sender<TerminalSize>,
@@ -105,7 +105,10 @@ impl TabClient {
         &self.label
     }
     pub(crate) fn host_id(&self) -> &str {
-        &self.host
+        &self.binding.profile.id
+    }
+    pub(crate) fn binding(&self) -> &SessionBinding {
+        &self.binding
     }
     pub(crate) fn view(&self) -> Arc<TabView> {
         self.views.borrow().clone()
@@ -237,7 +240,7 @@ pub(super) fn spawn(
     );
     let tab = Tab {
         handle: Some(handle),
-        binding,
+        binding: binding.clone(),
         generation: 1,
         terminal,
         status: TabStatus::Live,
@@ -272,7 +275,7 @@ pub(super) fn spawn(
         TabClient {
             id,
             label,
-            host: host.clone(),
+            binding,
             actions,
             views: receiver,
             sizes,
@@ -794,7 +797,18 @@ mod tests {
             TabClient {
                 id: TabId(0),
                 label: "Fixture".into(),
-                host: "host".into(),
+                binding: SessionBinding {
+                    profile: art_term_core::openab::profiles::HostProfile {
+                        id: "host".into(),
+                        revision: 1,
+                        name: "Fixture".into(),
+                        base_url: "https://fixture.example".into(),
+                        credential_present: false,
+                        metadata: None,
+                    },
+                    name: "th2-0123456789abcdef01234567".into(),
+                    generation: 1,
+                },
                 actions,
                 views,
                 sizes,

@@ -27,6 +27,8 @@ Windows 點名稱先重用同 Host 的本機 live runtime 分頁。沒有可重�
 
 Android Main 直接呈現既有 Shell 按鈕，點名稱才 attach；多筆預設收合，點左側主機名稱展開／收合。已 attached 的項目標示「接管」，沒有 Shell 時不顯示既有連線按鈕。右側 `＋` 明確建立新工作並連線，不沿用 Windows 的右側 Shell 清單入口。兩種畫面都以 backend 核發的 target 連線，不自行組合工作身分。
 
+Ubuntu TUI 選取 Shell 時，若完整 Host profile、工作名稱與 Runtime generation 都符合尚未結束的本機分頁，就切回該分頁，保留原畫面、閱讀位置與輸入保護。沒有可重用分頁才要求確認並取得新的連線權限；關頁後接回與外部 client 接管仍走明確確認。
+
 新建只提供「建立並連線」，由 backend 建立 tmux 工作並產生簡短顯示名稱，例如 `s-12ab34cd`；使用者不需輸入名稱。實際 Runtime 工作識別與顯示名稱分開，重新連線仍使用原識別。舊的一般 Shell 保留連線相容，不會自動遷移；Host 缺少支援檔時建立會失敗，不退回一般 Shell，準備方式見[終端歷史](terminal-history.md)。
 
 target 與 session ID 由 backend 發出，UI 不解析它們來組成遠端命令。binding 固定 Host 設定版本、Runtime 入口、Shell 名稱與官方 generation（工作世代）；綠點僅表示本機有已連線分頁，不是遠端在線探測。官方協定沒有 Runtime process 或 Shell incarnation 身分欄位，因此名稱與 generation 不能證明服務重啟後仍是原工作。短暫斷線沿用原 attach token，由 Runtime 驗證它是否仍能連接原工作；token 失效時停止自動恢復，交由使用者重新選擇。

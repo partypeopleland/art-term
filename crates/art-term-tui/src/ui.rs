@@ -713,11 +713,39 @@ impl App {
                 }
             }
             Some(TreeAction::Shell(_, shell)) => {
-                self.show_modal(Modal::Confirm(Confirm::Attach(shell)))
+                self.open_shell(shell, false);
             }
             Some(TreeAction::Screen(index)) => self.bind_screen(index + 1),
             None => (),
         }
+    }
+    fn open_shell(&mut self, shell: ShellView, confirmed: bool) {
+        if let Some(index) = self.tabs.iter().position(|tab| {
+            tab.binding() == shell.selection.binding()
+                && !matches!(tab.view().status, TabStatus::Ended(_))
+        }) {
+            self.select_tab(index);
+            return;
+        }
+        if !confirmed {
+            self.show_modal(Modal::Confirm(Confirm::Attach(shell)));
+            return;
+        }
+        let backend = self.backend.clone();
+        let size = self.size;
+        self.job(async move {
+            JobResult::Opened(
+                backend
+                    .open(
+                        OpenShell::Attach {
+                            selection: shell.selection,
+                            confirmed: true,
+                        },
+                        size,
+                    )
+                    .await,
+            )
+        });
     }
     fn edit_selected(&mut self) {
         match self.selected_action() {
@@ -1264,20 +1292,7 @@ impl App {
                         self.job(async move { JobResult::Deleted(backend.delete_host(host).await) })
                     }
                     Confirm::Attach(shell) => {
-                        let size = self.size;
-                        self.job(async move {
-                            JobResult::Opened(
-                                backend
-                                    .open(
-                                        OpenShell::Attach {
-                                            selection: shell.selection,
-                                            confirmed: true,
-                                        },
-                                        size,
-                                    )
-                                    .await,
-                            )
-                        });
+                        self.open_shell(shell, true);
                     }
                     Confirm::DeleteShell(shell) => self.job(async move {
                         JobResult::RemoteDeleted(backend.delete_shell(shell.selection, true).await)

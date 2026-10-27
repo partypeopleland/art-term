@@ -109,6 +109,11 @@ pub(crate) struct ShellSelection {
     binding: SessionBinding,
     attached: bool,
 }
+impl ShellSelection {
+    pub(crate) fn binding(&self) -> &SessionBinding {
+        &self.binding
+    }
+}
 #[derive(Clone)]
 pub(crate) struct ShellView {
     pub label: String,
