@@ -24,6 +24,7 @@ class Fixture:
         self.page = 'about:blank'
         self.delay = 0
         self.pause = False
+        self.pause_tool = 'browser_navigate'
         self.pause_list = False
         self.list_error = False
         self.list_started, self.list_release = threading.Event(), threading.Event()
@@ -72,7 +73,7 @@ class Fixture:
                     elif method == 'tools/call':
                         if outer.delay: time.sleep(outer.delay)
                         tool = params['name']
-                        if outer.pause and tool == 'browser_navigate':
+                        if outer.pause and tool == outer.pause_tool:
                             outer.pause = False; outer.started.set()
                             if not outer.release.wait(5): return self.reply({}, 504)
                         if tool == 'screenshot':
