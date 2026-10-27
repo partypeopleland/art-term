@@ -92,3 +92,7 @@ target/android-regression/venv/bin/python scripts/android-regression/web_links.p
   --sdk "$ANDROID_HOME" \
   --apk crates/art-term-gui/gen/android/app/build/outputs/apk/x86_64/debug/app-x86_64-debug.apk
 ```
+
+## 真正 Codex 的批准與工作生命週期
+
+[Codex 權限矩陣](../refarch/codex-permissions-matrix.md)的 Android 入口為 `codex_permissions.py`。它與 Linux TUI 共用同一組 14 個行為案例，使用真正 APK 的連線、Screen 選擇、鍵盤及 App 重開操作，並在自有官方 Runtime 上執行真正 Codex。工具回覆、上游請求、程序 PID／start、會話與有效政策分開記錄；原版與修正版 helper 可用同一 APK 比較。這些案例不宣稱實體 ARM64、歷史閱讀或所有 UI 矩陣都已通過。

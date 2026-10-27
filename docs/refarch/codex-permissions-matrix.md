@@ -35,6 +35,10 @@ python3 scripts/instance-mcp-regression/permissions.py
 
 Linux TUI 使用 `scripts/tui-regression/codex_permissions.py`，每次以 `--case C01` 至 `--case C14` 執行一案。`--help` 列出 binary、官方 Runtime、tmux、Node、已編譯 history bundle、真正 Codex binary 與測試認證檔的必要參數。測試建立獨立 Runtime、工作 Shell、Codex 設定與安全桌面服務，透過真正 TUI 操作；不載入使用者的 plugins、hooks 或專案指引。認證只複製到自有的私有暫存目錄，測試結束移除。
 
+Android APK 使用 `scripts/android-regression/codex_permissions.py`，相同的 `--binary` 參數在此指定 x86_64 debug fixture APK，並從 `ANDROID_HOME` 取得已安裝 SDK。Python 環境需同時安裝 TUI 與 Android regression 的 requirements。每次使用自建 AVD、真正 APK、原生 IPC 與官方 Runtime，透過真實觸控、終端鍵盤與 CDP 文字輸入操作；不替換 native 回覆。工具案例讀取實際終端內容，不把 native history 快照缺席當成無輸出，也不以這套案例宣稱歷史閱讀區已完整驗收。
+
+`--bridge-source` 可明確指定原版 helper，與同一 APK 搭配重現修正前的錯誤。結果分別記錄 APK、helper 與測試驅動 hash，不能把原版 helper 的結果冒稱修正版通過。App 重開案例保留該案例資料；互相獨立的案例才清除自建裝置的 App 測試資料。
+
 結果保留工具實際回覆與上游請求、有效政策、Codex 版本、來源與 helper hash，以及 PID、程序 start time 與會話 ID。`SUCCESS`、`CORRECT_REFUSAL` 與失敗分開記錄。因錯誤假設或驅動無法操作而失敗的測試不算產品錯誤已重現。
 
 C05 同一程序先批准一次，再拒絕下一次，核對拒絕後沒有上游呼叫。C11 在真正 Codex 的安全工具呼叫途中中斷自有工作 WSS，核對相同 token、非零恢復游標與 Runtime generation，再讓原工具完成並核對 App 顯示實際結果。既有的輸入傳送不確定保護仍保留；本案不要求靜默解除保護，也不透過另一條路徑注入新輸入。C12 關閉再開 App 並重新接回原 Shell，核對原 Codex PID、start 與桌面選擇 generation。C13 明確使用 read-only＋never resume 原會話，C14 明確以 --yolo resume，兩者都要求新程序與相同對話。

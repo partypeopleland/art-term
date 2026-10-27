@@ -85,7 +85,8 @@ class Runtime:
         tools = h.home / '.local/share/art-term/tools'
         tools.mkdir(parents=True, mode=0o700)
         for name in ('instance_bridge.py', 'instance-shell.py', 'instance-shell.bash'):
-            shutil.copy2(ROOT / 'scripts' / name, tools / name)
+            source = args.bridge_source if name == 'instance_bridge.py' else ROOT / 'scripts' / name
+            shutil.copy2(source, tools / name)
         shutil.copy2(ROOT / 'scripts/openab-runtime/tmux-v2/tmux-shell.py', tools / 'tmux-shell.py')
         tmux = h.helper / 'tmux-v2'
         tmux.mkdir()
@@ -301,7 +302,8 @@ class Codex:
                 self.offset = len(events)
                 return events[start:]
             text = self.surface.text()
-            prompt_visible = 'Allow the art_term MCP server to run tool "call_target_tool"?' in text and 'name: browser_title' in text
+            compact = ''.join(text.split())
+            prompt_visible = 'Allowtheart_termMCPservertoruntool"call_target_tool"?' in compact and 'name:browser_title' in compact
             if prompt_visible and not self.approval_visible:
                 assert approve, 'Unexpected approval request'
                 self.surface.save(self.output, 'approval-' + str(len(self.approvals)))
@@ -339,7 +341,11 @@ class Codex:
     def save(self):
         events = self.events()
         (self.output / 'codex-events.json').write_text(json.dumps(events, indent=2) + '\n')
-        (self.output / 'process.json').write_text(json.dumps(self.identity()) + '\n')
+        try:
+            process = self.identity()
+        except AssertionError as error:
+            process = {'unavailable': str(error)}
+        (self.output / 'process.json').write_text(json.dumps(process) + '\n')
         (self.output / 'fixture-events.json').write_text(json.dumps(
             {service.name: service.events for service in self.runtime.services}, indent=2) + '\n')
         self.surface.save(self.output, 'terminal')
@@ -503,12 +509,14 @@ def arguments():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('binary', 'runtime-binary', 'history-bundle', 'node', 'tmux', 'codex', 'auth-file'):
         parser.add_argument('--' + name, type=Path, required=True)
+    parser.add_argument('--bridge-source', type=Path, default=ROOT / 'scripts/instance_bridge.py',
+                        help='Remote helper source for an explicit baseline comparison')
     parser.add_argument('--model', default='gpt-6.1-sol')
     parser.add_argument('--case', choices=['C%02d' % n for n in range(1, 15)], required=True)
     parser.add_argument('--output-dir', type=Path, required=True)
     parser.add_argument('--timeout', type=int, default=150)
     args = parser.parse_args()
-    for name in ('binary', 'runtime_binary', 'history_bundle', 'node', 'tmux', 'codex', 'auth_file'):
+    for name in ('binary', 'runtime_binary', 'history_bundle', 'node', 'tmux', 'codex', 'auth_file', 'bridge_source'):
         setattr(args, name, getattr(args, name).resolve(strict=True))
     return args
 
@@ -519,7 +527,7 @@ def main():
     result = {'case': 'L-' + args.case, 'passed': False, 'platform': 'Linux TUI',
               'codexVersion': subprocess.check_output([str(args.codex), '--version'], text=True).strip(),
               'source': subprocess.check_output(['git', '-C', str(ROOT), 'rev-parse', 'HEAD'], text=True).strip(),
-              'bridgeSha256': hashlib.sha256((ROOT / 'scripts/instance_bridge.py').read_bytes()).hexdigest(),
+              'bridgeSha256': hashlib.sha256(args.bridge_source.read_bytes()).hexdigest(),
               'harnessSha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
               'binarySha256': hashlib.sha256(args.binary.read_bytes()).hexdigest()}
     runtime = surface = codex = None
