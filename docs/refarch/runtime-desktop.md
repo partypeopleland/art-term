@@ -43,6 +43,23 @@ App 以 `exec python3` 啟動短命 configure Shell；接收端先關 echo／can
 
 新工作 Shell 的專用 rc 先載入一般 `~/.bashrc`，再提供 Shell 工具及 scoped Codex stdio 接線。使用者可照常輸入 Codex，不需要 App 額外啟動按鈕；CLI 不會自動執行。通用 MCP 定義只帶程式路徑與 binding，不含上游憑證，保留使用者參數及一般設定，包括直接輸入 `codex --yolo`，不修改全域 Codex、Hana 或 Discord 配置。其他 CLI 只在確認支援的配置方式後整合，不宣稱所有引擎或既有 AI 能熱插入。Devin 不自動接線，也不代寫其 project／global 設定；其他支援標準 MCP 的 CLI 可依下一節，用各自原生配置一次登記通用入口。
 
+## Codex 批准政策
+
+更新 helper 後以新建工作 Shell 驗證；仍在執行的舊 broker 不會因覆寫檔案即換用新的工具定義。
+
+App 的 Tools ready 表示該工作 Shell 已完成 broker 配置與工具探索。Codex 是否能呼叫工具，仍由本次 CLI 的批准政策與 MCP 工具設定決定。重新接回 Shell 不會改變仍執行中的 Codex 政策；退出後 resume 是新程序，須核對其實際政策。
+
+`current_target` 與 `list_target_tools` 宣告為只讀探索。`call_target_tool` 能派送有副作用的桌面操作，因此不宣告只讀，即使本次派送的是 `browser_title`。不以使用者選定 Screen 取代 CLI 的批准。
+
+遇到 `MCP tool call requires approval, but approval policy is never`，可在重新啟動或 resume 時明確使用可提出批准的模式，例如：
+
+```bash
+codex -s workspace-write -a on-request
+codex -s workspace-write -a on-request resume <session-id>
+```
+
+只批准目前需要的操作。`--yolo` 是使用者明確選擇的整體放行模式；App 不自動加到手動啟動命令，也不修改全域設定。已有每工具政策時仍以 CLI 的有效設定為準。不同 Codex 版本對預設 `auto` 工具政策與完整存取模式的組合可能不同，不能只看 sandbox 名稱判斷所有 MCP 權限。逐案測試方式與觀測欄位見 [Codex 權限矩陣](codex-permissions-matrix.md)。
+
 ## 給其他 CLI 的標準 MCP 入口
 
 在已具備 broker 的 App 工作 Shell 執行：

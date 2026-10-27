@@ -84,3 +84,9 @@ Codex 等程式啟用滑鼠協定時，右側終端滾輪沿既有 PTY 傳給程
 viewer.py 的 committed CJK／游標座標不等於作業系統輸入法的 composition 驗收；Sixel 編碼／PTY 協定驗證也不等於實際終端已畫出圖片。兩者須明列人工驗證狀態。產品不提供字格圖片模式；測試中的像素或字格座標檢查是對原生 Sixel 資料的檢視，不是產品圖片備援。
 
 同一 Shell 已有相同 binding 的未結束本機分頁時，再次選取會切回該分頁，保留即時畫面或歷史閱讀位置，不 renew 或新增分頁。run.py 驗證背景分頁切回、helper 不重建與輸入不重播；official_runtime.py 以正式 Runtime／helper 驗證切回及閱讀位置。關頁後接回與外部 client 接管仍分開驗證，不能互相替代。已結束、不同 Host 設定版本或不同工作 generation 不直接重用。
+
+## 真正 Codex 的批准與重連
+
+依 [Codex 權限矩陣](../refarch/codex-permissions-matrix.md) 使用 `codex_permissions.py`，每次執行一案。這條路徑從真正 TUI 建立工作 Shell 與選定 Screen，使用官方 Runtime、Shell-owned broker、stdio adapter 與真正 Codex 模型。`current_target`、工具探索、批准／拒絕、A／B 切換與失效目標，均核對模型收到的工具回覆與安全測試上游的實際請求。
+
+WSS 恢復與 App 重開要求原 Codex PID 與程序 start 不變。resume 要求新程序與原對話，並記錄本次有效政策。這些結果獨立於預覽截圖與固定 MCP client，不用先前的通過紀錄推定新案例通過。

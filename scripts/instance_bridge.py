@@ -259,8 +259,8 @@ def text(value):
 
 
 TOOLS = [
-        {'name': 'current_target', 'description': 'Read the App-selected instance-mcp target identity. Use its identity for all calls.', 'inputSchema': {'type': 'object', 'properties': {}, 'additionalProperties': False}},
-        {'name': 'list_target_tools', 'description': 'Discover the selected instance-mcp tools and their original names/input schemas. Returns target identity and cursor.', 'inputSchema': {'type': 'object', 'properties': {'cursor': {'type': 'string'}}, 'additionalProperties': False}},
+        {'name': 'current_target', 'annotations': {'readOnlyHint': True}, 'description': 'Read the App-selected instance-mcp target identity. Use its identity for all calls.', 'inputSchema': {'type': 'object', 'properties': {}, 'additionalProperties': False}},
+        {'name': 'list_target_tools', 'annotations': {'readOnlyHint': True}, 'description': 'Discover the selected instance-mcp tools and their original names/input schemas. Returns target identity and cursor.', 'inputSchema': {'type': 'object', 'properties': {'cursor': {'type': 'string'}}, 'additionalProperties': False}},
         {'name': 'call_target_tool', 'description': 'Execute any discovered instance-mcp desktop/browser tool. expected_target must match current_target; stale selection is rejected. Results retain source target.', 'inputSchema': {'type': 'object', 'properties': {'name': {'type': 'string'}, 'arguments': {'type': 'object'}, 'expected_target': {'type': 'object'}}, 'required': ['name', 'arguments', 'expected_target'], 'additionalProperties': False}},
     ]
 

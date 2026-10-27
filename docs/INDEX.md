@@ -20,6 +20,7 @@
 | Ubuntu Server／Desktop 的三區終端客戶端、帳號金鑰與打包 | [Ubuntu 終端機版](platforms/linux.md) |
 | TUI 功能對等、滑鼠／快捷鍵、正式 broker 與工具呼叫回歸 | [TUI 功能回歸](platforms/tui-regression.md) |
 | GitHub Actions、EXE／APK／Linux TUI 自動建置、簽章 Secrets 與 Release | [自動發布](platforms/releases.md) |
+| Codex 桌面工具批准、程序重啟與三平台對照 | [Codex 權限矩陣](refarch/codex-permissions-matrix.md) |
 | 功能回歸、unit／原生 E2E、測試計畫與本機執行 | [Windows 回歸測試](platforms/windows-regression.md) |
 | 哪些操作受保護、跨平台案例與驗收界線 | [功能測試矩陣](refarch/test-matrix.md) |
 | 真 APK／模擬器／Keystore／系統選檔／跨裝置搬移 | [Android APK 原生 E2E](platforms/android-regression.md) |
