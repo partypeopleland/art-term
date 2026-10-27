@@ -8,7 +8,7 @@ For Ubuntu 24.04 Server, Desktop, or SSH sessions, the `art-term` terminal clien
 
 ## Preview
 
-These are browser captures of the app's UI components with fictional demo data. Native window borders, Android keyboard, and device services are outside this preview.
+The Windows and Android images are browser captures of the app's UI components with fictional demo data. They omit native window borders, the Android keyboard, and device services.
 
 | Android connections | Android terminal |
 | --- | --- |
@@ -17,6 +17,10 @@ These are browser captures of the app's UI components with fictional demo data. 
 <img src="assets/screenshots/windows-home.png" alt="Windows connection dashboard" width="900">
 
 To explore the demo locally, see [UI preview](docs/platforms/ui-preview.md). It uses demo responses and does not execute commands.
+
+Linux TUI, captured in a real terminal with fictional Host, Shell output, and Screen data. The workspace has a connection tree, a native image preview, and Shell tabs.
+
+<img src="assets/screenshots/linux-tui.png" alt="Linux TUI with a Host and Shell tree at the upper left, a Screen image below it, and two Shell tabs on the right" width="900">
 
 ## What you can do
 

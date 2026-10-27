@@ -8,7 +8,7 @@ Ubuntu 24.04 Server、Desktop 或 SSH 可使用 `art-term` 終端機客戶端，
 
 ## 畫面預覽
 
-以下是使用正式介面元件、搭配虛構示範資料的瀏覽器截圖。預覽不含原生視窗外框、Android 系統鍵盤與裝置服務。
+Windows 與 Android 圖片是使用正式介面元件、搭配虛構示範資料的瀏覽器截圖，不含原生視窗外框、Android 系統鍵盤與裝置服務。
 
 | Android 連線首頁 | Android 終端 |
 | --- | --- |
@@ -17,6 +17,10 @@ Ubuntu 24.04 Server、Desktop 或 SSH 可使用 `art-term` 終端機客戶端，
 <img src="assets/screenshots/windows-home.png" alt="Windows 連線首頁" width="900">
 
 想自己點看看，可在本機啟動[介面預覽](docs/platforms/ui-preview.md)。預覽使用示範回應，不會執行指令。
+
+Linux TUI 在真正的終端機中擷取，Host、Shell 輸出與 Screen 均使用虛構示範資料。畫面包含連線樹、原生圖片預覽與 Shell 分頁。
+
+<img src="assets/screenshots/linux-tui.png" alt="Linux TUI，左上為 Host 與 Shell 連線樹，左下為 Screen 圖片預覽，右側為兩個 Shell 分頁" width="900">
 
 ## 可以做什麼
 
