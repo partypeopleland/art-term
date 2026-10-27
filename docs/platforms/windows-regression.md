@@ -85,6 +85,10 @@ Microsoft Edge WebDriver 必須匹配 App 使用的 **WebView2 Runtime**，不�
 
 ## 功能與既有測試對照
 
+### 真 Codex 權限與重連
+
+[Codex 權限矩陣](../refarch/codex-permissions-matrix.md)另有真正模型的 C01 至 C14 案例，入口為 [Windows Codex runner](../../scripts/windows-regression/codex_permissions.py)。協調程式在 Linux 測試 Host 執行，Windows 端使用實際 EXE、WebView2、IPC、DPAPI 與自有互動式排程工作。每次執行一案，保存 binary／helper／驅動 hash、實際工具事件、政策、程序與對話身分，以及批准畫面。原版 helper 可用 `--bridge-source` 對照；驅動啟動失敗不算產品錯誤重現。測試後回收自有程序、排程工作、通道與暫存資料。
+
 路徑均相對於專案根目錄。表內用測試名稱作定位，詳細測試原始碼連結集中在附錄。
 
 | 修改範圍 | 先檢查的既有案例 | 需要連帶驗證 |

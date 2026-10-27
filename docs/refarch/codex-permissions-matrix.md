@@ -37,7 +37,9 @@ Linux TUI 使用 `scripts/tui-regression/codex_permissions.py`，每次以 `--ca
 
 Android APK 使用 `scripts/android-regression/codex_permissions.py`，相同的 `--binary` 參數在此指定 x86_64 debug fixture APK，並從 `ANDROID_HOME` 取得已安裝 SDK。Python 環境需同時安裝 TUI 與 Android regression 的 requirements。每次使用自建 AVD、真正 APK、原生 IPC 與官方 Runtime，透過真實觸控、終端鍵盤與 CDP 文字輸入操作；不替換 native 回覆。工具案例讀取實際終端內容，不把 native history 快照缺席當成無輸出，也不以這套案例宣稱歷史閱讀區已完整驗收。
 
-`--bridge-source` 可明確指定原版 helper，與同一 APK 搭配重現修正前的錯誤。結果分別記錄 APK、helper 與測試驅動 hash，不能把原版 helper 的結果冒稱修正版通過。App 重開案例保留該案例資料；互相獨立的案例才清除自建裝置的 App 測試資料。
+Windows EXE 使用 `scripts/windows-regression/codex_permissions.py`。協調程式在 Linux 測試 Host 執行，Python 環境需安裝 TUI 與 Windows regression 的 requirements；`--help` 列出 Windows SSH、EXE、EdgeDriver、系統暫存根目錄與 Host 工具參數。Windows 的互動式桌面以自有排程工作啟動 EdgeDriver，以 CDP 文字輸入與鍵盤送出操作真正 xterm，保留 EXE／WebView2、Tauri IPC 與 DPAPI。自有 SSH loopback 通道連到測試 Host 的官方 Runtime 與安全桌面服務，真正 Codex 的認證留在 Host，不搬到 Windows。這是原生 App 測試，與一般 Windows runner 的 echo 協定 fixture 分開記錄。
+
+`--bridge-source` 可明確指定原版 helper，與同一 APK 或 EXE 搭配重現修正前的錯誤。結果分別記錄 binary、helper 與測試驅動 hash，不能把原版 helper 的結果冒稱修正版通過。App 重開案例保留該案例資料；互相獨立的案例才使用新的測試資料。
 
 結果保留工具實際回覆與上游請求、有效政策、Codex 版本、來源與 helper hash，以及 PID、程序 start time 與會話 ID。`SUCCESS`、`CORRECT_REFUSAL` 與失敗分開記錄。因錯誤假設或驅動無法操作而失敗的測試不算產品錯誤已重現。
 
