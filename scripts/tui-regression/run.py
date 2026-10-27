@@ -434,6 +434,33 @@ def main():
             assert "FIRST-INPUT" not in runtime.work()[second]["input"]
             passed("Two tabs isolate input, retain background output and switch screens")
 
+            for held in (False, True):
+                if held:
+                    runtime.append_lines(first, 0, 100)
+                    app.prefix("u")
+                    app.wait_text("歷史閱讀")
+                history_label = re.search(r"歷史閱讀\s*-\d+|即時輸出", app.text()).group()
+                app.prefix("2")
+                app.wait_text("FOREGROUND-SECOND")
+                before = runtime.snapshot()
+                app.select_tree(first)
+                app.send(b"\r")
+                app.settle()
+                assert "確認 / Confirm" not in app.text(), "Selecting an existing local Shell requested takeover instead of switching tabs"
+                assert "3:" not in app.text(), "Selecting an existing local Shell created another tab"
+                assert history_label in app.text(), "Switching to a local Shell changed its history state"
+                assert "歷史控制狀態不確定" not in app.text()
+                after = runtime.snapshot()
+                assert after["sessions"][first]["generation"] == before["sessions"][first]["generation"]
+                assert [event for event in after["events"] if event["method"] in ("POST", "DELETE")] == [
+                    event for event in before["events"] if event["method"] in ("POST", "DELETE")
+                ], "Switching to a local Shell recreated a work or helper connection"
+            app.send("LOCAL-REUSED")
+            app.wait(lambda: runtime.work()[first]["input"].endswith("LOCAL-REUSED"), "input through reused local tab")
+            assert runtime.work()[first]["input"].count("LOCAL-REUSED") == 1
+            assert "LOCAL-REUSED" not in runtime.work()[second]["input"]
+            passed("Existing local Shell selection reuses its tab and held history without renew or duplicate input")
+
             frames_before = len(runtime.frames)
             app.prefix("h")
             app.idle()

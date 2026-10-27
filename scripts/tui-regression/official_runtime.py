@@ -320,6 +320,24 @@ def main():
                 return client
 
             first = create_work()
+            app.send("printf 'LOCAL-ROW-%s\\n' $(seq 1 100)\r")
+            app.wait_text("LOCAL-ROW-100")
+            for held in (False, True):
+                if held:
+                    app.prefix("u")
+                    app.wait_text("歷史閱讀")
+                history_label = re.search(r"歷史閱讀\s*-\d+|即時輸出", app.text()).group()
+                generation = next(item["generation"] for item in harness.api("GET", "/admin/sessions")[1]["sessions"] if item["name"] == first)
+                app.select_tree(first)
+                app.send(b"\r")
+                app.settle()
+                assert "確認 / Confirm" not in app.text(), "Local Shell selection requested a real Runtime takeover"
+                assert "2:" not in app.text(), "Local Shell selection created another real Runtime tab"
+                assert history_label in app.text(), "Local Shell selection lost the real helper reading position"
+                assert next(item["generation"] for item in harness.api("GET", "/admin/sessions")[1]["sessions"] if item["name"] == first) == generation
+            app.send(b"\x03")
+            app.wait_text("即時輸出")
+            passed("T-TERM/T-HISTORY", "Existing local Shell reuses the real Runtime tab and preserves held history without renew")
             a.list_error = True
             choose(app, "Screen A")
             wait(lambda: bool(app.image_cells("f01e14")) and "Tools unconfirmed" in app.text(),
