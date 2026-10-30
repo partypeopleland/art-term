@@ -6,6 +6,8 @@
 
 Windows 專屬修改須在 Windows 電腦執行。本輪修正原 CLI 視窗直接上捲與下捲自然追尾，透過共同受控端的原生 viewport 操作，語音與 Android plugin 不在範圍；前端／Rust／真 tmux 的部分歷史結果不能代表最新 Windows GUI、真 Codex 或 OS 中文候選選字已驗收。各次測試需核對實際 source／binary，舊 DesktopHistoryReader 的通過紀錄不能沿用。
 
+統一連線管理另有 `scripts/windows-regression/connection_management.py --exe <fixture.exe> --driver <msedgedriver.exe> --source <SHA>`。它操作實際 EXE／WebView2／IPC／DPAPI 與自建 HTTPS／MCP 服務，驗證三種類型的共用表單、中文顯示名稱、同類型拖曳、跨類型拒絕、重開與側欄順序、Toast 及手動終端輸入。driver 必須符合實際 WebView2 版本，輸出及私有測試設定放在系統暫存目錄。舊完整 runner 的獨立 Screen 表單、分類 select 與啟動 CLI 按鈕選擇器不作為新版介面的驗收入口。
+
 ## 各層測到什麼
 
 跨平台操作案例及哪些項目仍需實機，統一見[功能測試矩陣](../refarch/test-matrix.md)。Android 真 APK 與 Linux 真官方 Runtime 分別依 [APK E2E](android-regression.md)、[Linux 驗收](linux-regression.md)執行；本頁保留 Windows／unit 操作細節。
@@ -40,7 +42,7 @@ Vue/controller + test transport     real DPAPI / local TLS-WSS fixtures
 target/windows-regression/venv/Scripts/python.exe scripts/windows-regression/headless-layout.py --driver target/gui-tools/edge/msedgedriver.exe --output target/windows-regression/layout-check
 ```
 
-此檢查使用 Edge headless、隱藏 driver console，以及獨立 `/?desktop` 預覽入口與虛構資料；涵蓋固定200px、分隔線拖曳、原 xterm／首個小幅上捲／實際可見較早行／下捲到底自然追尾、非阻塞桌面載入、分類設定與草稿清除，並保存截圖及結果。它不執行原生 App、IPC、DPAPI 或系統選檔器，不能代替下面的原生 E2E。完成後關閉自己啟動的預覽 server；正式打包不包含此入口。
+此檢查使用 Edge headless、隱藏 driver console，以及獨立 `/?desktop` 預覽入口與虛構資料；涵蓋預設360px、分隔線拖曳、原 xterm／首個小幅上捲／實際可見較早行／下捲到底自然追尾、非阻塞桌面載入、分類設定與草稿清除，並保存截圖及結果。它不執行原生 App、IPC、DPAPI 或系統選檔器，不能代替下面的原生 E2E。完成後關閉自己啟動的預覽 server；正式打包不包含此入口。
 
 以下指令均在 Windows 的專案根目錄執行。需要已安裝 Rust MSVC、C++ Build Tools、Node/npm、PowerShell 與 Python；正常使用 App 的人不需要這些開發工具。首次安裝相關工具依其官方文件，由 AI 先檢查現有版本並沿用。
 

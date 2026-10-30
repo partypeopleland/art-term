@@ -52,7 +52,7 @@ id 為舊版小寫 slug（1–32 個 ASCII 小寫字母／數字／非首字元�
 
 `display_name` 是連線名稱下方的自訂顯示文字，最多 20 個 Unicode 字元，支援中文，拒絕控制字元；空白或未設定時沿用既有預設。它不修改遠端 Shell 名稱或啟動命令。舊檔案的 `coding_cli` 保留讀取相容及預設標籤，但 App 不提供 CLI 啟動按鈕，也不執行其中的命令；由使用者在終端自行輸入。
 
-metadata 直接來自這份 TOML。新增／編輯 Runtime 表單修改分類並保留既有相容欄位與 CLI 能力。target（後端核發的連線目標）發出後凍結 Runtime 能力，後續設定更新不改綁既有分頁；Screen 由使用者在分頁另行明確選擇，不由 Host metadata 推導。
+metadata 直接來自這份 TOML。新增／編輯 Runtime 表單修改分類並保留既有相容欄位與預設顯示名稱。target（後端核發的連線目標）發出後凍結 Runtime 能力，後續設定更新不改綁既有分頁；Screen 由使用者在分頁另行明確選擇，不由 Host metadata 推導。
 
 ## 統一管理與排序
 
