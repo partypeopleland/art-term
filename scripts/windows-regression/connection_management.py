@@ -178,7 +178,8 @@ def main():
         print('STAGE ' + stage, flush=True)
         name = create_shell(app, fixture, app.profiles()[0])
         require(not app.find('[data-testid=launch-coding-cli]'), 'launch CLI button remains')
-        app.terminal('codex --help\r')
+        app.terminal('codex --help')
+        ActionChains(app.driver).send_keys(Keys.ENTER).perform()
         app.wait(lambda: 'codex --help\r' in fixture.snapshot()['sessions'][name]['input'])
         result['checks']['manualTerminalWithoutLaunchControl'] = True
         result['webview'] = app.metadata
