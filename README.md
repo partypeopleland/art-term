@@ -33,10 +33,10 @@ Linux TUI, captured in a real terminal with fictional Host, Shell output, and Sc
 ## Get started
 
 1. Download the Windows ZIP, Android ARM64 APK, or Ubuntu x86_64 archive from [Releases](https://github.com/partypeopleland/art-term/releases/latest).
-2. Prepare a Linux host with the official openab-pty Runtime, reachable through your private network, such as Tailscale. See [host setup](docs/openab-host-setup.md).
-3. Add the Runtime URL and management credential in the app, then create or select a Shell. Install any coding CLI you want to use on the host.
+2. Prepare a reachable [openab-pty Runtime](https://github.com/openabdev/openab-pty). Follow its upstream documentation for installation, images, and deployment.
+3. Add its HTTPS base URL and management credential in art-term, then create or select a Shell. See [connection prerequisites](docs/openab-host-setup.md), including the host helpers currently required to create new Shells.
 
-Desktop preview is optional and needs a separately configured shared desktop with instance-mcp. The app does not install the remote services or coding tools.
+art-term connects through the Runtime's HTTPS API and WSS terminal protocol, independently of its installation method. Desktop preview is optional and needs a separately configured shared desktop with instance-mcp. Install any coding CLI you want to use in the remote Shell environment.
 
 ## How the pieces connect
 

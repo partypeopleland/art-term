@@ -1,8 +1,10 @@
-# AI 操作指南：安裝官方 openab-pty 受控端
+# 選用工具：Linux 原生 openab-pty 安裝指南
+
+本頁只說明本專案既有 `scripts/init-host.sh` 的 Linux 原生安裝流程，供選用該工具的維護者或其 AI 查閱。一般使用者先看[使用前準備](openab-host-setup.md)；其他安裝、映像與部署方式請參考 [openab-pty 上游文件](https://github.com/openabdev/openab-pty)。art-term 只需要可達的 HTTPS／WSS 入口與管理憑證，不要求使用此腳本。
 
 0.1.26 起，新建 Shell 另需私有 tmux 3.6a 與讀頁支援檔；完成 Runtime 安裝後依[終端歷史主機準備](refarch/terminal-history.md#主機準備)設定。既有 Shell 可繼續連線。
 
-本頁供使用者的 AI 執行 Linux Host 安裝。目標是讓 art-term 以 HTTPS／WSS 操作指定帳號的遠端 Shell；使用者只需準備依賴與在 App 填入連線資訊。給使用者看的入口是[使用前準備](openab-host-setup.md)，進階故障、升級與復原細節見 [Host 維護](platforms/linux-host-maintenance.md)。
+以下步驟在指定的 Linux Host 安裝未修改的官方 Runtime，並提供 art-term 使用的 HTTPS／WSS 入口。進階故障、升級與復原細節見 [Host 維護](platforms/linux-host-maintenance.md)。
 
 ## 執行範圍與完成條件
 

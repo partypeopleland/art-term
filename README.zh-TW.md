@@ -33,10 +33,10 @@ Linux TUI 在真正的終端機中擷取，Host、Shell 輸出與 Screen 均使�
 ## 開始使用
 
 1. 到 [Releases](https://github.com/partypeopleland/art-term/releases/latest) 下載 Windows ZIP、Android ARM64 APK 或 Ubuntu x86_64 壓縮檔。
-2. 準備已安裝官方 openab-pty Runtime 的 Linux 主機，讓裝置能透過私人網路連線，例如 Tailscale。詳見[使用前準備](docs/openab-host-setup.md)。
-3. 在 App 新增 Runtime 網址與管理憑證，建立或選擇 Shell。想使用的 coding CLI 要先裝在主機上。
+2. 自行準備可連線的 [openab-pty Runtime](https://github.com/openabdev/openab-pty)，安裝、映像與部署方式請參考上游文件。
+3. 在 art-term 新增其 HTTPS 根網址與管理憑證，建立或選擇 Shell。[使用前準備](docs/openab-host-setup.md)另列目前新建 Shell 所需的受控端支援檔。
 
-桌面預覽是選配，需要另外準備共享桌面與 instance-mcp。App 不會代裝遠端服務或 coding 工具。
+art-term 依 Runtime 的 HTTPS API 與 WSS 終端協定連線，不依賴特定安裝方式。桌面預覽是選配，需要另外準備共享桌面與 instance-mcp；想使用的 coding CLI 要先裝在遠端 Shell 環境中。
 
 ## 系統怎麼連在一起
 

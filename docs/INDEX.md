@@ -27,8 +27,8 @@
 | APK UI 測試操作與覆蓋清單 | [UI 測試](../scripts/android-regression/ui-matrix.md) |
 | Linux 真官方 Runtime／helper／Host fixture驗收 | [Linux 回歸測試](platforms/linux-regression.md) |
 | Android 工具鏈、觸控／背景、原簽章與驗收 | [Android](platforms/android.md) |
-| 使用者：必要依賴與交給 AI 的安裝 prompt | [使用前準備](openab-host-setup.md) |
-| AI：檢查受控端、安裝 Runtime 與驗證連線 | [AI 安裝操作指南](openab-host-installation.md) |
+| 使用者：上游 Runtime 文件、連線資訊與功能依賴 | [使用前準備](openab-host-setup.md) |
+| 維護者／AI：選用本專案 Linux 原生安裝工具 | [選用安裝工具指南](openab-host-installation.md) |
 | Host 進階安裝、排查、升級、復原與移除 | [Host 維護](platforms/linux-host-maintenance.md) |
 | 原生 Runtime 邊界的決策理由 | [ADR-001](adr/ADR-001-client-boundaries.md) |
 | Android 語音輸入現況、決策與待觀察事項 | [BDR-001](bdr/BDR-001-android-voice-input.md) |
