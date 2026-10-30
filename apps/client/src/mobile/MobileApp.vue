@@ -1020,7 +1020,7 @@ onBeforeUnmount(() => {
   overflow: visible;
 }
 
-.m-app :deep(.runtime-host-backdrop),
+.m-app :deep(.runtime-host-backdrop:not(.embedded-host-page)),
 .m-app :deep(.runtime-conn-backdrop) {
   position: absolute;
   padding: 8px;
@@ -1034,10 +1034,12 @@ onBeforeUnmount(() => {
   padding: 12px;
   overscroll-behavior: contain;
 }
-.m-app :deep(.runtime-hosts input),
+.m-app :deep(.runtime-hosts input:not([type=radio])),
 .m-app :deep(.runtime-conn input) { font-size: 16px; min-height: 44px; box-sizing: border-box; }
-.m-app :deep(.runtime-hosts button),
+.m-app :deep(.runtime-hosts button:not(.drag-handle)),
 .m-app :deep(.runtime-conn button) { min-height: 44px; touch-action: manipulation; }
+.m-app :deep(.embedded-host-page .runtime-hosts) { max-height: none; }
+.m-app :deep(.runtime-hosts .drag-handle) { touch-action: none; }
 .m-app :deep(.runtime .mini) { min-height: 44px; min-width: 44px; touch-action: manipulation; }
 
 .sheet-host :deep(.shot) {
