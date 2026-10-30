@@ -21,11 +21,23 @@
 | 真官方 Runtime configure | Rust 原生 configure→未修改官方 Runtime 管理 PTY→adapter→固定 client→A／B；raw／關 echo READY 握手，token 不在 replay／history／cmdline／environ／log；管理 Shell 刪除與名額恢復；renew 後仍可 configure／clear |
 | 工具生命週期 | 無 adapter 不假報 ready、auth／timeout／isError、clear 拒新呼叫、CLI stdio EOF、關頁、detach 與 App 關閉保留 Shell 選擇、Shell 結束清記憶體／socket、背景／晚到回應、App 重啟／takeover 核對既有指派與目前設定後恢復；owner／0700／非 symlink 及同 UID 邊界 |
 | CLI 契約 | 確定性檢查 Codex -c stdio command／args 不含 URL／token、timeout 75秒、其他 CLI 不猜語法、不對既有程式偷偷輸入；此項不等於真 Codex／AI 已測 |
-| Windows 平台呈現 | 保留200px可調左欄／左下預覽／右側終端與全頁設定；同一 xterm 原視窗直接顯示較早內容，字型主題與選取保持；首個小幅 wheel、閱讀中輸出保持、下捲自然追尾、閱讀中輸入／貼上、中文／Backspace、resize／Theme／焦點／表單快捷鍵 |
+| Windows 平台呈現 | 保留360px預設可調左欄／左下預覽／右側終端與全頁設定；同一 xterm 原視窗直接顯示較早內容，字型主題與選取保持；首個小幅 wheel、閱讀中輸出保持、下捲自然追尾、閱讀中輸入／貼上、中文／Backspace、resize／Theme／焦點／表單快捷鍵 |
 | 共同受控端歷史契約 | 同一 helper／Rust channel 向後相容提供 snapshot 五操作及中立 scroll／follow；Android HostHistoryWindow 原流程不變，Windows HostTerminalViewport 使用原 PTY；能力協商、舊 helper 不收未知操作、busy／inner alternate、輸入排序／protocol reply、hidden／close／SIGKILL 只清自有狀態；無平台專用安裝，兩平台呈現另測 |
 | 回歸 | tmux 歷史按需讀頁、輸入／ACK／重連、固定滑動頂列／四主題／語音與鍵列、Host／Screen 混合搬移、Screen-only 還原及舊版 Host 檔相容、無私人預填 |
 
 ARM64 手機、現場網路／MCP、實際 Codex CLI 與 AI 模型各自需要明確結果；固定 client E2E、命令契約或舊 helper 案例不替代它們。無授權不操作 Owner 手機或既有共享服務。
+
+## 統一連線管理
+
+| 範圍 | 必須驗證 |
+|---|---|
+| 共用設定頁 | Computer／Agent／Screen 同一列表，新增圖示才顯示表單，三種類型 radio 同行；編輯、測試、刪除後顯示提示，網址完整可讀 |
+| 分組排序 | 同類型滑鼠／觸控拖曳與鍵盤排序，跨類型拒絕；保存、重開、導覽及匯出／匯入保留順序；過期來源、重複或缺少 ID 不改設定 |
+| 顯示名稱 | 中文、自訂／留空預設、20 字接受與 21 字拒絕、重開及搬移；標籤不改遠端工作名稱 |
+| 手動 CLI | Windows／APK 沒有專用啟動控制；移除專用啟動命令後，終端輸入、Screen 選擇及 Shell 工具配置仍正常 |
+| 手機導覽 | art-term 首頁、Main、Connect 三頁可點擊及雙向滑動，頂列保持固定，拖曳排序不觸發頁面滑動 |
+
+以上是驗收條件；每次通過狀態以對應來源及實際檢查結果為準。TUI 本輪沿用共用順序與名稱，互動重新設計不在本輪範圍。
 
 ## Ubuntu TUI 的對應案例
 
@@ -38,7 +50,7 @@ TUI 以獨立的 [TUI 功能回歸](../platforms/tui-regression.md)與 [cases.js
 | 連線新增、測試、改名、分類、刪除後重開 | W-CRUD：缺檔空清單、增改刪、重開保存 | A-CRUD：同操作並經 Android Keystore 保存 | TOML 唯一來源、revision／外部變更與並行衝突 |
 | 編輯時沒有重填密碼，不應失去原憑證 | W-CRUD：空白憑證編輯後原認證可用 | A-CRUD：編輯後及重開後原認證可用 | DPAPI context 綁定、錯 schema／Host／origin／revision 拒絕 |
 | 終端輸入與多個工作不串線 | W-TERM：真 xterm Unicode、resize、兩分頁隔離 | A-TERM：Unicode composer、觸控按鍵、resize、分頁隔離 | L-RUNTIME：真 shell Unicode／stty resize；stream unit驗byte／ACK／Gap |
-| 從工作頁啟動已設定的 coding CLI | W-TERM：按啟動按鈕，核對送出的命令與含空格參數 | A-TERM：相同按鈕與命令檢查 | 只驗證命令組裝與傳送；fixture 不執行真的 coding CLI |
+| 手動啟動 coding CLI | W-TERM：沒有專用啟動按鈕，終端輸入仍送往原 Shell | A-TERM：相同入口移除及手動輸入檢查 | 舊 coding_cli 僅保留相容讀取；Screen supervisor／broker 不受影響 |
 | 暫時斷線不重播命令，也不擅自接管工作 | W-TERM：原 token／游標恢復，不 renew、不重送輸入 | A-TERM：同 token／游標恢復及輸入不重播 | L-RUNTIME：官方 Runtime 原 grant 恢復、generation不變、不重播舊輸出 |
 | 預覽立即出圖，定時／手動更新正常 | W-PREVIEW：大 PNG 真解碼、首圖／30秒／手動／停用 | A-PREVIEW：真 APK 圖片解碼及相同更新操作 | L-PREVIEW：真 helper→真 PTY 大圖；decoder/framing unit驗錯誤資料 |
 | 截圖不能污染或刪除使用者工作 | W-PREVIEW：工作 Shell 無截圖命令，只刪自建暫時 Shell | A-PREVIEW：同隔離與清理檢查 | L-PREVIEW：兩個真 PTY 隔離；取消／晚到回覆 unit保護 |

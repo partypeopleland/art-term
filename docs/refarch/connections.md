@@ -45,14 +45,20 @@ name = "Example Host"
 openab_pty_url = "https://runtime.example.test:8443"
 category = "host"
 desktop_transport = "runtime-mcp"
-coding_cli = { id = "assistant", name = "Assistant", command = "assistant-cli", args = ["--model", "example-model"] }
+display_name = "開發助手"
 ```
 
 id 為舊版小寫 slug（1–32 個 ASCII 小寫字母／數字／非首字元連字號），或 App 產生的 canonical UUID。id 唯一，revision 為正整數，用來辨識同一筆設定的版本。category 為 host 或 agent，只決定分類；desktop_transport 與 coding_cli 均可省略，不從分類推斷能力。舊 desktop_transport 保留解析，只供未選 Screen 的 Windows 舊分頁 Runtime 截圖相容；不控制 Android Screen 入口或明確選取後的直接 MCP 路由。更新沿用 id、增加 revision；未知欄位拒絕，錯誤不回印原輸入。
 
-每筆連線可設定一個 coding_cli：id 為上述 slug、name 最多 80 字元、command 最多 256 UTF-8 bytes 且不以 `-` 開頭；最多 32 個 args，各 ≤1024 bytes，command 與 args 合計 ≤8192 bytes，皆拒絕控制字元。使用者在已連線 Shell 明確點擊後，才逐參數 POSIX quoting 送出；重連不自動執行，App 不安裝或在本機執行 CLI。
+`display_name` 是連線名稱下方的自訂顯示文字，最多 20 個 Unicode 字元，支援中文，拒絕控制字元；空白或未設定時沿用既有預設。它不修改遠端 Shell 名稱或啟動命令。舊檔案的 `coding_cli` 保留讀取相容及預設標籤，但 App 不提供 CLI 啟動按鈕，也不執行其中的命令；由使用者在終端自行輸入。
 
-metadata 直接來自這份 TOML。新增／編輯 Runtime 表單修改分類並保留既有相容欄位與 CLI 能力。target（後端核發的連線目標）發出後凍結 Runtime 與 CLI 能力，後續設定更新不改綁既有分頁；Screen 由使用者在分頁另行明確選擇，不由 Host metadata 推導。
+metadata 直接來自這份 TOML。新增／編輯 Runtime 表單修改分類並保留既有相容欄位與 CLI 能力。target（後端核發的連線目標）發出後凍結 Runtime 能力，後續設定更新不改綁既有分頁；Screen 由使用者在分頁另行明確選擇，不由 Host metadata 推導。
+
+## 統一管理與排序
+
+Windows 與 Android 的「連線」頁統一列出 Computer、Agent、Screen，點右上新增圖示才展開共用表單，類型以一行 radio 選項呈現。操作結果在視窗上方顯示短暫提示，網址可換行顯示。拖曳把手或把手上的方向鍵可調整同類型內順序，不能跨類型；左側／Main 清單沿用保存順序。
+
+排序使用原有陣列順序，原子保存前核對目前來源及原本順序，失敗不更動記憶體。只排序，不更新 id、revision 或憑證密文，因此不使現有工作失效。TUI 沿用共用設定順序與顯示名稱，介面重設另行處理。
 
 ## 獨立 Screens 集合
 

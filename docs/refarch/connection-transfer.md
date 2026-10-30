@@ -2,7 +2,7 @@
 
 Windows 與 Android 共用連線匯出／匯入流程；兩平台入口都位於全站齒輪設定頁的「連線設定」。檔案由使用者自行搬移；App 不提供帳號、雲端備份或自動同步。正常公開建置也能還原，不需要私人 bootstrap、來源裝置的 DPAPI／Keystore 金鑰或特殊 APK。
 
-匯出／匯入包含受控端 Host／Agent 連線與獨立 Screens，可選擇其中一類或混合搬移。Screen 名稱與 MCP URL 隨設定搬移，token 僅放在密碼加密檔中。匯入一次保存所有選定項目，未選取的本機 Host 與 Screen 保留；本機分頁、桌面選擇與 Shell 授權不隨檔案搬移。備份及降版方式見[連線設定](connections.md#舊設定與版本升級)。
+匯出／匯入包含受控端 Host／Agent 連線與獨立 Screens，可選擇其中一類或混合搬移。Screen 名稱與 MCP URL、Host 自訂顯示名稱及各類型內的清單順序隨設定搬移，token 僅放在密碼加密檔中。匯入一次保存所有選定項目，未選取的本機 Host 與 Screen 保留；本機分頁、桌面選擇與 Shell 授權不隨檔案搬移。備份及降版方式見[連線設定](connections.md#舊設定與版本升級)。
 
 0.1.18 不再讀取 0.1.17 的使用者目錄 Host JSON。升級前先用舊版完成匯出，再開啟新版匯入；舊資料與平台金鑰保留。不要以複製 DPAPI／Keystore 密文取代跨裝置匯出。
 
