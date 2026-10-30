@@ -298,8 +298,6 @@ export function createAppController(
       hostId: host.dto.id,
       hostLabel: host.dto.label,
       label: target.label,
-      // The coding-CLI hint is explicit backend metadata only — display
-      // text is never interpreted for it.
       status: 'connecting',
       errorMsg: '',
       notice: '',
