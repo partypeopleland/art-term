@@ -420,6 +420,7 @@ impl Backend {
                 edit.base_url,
                 credential.ok_or(ApiError::Auth)?,
                 Some(art_term_core::connections::ConnectionMetadata {
+                    display_name: None,
                     category: edit.category,
                     ..Default::default()
                 }),
@@ -878,6 +879,7 @@ mod tests {
         let (_root, backend) = backend();
         let first = add(&backend).await;
         let metadata = art_term_core::connections::ConnectionMetadata {
+            display_name: None,
             category: art_term_core::connections::Category::Agent,
             ..Default::default()
         };

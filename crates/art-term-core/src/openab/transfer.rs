@@ -21,6 +21,8 @@ const DOMAIN: &[u8] = b"art-term-connections:v1:encrypted:argon2id:v19:m65536:t3
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Metadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    display_name: Option<String>,
     category: Category,
     desktop_transport: Option<String>,
     coding_cli: Option<Cli>,
@@ -36,6 +38,7 @@ struct Cli {
 impl From<&ConnectionMetadata> for Metadata {
     fn from(m: &ConnectionMetadata) -> Self {
         Self {
+            display_name: m.display_name.clone(),
             category: m.category,
             desktop_transport: m.desktop_transport.clone(),
             coding_cli: m.coding_cli.as_ref().map(|c| Cli {
@@ -50,6 +53,7 @@ impl From<&ConnectionMetadata> for Metadata {
 impl From<Metadata> for ConnectionMetadata {
     fn from(m: Metadata) -> Self {
         Self {
+            display_name: m.display_name,
             category: m.category,
             desktop_transport: m.desktop_transport,
             coding_cli: m.coding_cli.map(|c| CodingCli {
@@ -307,6 +311,7 @@ impl Payload {
                 return Err(ApiError::Protocol);
             }
             e.metadata.validate().map_err(|_| ApiError::Protocol)?;
+            e.metadata.normalize_display_name();
             size += e.name.len()
                 + e.origin.len()
                 + serde_json::to_vec(&Metadata::from(&e.metadata))

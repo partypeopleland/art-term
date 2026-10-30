@@ -20,6 +20,7 @@ fn payload(private: bool) -> Payload {
             name: "Fixture Agent".into(),
             origin: "https://agent.example.test".into(),
             metadata: ConnectionMetadata {
+                display_name: None,
                 category: Category::Agent,
                 desktop_transport: Some("runtime-mcp".into()),
                 coding_cli: Some(CodingCli {

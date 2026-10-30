@@ -40,10 +40,6 @@ pub struct TargetDto {
     pub running: bool,
     pub phase: String,
     pub desktop_available: bool,
-    /// Configured coding CLI hint (`"codex"`) — explicit config only,
-    /// never inferred from display text.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub coding_cli: Option<crate::connections::CodingCli>,
 }
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

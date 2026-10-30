@@ -140,6 +140,7 @@ fn metadata_restart_legacy_credential_and_revision_continuity() {
         secret().expose()
     );
     let metadata = ConnectionMetadata {
+        display_name: None,
         category: Category::Agent,
         desktop_transport: Some("runtime-mcp".into()),
         coding_cli: Some(CodingCli {
@@ -186,7 +187,16 @@ fn metadata_restart_legacy_credential_and_revision_continuity() {
     let without_catalog = resolve_metadata(snapshot.profile.metadata.as_ref(), None, &p.base_url);
     let frozen = mapping_from_metadata(&without_catalog);
     assert!(matches!(frozen.route, Some(DesktopRoute::Native)));
-    assert_eq!(frozen.coding_cli.as_ref().unwrap().command, "another-cli");
+    assert_eq!(
+        next.metadata
+            .as_ref()
+            .unwrap()
+            .coding_cli
+            .as_ref()
+            .unwrap()
+            .command,
+        "another-cli"
+    );
     let disabled = restarted
         .update_with_metadata(
             &p.id,
@@ -266,6 +276,7 @@ fn failed_windows_replace_preserves_disk_and_memory() {
             p.base_url.clone(),
             None,
             Some(crate::connections::ConnectionMetadata {
+                display_name: None,
                 category: crate::connections::Category::Agent,
                 ..Default::default()
             })
@@ -1583,4 +1594,87 @@ fn standalone_desktop_token_context_and_host_import_preserve_the_catalog() {
         1,
         "invalid desktop data must not destroy Hosts"
     );
+}
+
+#[test]
+fn connection_display_name_accepts_chinese_and_bounds_characters() {
+    let metadata: crate::connections::ConnectionMetadata =
+        serde_json::from_value(serde_json::json!({
+            "category": "agent", "display_name": "開發助手"
+        }))
+        .expect("Chinese display names must be accepted independently of CLI commands");
+    metadata.validate().unwrap();
+    let long: crate::connections::ConnectionMetadata = serde_json::from_value(serde_json::json!({
+        "category": "agent", "display_name": "字".repeat(21)
+    }))
+    .unwrap();
+    assert!(long.validate().is_err());
+    let boundary: crate::connections::ConnectionMetadata =
+        serde_json::from_value(serde_json::json!({
+            "category": "agent", "display_name": "字".repeat(20)
+        }))
+        .unwrap();
+    boundary.validate().unwrap();
+}
+
+#[test]
+fn connection_order_is_persistent_bounded_and_keeps_credentials() {
+    use super::profiles::ConnectionKind;
+    use crate::connections::{Category, ConnectionMetadata};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("connections.toml");
+    let store = HostStore::load(path.clone(), Arc::new(FixtureCipher)).unwrap();
+    let a = store
+        .add_with_metadata(
+            "A".into(),
+            "https://a.test".into(),
+            secret(),
+            Some(ConnectionMetadata {
+                category: Category::Agent,
+                ..Default::default()
+            }),
+        )
+        .unwrap();
+    let h = store
+        .add("Host".into(), "https://h.test".into(), secret())
+        .unwrap();
+    let b = store
+        .add_with_metadata(
+            "B".into(),
+            "https://b.test".into(),
+            secret(),
+            Some(ConnectionMetadata {
+                category: Category::Agent,
+                ..Default::default()
+            }),
+        )
+        .unwrap();
+    let before = [a.id.clone(), b.id.clone()];
+    let after = [b.id.clone(), a.id.clone()];
+    store
+        .reorder_connections(ConnectionKind::Agent, &before, &after)
+        .expect("same-kind order must save");
+    assert_eq!(store.list().unwrap(), vec![b.clone(), h.clone(), a.clone()]);
+    assert_eq!(
+        store.snapshot(&a.id).unwrap().credential.expose(),
+        secret().expose()
+    );
+    let loaded = HostStore::load(path.clone(), Arc::new(FixtureCipher)).unwrap();
+    assert_eq!(
+        loaded.list().unwrap(),
+        vec![b.clone(), h.clone(), a.clone()]
+    );
+    assert!(store
+        .reorder_connections(ConnectionKind::Agent, &before, &after)
+        .is_err());
+    for invalid in [
+        vec![a.id.clone(), h.id.clone()],
+        vec![a.id.clone()],
+        vec![a.id.clone(), a.id.clone()],
+    ] {
+        assert!(store
+            .reorder_connections(ConnectionKind::Agent, &after, &invalid)
+            .is_err());
+    }
+    assert_eq!(store.list().unwrap(), vec![b, h, a]);
 }

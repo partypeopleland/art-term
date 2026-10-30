@@ -7,7 +7,7 @@ import type { TabState } from '../src/shared/state/controller'
 import { boundPanel, resizeEdges, resizePanel } from '../src/shared/components/preview-window'
 
 const tab: TabState = {
-  key: 'test', targetId: 'test', hostId: 'host', hostLabel: 'Host', label: 'Shell', codingCli: null,
+  key: 'test', targetId: 'test', hostId: 'host', hostLabel: 'Host', label: 'Shell',
   status: 'live', errorMsg: '', notice: '', sessionId: 'test', remoteSession: 'shell', runtime: true,
   runtimeAgent: false, exitCode: null, desktopAvailable: true, desktopEnabled: true, desktopBusy: false,
   desktopMsg: '', desktopError: '', previewVisible: true, shot: null, shotError: '', captureGen: 0,

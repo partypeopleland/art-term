@@ -17,6 +17,7 @@ export interface CodingCli {
 }
 export interface ConnectionMetadata {
   category: 'host' | 'agent'
+  display_name?: string | null
   desktop_transport?: 'runtime-mcp' | null
   coding_cli?: CodingCli | null
 }
@@ -34,8 +35,6 @@ export interface TargetDto {
   /** 'ready' (unattached) or 'attached' — drives explicit takeover UI. */
   phase: string
   desktopAvailable: boolean
-  /** Frozen non-secret CLI definition from effective connection metadata. */
-  codingCli?: CodingCli
 }
 
 export interface HostDto {
@@ -170,7 +169,6 @@ export interface Transport {
   instanceSelect?(sessionId: string, desktopId: string, expectedRevision: number): Promise<InstanceSelection>
   instanceRestore?(sessionId: string): Promise<InstanceSelection | null>
   instanceClear?(sessionId: string): Promise<void>
-  instanceLaunch?(sessionId: string): Promise<InstanceSelection>
 
   transferExport(input: TransferExportInput): Promise<{ status: 'saved' | 'cancelled' }>
   transferPickImport(): Promise<TransferPreview>
@@ -187,6 +185,7 @@ export interface Transport {
   runtimeHosts(): Promise<RuntimeHostDto[]>
   runtimeSaveHost(input: RuntimeHostInput): Promise<RuntimeHostDto>
   runtimeDeleteHost(id: string, expectedRevision: number): Promise<void>
+  runtimeReorderConnections?(kind: 'host' | 'agent' | 'screen', expectedIds: string[], orderedIds: string[]): Promise<void>
   runtimeTestHost(id: string, expectedRevision: number): Promise<RuntimeHostTestDto>
   open(targetId: string, rows: number, cols: number): Promise<SessionDto>
   /** Pull max bounded output; raw bytes. */
@@ -212,10 +211,12 @@ export interface RuntimeHostDto {
   agentId?: string
   agentName?: string
   agentTool?: string
+  displayName?: string
 }
 
 /** One-shot masked input; never retained after submission. */
 export interface RuntimeHostInput {
+  displayName?: string
   category?: 'host' | 'agent'
   metadata?: ConnectionMetadata
   id?: string

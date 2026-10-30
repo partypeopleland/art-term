@@ -146,14 +146,3 @@ pub async fn gui_instance_clear(
         .await
         .map_err(|_| "預覽已停止，遠端工具取消未確認；請重試或結束 CLI".into())
 }
-#[tauri::command]
-pub async fn gui_instance_launch(
-    hosts: State<'_, Arc<RuntimeHosts>>,
-    sessions: State<'_, Arc<RuntimeSessions>>,
-    session_id: String,
-) -> Result<InstanceSelection, String> {
-    sessions
-        .launch_instance(&hosts, &session_id)
-        .await
-        .map_err(|_| "工具入口未確認啟動；本輪支援 Codex，請查看終端狀態後重新選擇桌面".into())
-}

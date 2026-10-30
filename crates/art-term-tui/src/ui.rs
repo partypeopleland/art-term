@@ -557,7 +557,15 @@ impl App {
                 let selection = HostSelection::from(host);
                 rows.push(TreeRow {
                     key: format!("host:{}", host.id),
-                    label: format!("  {}", safe(&host.name)),
+                    label: match host
+                        .metadata
+                        .as_ref()
+                        .and_then(|m| m.display_name.as_ref())
+                        .filter(|name| !name.trim().is_empty())
+                    {
+                        Some(name) => format!("  {} / {}", safe(&host.name), safe(name)),
+                        None => format!("  {}", safe(&host.name)),
+                    },
                     action: Some(TreeAction::Host(index)),
                 });
                 rows.push(TreeRow {

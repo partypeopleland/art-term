@@ -3,7 +3,6 @@ import type { ComputedRef, Ref } from 'vue'
 import { asConnectionError } from '../transport/types'
 import { hostErrorText } from '../transport/host-error'
 import type {
-  CodingCli,
   InstanceDesktop,
   HostDto,
   OutputDto,
@@ -21,22 +20,6 @@ const WRITE_CAP = 256 * 1024
 const WRITE_CHUNK = 16 * 1024
 const DEFAULT_IDLE_POLL_MS = 20
 
-/** Bound POSIX words; keep the Codex button inline and ordinary words unquoted. */
-export function codingCliInput(cli: CodingCli): string | null {
-  if (typeof cli.command !== 'string' || !cli.command || cli.command.length > 256 || cli.command.startsWith('-') ||
-      !Array.isArray(cli.args) || cli.args.length > 32) return null
-  const codex = cli.id === 'codex'
-  const args = codex
-    ? ['--yolo', '--no-alt-screen', ...cli.args.filter(arg => arg !== '--yolo' && arg !== '--no-alt-screen')]
-    : cli.args
-  const words = [cli.command, ...args]
-  if (words.some(w => typeof w !== 'string' || w.length > 1024 || /[\u0000-\u001f\u007f-\u009f]/u.test(w)) || words.reduce((n, w) => n + new TextEncoder().encode(w).length, 0) > 8192) return null
-  return words.map((w, index) => {
-    const plain = index === 0 ? /^(?:[A-Za-z0-9_./-]+\/)?codex$/.test(w) : /^[A-Za-z0-9_./:@%+=,-]+$/.test(w)
-    return codex && plain ? w : "'" + w.replaceAll("'", "'\\''") + "'"
-  }).join(' ') + '\r'
-}
-
 export type TabStatus = 'connecting' | 'live' | 'exited' | 'error'
 
 export interface ShotState {
@@ -52,7 +35,6 @@ export interface TabState {
   hostId: string
   hostLabel: string
   label: string
-  codingCli: CodingCli | null
   status: TabStatus
   errorMsg: string
   notice: string
@@ -140,7 +122,6 @@ export interface AppController {
   isSwitchKey(e: KeyboardEvent): boolean
   handleKey(e: KeyboardEvent): boolean
   sendInput(tab: TabState, text: string): void
-  launchCodingCli(tab: TabState): void
   requestResize(tab: TabState, rows: number, cols: number): void
   setDesktop(tab: TabState, enabled: boolean): Promise<void>
   setPreviewVisible(tab: TabState, visible: boolean): void
@@ -319,7 +300,6 @@ export function createAppController(
       label: target.label,
       // The coding-CLI hint is explicit backend metadata only — display
       // text is never interpreted for it.
-      codingCli: target.codingCli ? { ...target.codingCli, args: [...target.codingCli.args] } : null,
       status: 'connecting',
       errorMsg: '',
       notice: '',
@@ -660,14 +640,6 @@ export function createAppController(
       tab.writeBuf = tab.writeBuf.concat(bytes)
     }
     void flushWrite(tab)
-  }
-
-  function launchCodingCli(tab: TabState): void {
-    if (!tab.codingCli || tab.status !== 'live' || hidden || tab.closed) return
-    const command = codingCliInput(tab.codingCli)
-    if (command === null) return
-    sendInput(tab, command)
-    tab.term?.focus()
   }
 
   async function flushWrite(tab: TabState): Promise<void> {
@@ -1128,7 +1100,6 @@ export function createAppController(
     isSwitchKey,
     handleKey,
     sendInput,
-    launchCodingCli,
     requestResize,
     setDesktop,
     setPreviewVisible,

@@ -20,8 +20,6 @@ pub enum DesktopRoute {
 pub struct RuntimeMapping {
     /// Frozen capability, independent of Host/Agent classification.
     pub route: Option<DesktopRoute>,
-    /// Frozen non-secret CLI definition, independent of desktop availability.
-    pub coding_cli: Option<crate::connections::CodingCli>,
 }
 
 /// One effective metadata policy for classification and frozen capabilities.
@@ -47,7 +45,6 @@ pub fn mapping_from_metadata(metadata: &crate::connections::ConnectionMetadata) 
             .as_deref()
             .filter(|v| *v == "runtime-mcp")
             .map(|_| DesktopRoute::Native),
-        coding_cli: metadata.coding_cli.clone(),
     }
 }
 pub fn mapping_for(connections: &Connections, canonical_origin: &str) -> Option<RuntimeMapping> {
@@ -73,10 +70,6 @@ mod tests {
         let endpoint = crate::connections::parse(ENDPOINT_CONTRACT).unwrap();
         let mapped = mapping_for(&endpoint, "https://runtime.nuc.example.invalid/").unwrap();
         assert!(matches!(mapped.route, Some(DesktopRoute::Native)));
-        assert_eq!(
-            mapped.coding_cli.as_ref().map(|c| c.id.as_str()),
-            Some("codex")
-        );
 
         let connections = contract();
         let hana = mapping_for(&connections, "https://runtime.hana.example.invalid/").unwrap();
@@ -113,7 +106,6 @@ mod tests {
         let parsed = crate::connections::parse(&source).unwrap();
         let mapped = mapping_for(&parsed, "https://other.example.invalid/").unwrap();
         assert!(matches!(mapped.route, Some(DesktopRoute::Native)));
-        assert!(mapped.coding_cli.is_none());
         assert!(mapping_for(&parsed, "https://runtime.nuc.example.invalid/").is_none());
     }
 

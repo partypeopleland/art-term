@@ -80,6 +80,8 @@ pub enum Category {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct ConnectionMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
     pub category: Category,
     #[serde(default)]
     pub desktop_transport: Option<String>,
@@ -89,6 +91,7 @@ pub struct ConnectionMetadata {
 impl Default for ConnectionMetadata {
     fn default() -> Self {
         Self {
+            display_name: None,
             category: Category::Host,
             desktop_transport: None,
             coding_cli: None,
@@ -96,7 +99,20 @@ impl Default for ConnectionMetadata {
     }
 }
 impl ConnectionMetadata {
+    pub fn normalize_display_name(&mut self) {
+        self.display_name = self
+            .display_name
+            .take()
+            .map(|v| v.trim().to_owned())
+            .filter(|v| !v.is_empty());
+    }
     pub fn validate(&self) -> Result<()> {
+        if let Some(name) = &self.display_name {
+            ensure!(
+                name.chars().count() <= 20 && !name.chars().any(char::is_control),
+                "invalid display name"
+            );
+        }
         ensure!(
             self.desktop_transport
                 .as_deref()
@@ -151,6 +167,7 @@ struct RawFile {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawConnection {
+    display_name: Option<String>,
     id: String,
     name: String,
     openab_pty_url: String,
@@ -286,6 +303,7 @@ fn parse_v4(raw: RawFile, source: &str) -> Result<Connections> {
             "duplicate connection origin"
         );
         let metadata = ConnectionMetadata {
+            display_name: c.display_name,
             category: c.category,
             desktop_transport: c.desktop_transport,
             coding_cli: c.coding_cli,
@@ -480,6 +498,7 @@ fn finish(
             name: a.name.trim().to_owned(),
             openab_pty_url: origin,
             metadata: ConnectionMetadata {
+                display_name: None,
                 category: Category::Agent,
                 desktop_transport: desktop_transport
                     .or_else(|| desktop_endpoint.map(|_| "runtime-mcp".to_owned())),
@@ -498,6 +517,7 @@ fn finish(
                 id: ep.id,
                 openab_pty_url: origin,
                 metadata: ConnectionMetadata {
+                    display_name: None,
                     category: Category::Host,
                     desktop_transport: Some("runtime-mcp".into()),
                     coding_cli: legacy_cli(ep.coding_cli),

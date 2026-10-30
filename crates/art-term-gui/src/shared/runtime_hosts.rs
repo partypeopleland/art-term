@@ -93,6 +93,7 @@ pub struct HostInput {
     credential: String,
     metadata: Option<art_term_core::connections::ConnectionMetadata>,
     category: Option<art_term_core::connections::Category>,
+    display_name: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -169,6 +170,8 @@ pub struct RuntimeHostDto {
     agent_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     agent_tool: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    display_name: Option<String>,
 }
 impl RuntimeHostDto {
     fn resolved(profile: HostProfile, connections: Option<&Connections>) -> Self {
@@ -192,7 +195,12 @@ impl RuntimeHostDto {
             ),
             agent_id: agent.map(|a| a.id.clone()),
             agent_name: None,
-            agent_tool: metadata.coding_cli.as_ref().map(|c| c.name.clone()),
+            agent_tool: metadata
+                .display_name
+                .clone()
+                .filter(|name| !name.trim().is_empty())
+                .or_else(|| metadata.coding_cli.as_ref().map(|c| c.name.clone())),
+            display_name: metadata.display_name.clone(),
             profile,
         }
     }
@@ -256,6 +264,29 @@ pub async fn gui_runtime_save_host(
                 &input.base_url,
             )?);
         }
+        if let Some(name) = input.display_name {
+            let mut metadata = match input.metadata.take() {
+                Some(metadata) => metadata,
+                None => {
+                    let existing = match &input.id {
+                        Some(id) => hosts
+                            .store()?
+                            .list()?
+                            .into_iter()
+                            .find(|p| &p.id == id)
+                            .and_then(|p| p.metadata),
+                        None => None,
+                    };
+                    existing.unwrap_or_default()
+                }
+            };
+            if name.chars().any(char::is_control) {
+                return Err(ApiError::Protocol);
+            }
+            metadata.display_name = Some(name.trim().to_owned()).filter(|v| !v.is_empty());
+            metadata.validate().map_err(|_| ApiError::Protocol)?;
+            input.metadata = Some(metadata);
+        }
         let profile = match (input.id, input.expected_revision) {
             (Some(id), Some(revision)) => hosts.store()?.update_with_metadata(
                 &id,
@@ -297,6 +328,24 @@ fn category_metadata(
     );
     metadata.category = category;
     Ok(metadata)
+}
+
+#[tauri::command]
+pub async fn gui_runtime_reorder_connections(
+    state: State<'_, Arc<RuntimeHosts>>,
+    kind: art_term_core::openab::profiles::ConnectionKind,
+    expected_ids: Vec<String>,
+    ordered_ids: Vec<String>,
+) -> Reply<()> {
+    let hosts = state.inner().clone();
+    tokio::task::spawn_blocking(move || {
+        hosts
+            .store()?
+            .reorder_connections(kind, &expected_ids, &ordered_ids)
+    })
+    .await
+    .map_err(|_| HostError::from(ApiError::StateChanged))?
+    .map_err(Into::into)
 }
 
 #[tauri::command]
@@ -370,6 +419,7 @@ mod tests {
     fn category_update_preserves_local_and_exact_origin_catalog_capabilities() {
         use art_term_core::connections::{Category, CodingCli, Connection, ConnectionMetadata};
         let capabilities = ConnectionMetadata {
+            display_name: None,
             category: Category::Agent,
             desktop_transport: Some("runtime-mcp".into()),
             coding_cli: Some(CodingCli {
@@ -457,6 +507,9 @@ mod tests {
         );
         let mapping = art_term_core::runtime_preview::mapping_from_metadata(&metadata);
         assert!(mapping.route.is_some());
-        assert_eq!(mapping.coding_cli.unwrap().command, "assistant-cli");
+        assert!(serde_json::to_value(dto)
+            .unwrap()
+            .get("codingCli")
+            .is_none());
     }
 }

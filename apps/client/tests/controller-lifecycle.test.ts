@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { ConnectionError } from '../src/shared/transport/types'
-import { codingCliInput, createAppController } from '../src/shared/state/controller'
+import { createAppController } from '../src/shared/state/controller'
 import { FakeTerm, FakeTransport, deferred, makeHost, makeTarget } from './fake'
 
 async function flush(): Promise<void> {
@@ -9,25 +9,6 @@ async function flush(): Promise<void> {
 
 const host = makeHost('test-host', [makeTarget('test-target', 'test-host', 'host')])
 const group = { dto: host, expanded: true }
-
-it('launches Codex inline with yolo and no unnecessary quotes or duplicate flags', () => {
-  const cli = { id: 'codex', name: 'CODEX', command: 'codex', args: ['--yolo'] }
-  expect(codingCliInput(cli)).toBe('codex --yolo --no-alt-screen\r')
-  expect(codingCliInput({ ...cli, args: [] })).toBe('codex --yolo --no-alt-screen\r')
-  expect(codingCliInput({ ...cli, args: ['--no-alt-screen', '--yolo', '--model', 'a b'] }))
-    .toBe("codex --yolo --no-alt-screen --model 'a b'\r")
-  expect(codingCliInput({ ...cli, args: ['--label', "owner's workspace", '$(literal)', ''] }))
-    .toBe("codex --yolo --no-alt-screen --label 'owner'\\''s workspace' '$(literal)' ''\r")
-})
-
-it('rejects CLI control characters and excessive input before remote write', () => {
-  const cli = { id: 'assistant', name: 'Assistant', command: 'assistant', args: ['--model', 'a b'] }
-  expect(codingCliInput(cli)).toBe("'assistant' '--model' 'a b'\r")
-  expect(codingCliInput({ ...cli, args: ['bad\narg'] })).toBeNull()
-  expect(codingCliInput({ ...cli, command: 'bad\rcommand' })).toBeNull()
-  expect(codingCliInput({ ...cli, args: Array(33).fill('x') })).toBeNull()
-  expect(codingCliInput({ ...cli, args: ['x'.repeat(1025)] })).toBeNull()
-})
 
 describe('mobile lifecycle in shared controller', () => {
   it('uses the gateway fallback when a structured connection failure has no message', async () => {

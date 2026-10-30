@@ -1,3 +1,6 @@
+#[path = "connection_order.rs"]
+mod connection_order;
+pub use connection_order::ConnectionKind;
 #[path = "instance_profiles.rs"]
 mod instance_profiles;
 use super::{
@@ -53,6 +56,8 @@ struct Document {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct DiskConnection {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    display_name: Option<String>,
     id: String,
     revision: u64,
     name: String,
@@ -99,6 +104,7 @@ fn decode(bytes: &[u8]) -> Result<Vec<Record>, ApiError> {
                         base_url: c.openab_pty_url,
                         credential_present: c.credential_ciphertext.is_some(),
                         metadata: Some(crate::connections::ConnectionMetadata {
+                            display_name: c.display_name,
                             category: c.category,
                             desktop_transport: c.desktop_transport,
                             coding_cli: c.coding_cli,
@@ -147,6 +153,7 @@ fn encode(records: &[Record], source: Option<&[u8]>) -> Result<Vec<u8>, ApiError
                 revision: r.profile.revision,
                 name: r.profile.name.clone(),
                 openab_pty_url: r.profile.base_url.clone(),
+                display_name: m.display_name,
                 category: m.category,
                 desktop_transport: m.desktop_transport,
                 coding_cli: m.coding_cli,
@@ -374,8 +381,17 @@ impl HostStore {
         name: String,
         base_url: String,
         credential: Secret,
-        metadata: Option<crate::connections::ConnectionMetadata>,
+        mut metadata: Option<crate::connections::ConnectionMetadata>,
     ) -> Result<HostProfile, ApiError> {
+        if let Some(m) = &mut metadata {
+            if m.display_name
+                .as_ref()
+                .is_some_and(|v| v.chars().any(char::is_control))
+            {
+                return Err(ApiError::Protocol);
+            }
+            m.normalize_display_name();
+        }
         validate_name(&name)?;
         if let Some(m) = &metadata {
             m.validate().map_err(|_| ApiError::Protocol)?;
@@ -421,8 +437,17 @@ impl HostStore {
         name: String,
         base_url: String,
         credential: Option<Secret>,
-        metadata: Option<crate::connections::ConnectionMetadata>,
+        mut metadata: Option<crate::connections::ConnectionMetadata>,
     ) -> Result<HostProfile, ApiError> {
+        if let Some(m) = &mut metadata {
+            if m.display_name
+                .as_ref()
+                .is_some_and(|v| v.chars().any(char::is_control))
+            {
+                return Err(ApiError::Protocol);
+            }
+            m.normalize_display_name();
+        }
         validate_name(&name)?;
         if let Some(m) = &metadata {
             m.validate().map_err(|_| ApiError::Protocol)?;
@@ -658,6 +683,16 @@ impl HostStore {
                 },
             });
         }
+        entries.sort_by_key(|entry| {
+            guard
+                .iter()
+                .position(|r| r.profile.base_url == entry.origin)
+        });
+        desktops.sort_by_key(|entry| {
+            desktop_records
+                .iter()
+                .position(|r| r.profile.mcp_url == entry.mcp_url)
+        });
         let mut payload = super::transfer::Payload { entries, desktops };
         payload.validate()?;
         Ok(payload)

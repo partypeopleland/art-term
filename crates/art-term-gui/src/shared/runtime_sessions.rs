@@ -300,7 +300,6 @@ impl RuntimeSessions {
                 running: true,
                 phase: if attached { "attached" } else { "ready" }.into(),
                 desktop_available: target.desktop.as_ref().is_some_and(|m| m.route.is_some()),
-                coding_cli: target.desktop.as_ref().and_then(|m| m.coding_cli.clone()),
             });
         }
         // A changed profile or session incarnation invalidates the old target;
@@ -322,7 +321,6 @@ impl RuntimeSessions {
             running: true,
             phase: if attached { "attached" } else { "ready" }.into(),
             desktop_available: desktop.as_ref().is_some_and(|m| m.route.is_some()),
-            coding_cli: desktop.as_ref().and_then(|m| m.coding_cli.clone()),
         };
         targets.insert(
             id,
@@ -1457,79 +1455,6 @@ impl RuntimeSessions {
         .await?;
         Ok(())
     }
-    pub async fn launch_instance(
-        &self,
-        hosts: &RuntimeHosts,
-        id: &str,
-    ) -> anyhow::Result<InstanceSelection> {
-        let conn = self
-            .connection(id)
-            .map_err(|_| anyhow::anyhow!("連線已結束"))?;
-        let _guard = conn
-            .desktop_operation
-            .try_lock()
-            .map_err(|_| anyhow::anyhow!("桌面操作進行中"))?;
-        let profile = Self::direct_snapshot(hosts, &conn)?.profile;
-        let epoch = *conn.preview_cancel.borrow();
-        if Self::configure_selected(hosts, &conn, &profile).await? {
-            return Ok(InstanceSelection {
-                desktop: profile,
-                tool_ready: true,
-            });
-        }
-        let (binding, _) = Self::native_binding(hosts, &conn)?;
-        let cli = binding
-            .profile
-            .metadata
-            .as_ref()
-            .and_then(|m| m.coding_cli.clone())
-            .unwrap_or(art_term_core::connections::CodingCli {
-                id: "codex".into(),
-                name: "Codex".into(),
-                command: "codex".into(),
-                args: vec![],
-            });
-        anyhow::ensure!(
-            std::path::Path::new(&cli.command)
-                .file_name()
-                .and_then(|name| name.to_str())
-                == Some("codex"),
-            "此 CLI 尚未支援桌面工具入口；本輪支援 Codex"
-        );
-        let quote = |word: &str| format!("'{}'", word.replace('\'', "'\\''"));
-        let words = std::iter::once(cli.command.as_str())
-            .chain(cli.args.iter().map(String::as_str))
-            .map(quote)
-            .collect::<Vec<_>>()
-            .join(" ");
-        let command = format!("python3 \"$HOME/.local/share/art-term/tools/instance_bridge.py\" launch --binding {} -- {}\r", binding.name, words);
-        anyhow::ensure!(
-            *conn.preview_cancel.borrow() == epoch
-                && Self::direct_snapshot(hosts, &conn)?.profile == profile,
-            "桌面已切換"
-        );
-        self.write(id, command.as_bytes(), false)
-            .await
-            .map_err(|_| anyhow::anyhow!("無法啟動 CLI"))?;
-        // Exactly one explicit launch. Only configuration is retried while Codex starts stdio.
-        for _ in 0..10 {
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            anyhow::ensure!(
-                !conn.closed.load(Ordering::SeqCst)
-                    && *conn.preview_cancel.borrow() == epoch
-                    && Self::direct_snapshot(hosts, &conn)?.profile == profile,
-                "桌面已切換"
-            );
-            if Self::configure_selected(hosts, &conn, &profile).await? {
-                return Ok(InstanceSelection {
-                    desktop: profile,
-                    tool_ready: true,
-                });
-            }
-        }
-        anyhow::bail!("Codex 工具入口尚未確認啟動；請查看終端，桌面預覽仍可使用")
-    }
-
     pub async fn close(&self, id: &str) -> Reply<()> {
         let connection = self
             .sessions
@@ -2050,33 +1975,18 @@ mod tests {
         let sessions = RuntimeSessions::default();
         let mapping = RuntimeMapping {
             route: Some(DesktopRoute::Native),
-            coding_cli: Some(art_term_core::connections::CodingCli {
-                id: "fixture".into(),
-                name: "Fixture CLI".into(),
-                command: "printf".into(),
-                args: vec!["hello".into()],
-            }),
         };
         let dto = sessions
             .issue(binding(), None, false, Some(mapping))
             .unwrap();
         assert!(dto.desktop_available);
-        assert_eq!(
-            dto.coding_cli.as_ref().map(|c| c.id.as_str()),
-            Some("fixture")
-        );
         // A re-issue with NO mapping keeps the frozen binding.
         let same = sessions.issue(binding(), None, false, None).unwrap();
         assert_eq!(same.id, dto.id);
         assert!(same.desktop_available);
-        assert_eq!(
-            same.coding_cli.as_ref().map(|c| c.id.as_str()),
-            Some("fixture")
-        );
         let unmapped = RuntimeSessions::default();
         let dto = unmapped.issue(binding(), None, false, None).unwrap();
         assert!(!dto.desktop_available);
-        assert!(dto.coding_cli.is_none());
     }
     #[tokio::test]
     async fn unmapped_session_desktop_and_screenshot_are_denied() {
@@ -2375,22 +2285,11 @@ mod tests {
                     binding(),
                     None,
                     false,
-                    Some(RuntimeMapping {
-                        route: Some(route),
-                        coding_cli: None,
-                    }),
+                    Some(RuntimeMapping { route: Some(route) }),
                 )
                 .unwrap();
             sessions
-                .issue(
-                    binding(),
-                    None,
-                    false,
-                    Some(RuntimeMapping {
-                        route: None,
-                        coding_cli: None,
-                    }),
-                )
+                .issue(binding(), None, false, Some(RuntimeMapping { route: None }))
                 .unwrap();
             let targets = sessions.targets.lock().unwrap();
             assert_eq!(
