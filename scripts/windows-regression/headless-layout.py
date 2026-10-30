@@ -62,12 +62,12 @@ def main():
         node('runtime-demo-host')
         check(abs(width() - 360) < 1, 'default sidebar is not 360px')
         driver.set_window_size(1820, 1000)
-        wait.until(lambda _: abs(width() - 200) < 1)
+        wait.until(lambda _: abs(width() - 360) < 1)
         checks['fixed360AfterWindowExpansion'] = True
         drag('sidebar-divider', 160, 0)
         wait.until(lambda _: abs(width() - 520) < 2)
         driver.set_window_size(1360, 900)
-        wait.until(lambda _: abs(width() - 360) < 2)
+        wait.until(lambda _: abs(width() - 520) < 2)
         checks['dragWidthRetainedOnResize'] = True
         preview_before = node('preview-divider').rect['y']
         drag('preview-divider', 0, -70)
@@ -147,11 +147,11 @@ def main():
         driver.save_screenshot(str(output / 'settings-appearance.png'))
         node('settings-connections').click()
         check(not driver.find_elements(By.CSS_SELECTOR, '[data-testid=runtime-host-form]'), 'add form is visible before add is clicked')
+        check(driver.find_elements(By.CSS_SELECTOR, '[data-host-id] button'), 'existing connection actions lost')
         node('runtime-create').click()
         check(len(driver.find_elements(By.CSS_SELECTOR, 'input[type=radio][data-testid^=connection-type-]')) == 3, 'connection type radios missing')
         node('credential').send_keys('fixture-draft')
         check(not driver.find_elements(By.CSS_SELECTOR, '[role=dialog]'), 'connection management still a modal')
-        check(driver.find_elements(By.CSS_SELECTOR, '[data-host-id] button'), 'existing connection actions lost')
         driver.save_screenshot(str(output / 'settings-connections.png'))
         check(not driver.find_elements(By.CSS_SELECTOR, '[data-testid=settings-screens]'), 'separate Screen settings remains')
         node('settings-appearance').click()

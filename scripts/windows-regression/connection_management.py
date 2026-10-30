@@ -80,6 +80,7 @@ def main():
             ActionChains(app.driver).move_to_element(src).click_and_hold().pause(.1).move_to_element_with_offset(dst, 0, dst.size['height'] * (.3 if after else -.3)).pause(.2).release().perform()
 
         stage = 'unified-create'
+        print('STAGE ' + stage, flush=True)
         manage()
         require(not app.find('[data-testid=runtime-host-form]'), 'creation form is initially visible')
         require(not app.find('[data-testid=settings-screens]'), 'separate Screen settings remains')
@@ -97,6 +98,7 @@ def main():
         app.driver.save_screenshot(str(root / 'connections.png'))
 
         stage = 'tests-and-toast'
+        print('STAGE ' + stage, flush=True)
         action(computer['id'], 'test').click()
         toast('連線測試成功')
         require('成功' not in row(computer['id']).text, 'test result remains inside row')
@@ -109,6 +111,7 @@ def main():
         result['checks']['nativeHostAndScreenTestsWithTransientToast'] = True
 
         stage = 'alias-bounds'
+        print('STAGE ' + stage, flush=True)
         action(computer['id'], 'edit').click()
         require(app.node('credential').get_attribute('value') == '', 'editing read Token back')
         app.fill('display-name', '漢' * 21)
@@ -130,6 +133,7 @@ def main():
         result['checks']['unicodeBoundaryAndDefault'] = True
 
         stage = 'grouped-drag'
+        print('STAGE ' + stage, flush=True)
         baseline = {value['id']: value['revision'] for value in app.profiles() + app.screens()}
         drag(agent_b['id'], agent_a['id'])
         app.wait(lambda: order('agent') == [agent_b['id'], agent_a['id']])
@@ -144,6 +148,7 @@ def main():
         result['checks']['trustedSameTypeDragAndCrossTypeRefusal'] = True
 
         stage = 'restart-and-navigation'
+        print('STAGE ' + stage, flush=True)
         app.close()
         app.launch(config)
         require([value['id'] for value in app.profiles() if value['category'] == 'agent'] == [agent_b['id'], agent_a['id']], 'agent sort not persisted')
@@ -155,6 +160,7 @@ def main():
         result['checks']['restartAndNavigation'] = True
 
         stage = 'manual-terminal'
+        print('STAGE ' + stage, flush=True)
         name = create_shell(app, fixture, app.profiles()[0])
         require(not app.find('[data-testid=launch-coding-cli]'), 'launch CLI button remains')
         app.terminal('codex --help\r')
@@ -163,6 +169,7 @@ def main():
         result['webview'] = app.metadata
         result['passed'] = True
     except Exception as error:
+        result['webview'] = app.metadata if app else {}
         result['failure'] = {'stage': stage, 'type': type(error).__name__}
         if type(error) is RuntimeError:
             result['failure']['code'] = str(error)
