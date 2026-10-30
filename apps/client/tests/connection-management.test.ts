@@ -12,14 +12,14 @@ const hosts = [
 ]
 const screen = { id: 'screen', revision: 1, name: 'Screen A', mcpUrl: 'https://screen.example.test/mcp', tokenPresent: true }
 const wrappers: ReturnType<typeof mount>[] = []
-function setup() {
+function setup(attachTo?: HTMLElement) {
   const transport = Object.assign(new FakeTransport(), {
     runtimeHosts: vi.fn(async () => hosts), instanceDesktops: vi.fn(async () => [screen]),
     runtimeSaveHost: vi.fn(async () => hosts[0]!), instanceSave: vi.fn(async () => screen),
     runtimeTestHost: vi.fn(async () => ({ sessionCount: 1, draining: false, teardownBestEffort: false, continuityVerified: false })),
     instanceTest: vi.fn(async () => {}), runtimeReorderConnections: vi.fn(async () => {})
   })
-  const wrapper = mount(RuntimeHosts, { props: { transport, embedded: true } })
+  const wrapper = mount(RuntimeHosts, { attachTo, props: { transport, embedded: true } })
   wrappers.push(wrapper)
   return { wrapper, transport }
 }
@@ -111,6 +111,33 @@ describe('unified connection management', () => {
     expect(wrapper.get('[data-testid=connection-toast]').text()).toContain('[STATE_CHANGED]')
     await wrapper.get('[aria-label=關閉提示]').trigger('click')
     expect(wrapper.find('[data-testid=connection-toast]').exists()).toBe(false)
+  })
+  it('keeps scrolling the visible list edge while holding a drag over a gap and cancels on release', async () => {
+    vi.useFakeTimers()
+    const outer = document.createElement('div'), inner = document.createElement('div')
+    outer.className = 'global-settings-page'; outer.style.overflowY = 'auto'
+    inner.className = 'settings-content'; inner.style.overflowY = 'visible'
+    outer.append(inner); document.body.append(outer)
+    Object.defineProperties(outer, { clientHeight: { value: 200 }, scrollHeight: { value: 1000 } })
+    outer.getBoundingClientRect = () => ({ top: 0, bottom: 200, left: 0, right: 300, width: 300, height: 200, x: 0, y: 0, toJSON() {} })
+    const { wrapper, transport } = setup(inner); await flushPromises()
+    const handle = wrapper.get('[data-connection-id=agent-a] [data-action=reorder]')
+    Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: vi.fn(() => inner) })
+    const pointer = async (type: string) => {
+      const event = new MouseEvent(type, { bubbles: true, button: 0, clientX: 30, clientY: 190 })
+      Object.defineProperties(event, { pointerId: { value: 12 }, pointerType: { value: 'touch' } })
+      handle.element.dispatchEvent(event); await nextTick()
+    }
+    await pointer('pointerdown'); await pointer('pointermove')
+    await vi.advanceTimersByTimeAsync(100)
+    expect(outer.scrollTop).toBeGreaterThan(14)
+    expect(inner.scrollTop).toBe(0)
+    await pointer('pointercancel')
+    const stopped = outer.scrollTop
+    await vi.advanceTimersByTimeAsync(100)
+    expect(outer.scrollTop).toBe(stopped)
+    expect(transport.runtimeReorderConnections).not.toHaveBeenCalled()
+    wrapper.unmount(); wrappers.splice(wrappers.indexOf(wrapper), 1); outer.remove()
   })
   it('places Screen management in connections and has no separate Screen settings page', async () => {
     const { transport } = setup()

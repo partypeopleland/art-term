@@ -10,7 +10,7 @@ import { getTestComputerPrefill } from '../test-computer-prefill'
 
 type Kind = 'host' | 'agent' | 'screen'
 type Row = { kind: 'host' | 'agent'; value: RuntimeHostDto } | { kind: 'screen'; value: InstanceDesktop }
-type Drag = { pointer: number; row: Row; overId: string | null; after: boolean }
+type Drag = { pointer: number; row: Row; overId: string | null; after: boolean; x: number; y: number; scroller: HTMLElement | null }
 const props = withDefaults(defineProps<{ transport: Transport; initialView?: 'list' | 'create'; initialCategory?: 'host' | 'agent'; categoryFilter?: 'host' | 'agent'; embedded?: boolean }>(), { initialView: 'list' })
 const emit = defineEmits<{ close: []; changed: []; picker: [active: boolean]; open: [host: HostDto, target: TargetDto] }>()
 const view = ref<'list' | 'form'>(props.initialView === 'create' ? 'form' : 'list')
@@ -25,6 +25,7 @@ const testPrefillApplied = ref(false), formTouched = ref(false), busy = ref(fals
 const credentialInput = ref<HTMLInputElement | null>(null)
 const toast = ref<{ message: string; error: boolean } | null>(null), drag = ref<Drag | null>(null)
 let generation = 0, alive = true
+let dragFrame: number | undefined
 let previousKind: Kind = props.initialCategory ?? 'host'
 const kinds: { kind: Kind; title: string }[] = [{ kind: 'host', title: 'Computer' }, { kind: 'agent', title: 'Agent' }, { kind: 'screen', title: 'Screen' }]
 const rows = computed<Row[]>(() => [
@@ -36,7 +37,8 @@ function rowUrl(row: Row): string { return row.kind === 'screen' ? row.value.mcp
 function dismissToast(): void { toast.value = null }
 function notify(message: string, failure = false): void { toast.value = { message, error: failure } }
 function clearCredential(): void { testPrefillApplied.value = false; credential.value = ''; if (credentialInput.value) credentialInput.value.value = '' }
-function clearPending(): void { generation++; clearCredential(); busy.value = false; drag.value = null }
+function clearDrag(): void { if (dragFrame !== undefined) cancelAnimationFrame(dragFrame); dragFrame = undefined; drag.value = null }
+function clearPending(): void { generation++; clearCredential(); busy.value = false; clearDrag() }
 function current(request: number): boolean { return alive && request === generation && document.visibilityState !== 'hidden' }
 function reset(): void {
   clearPending(); formTouched.value = false; editing.value = null; deleting.value = null
@@ -147,21 +149,43 @@ function keyboardReorder(event: KeyboardEvent, row: Row): void {
 function startDrag(event: PointerEvent, row: Row): void {
   if (busy.value || drag.value || event.isPrimary === false || event.button !== 0 || !(event.currentTarget instanceof HTMLElement)) return
   event.preventDefault(); event.stopPropagation(); event.currentTarget.setPointerCapture?.(event.pointerId)
-  drag.value = { pointer: event.pointerId, row, overId: null, after: false }
+  drag.value = { pointer: event.pointerId, row, overId: null, after: false, x: event.clientX, y: event.clientY, scroller: scrollContainer() }
+  dragFrame = requestAnimationFrame(scrollDrag)
+}
+function scrollContainer(): HTMLElement | null {
+  for (let element = dialog.value; element; element = element.parentElement) {
+    if (element.scrollHeight > element.clientHeight && /^(auto|scroll)$/.test(getComputedStyle(element).overflowY)) return element
+  }
+  return null
+}
+function updateDrop(): void {
+  if (!drag.value) return
+  const element = document.elementFromPoint?.(drag.value.x, drag.value.y)?.closest<HTMLElement>('[data-connection-id]')
+  if (!element || element.dataset.connectionKind !== drag.value.row.kind) { drag.value.overId = null; return }
+  drag.value.overId = element.dataset.connectionId ?? null
+  drag.value.after = drag.value.y > element.getBoundingClientRect().top + element.getBoundingClientRect().height / 2
+}
+function scrollDrag(): void {
+  dragFrame = undefined
+  if (!drag.value) return
+  const container = drag.value.scroller
+  if (container) {
+    const rect = container.getBoundingClientRect(), top = Math.max(0, rect.top), bottom = Math.min(innerHeight, rect.bottom)
+    const delta = drag.value.y < top + 44 ? -14 : drag.value.y > bottom - 44 ? 14 : 0
+    container.scrollTop = Math.max(0, Math.min(container.scrollHeight - container.clientHeight, container.scrollTop + delta))
+  }
+  updateDrop()
+  dragFrame = requestAnimationFrame(scrollDrag)
 }
 function moveDrag(event: PointerEvent): void {
   if (!drag.value || event.pointerId !== drag.value.pointer) return
   event.preventDefault(); event.stopPropagation()
-  const element = document.elementFromPoint?.(event.clientX, event.clientY)?.closest<HTMLElement>('[data-connection-id]')
-  if (!element || element.dataset.connectionKind !== drag.value.row.kind) { drag.value.overId = null; return }
-  drag.value.overId = element.dataset.connectionId ?? null
-  drag.value.after = event.clientY > element.getBoundingClientRect().top + element.getBoundingClientRect().height / 2
-  const container = dialog.value?.closest<HTMLElement>('.settings-content, .global-settings-page') ?? dialog.value
-  if (container) { const rect = container.getBoundingClientRect(); if (event.clientY < rect.top + 44) container.scrollTop -= 14; else if (event.clientY > rect.bottom - 44) container.scrollTop += 14 }
+  drag.value.x = event.clientX; drag.value.y = event.clientY
+  updateDrop()
 }
 function endDrag(event: PointerEvent, cancelled = false): void {
   if (!drag.value || event.pointerId !== drag.value.pointer) return
-  event.stopPropagation(); const pending = drag.value; drag.value = null
+  event.stopPropagation(); const pending = drag.value; clearDrag()
   if (!cancelled && pending.overId) void reorder(pending.row, pending.overId, pending.after)
 }
 function visibility(): void { if (document.visibilityState === 'hidden') { clearPending(); dismissToast() } }
