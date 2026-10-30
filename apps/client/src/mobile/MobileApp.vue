@@ -76,31 +76,31 @@ const rootEl = ref<HTMLElement | null>(null)
 const settingsOpen = ref(false)
 const screenPickerOpen = ref(false)
 const zoomOpen = ref(false)
-const aboutOpen = ref(false)
+const phase = ref<Workspace>('list')
+const aboutOpen = computed(() => phase.value === 'home')
 function showHomepage(): void {
   runtimeEntry.cancel()
   voice.cancel('target')
   settingsOpen.value = false
   composerOpen.value = false
-  aboutOpen.value = true
+  pager.slideTo('home')
 }
 const voiceLightboxOpen = ref(false)
 const composerOpen = ref(false)
 const composerText = ref('')
-const phase = ref<Workspace>('list')
 const zoomVisible = computed(() => {
   const tab = controller.activeTab.value
   return zoomOpen.value && phase.value === 'session' && !!tab && tab.previewVisible && (tab.desktopEnabled || !!tab.shot)
 })
-const pager = useWorkspacePager(rootEl, phase, activateWorkspace, () => !zoomVisible.value && !screenPickerOpen.value && !aboutOpen.value && !settingsOpen.value && !runtimeHostsOpen.value && !runtimeDialogProfile.value && !composerOpen.value)
+const pager = useWorkspacePager(rootEl, phase, activateWorkspace, () => !zoomVisible.value && !screenPickerOpen.value && !settingsOpen.value && !runtimeHostsOpen.value && !runtimeDialogProfile.value && !composerOpen.value)
 const { dragging: swipeDragging, animating: swipeAnimating, nativeDragging: nativeSwipeActive, visible: swipeVisible, indicatorStyle: workspaceIndicatorStyle, transform: pageTransform, begin: beginSwipe, move: moveSwipe, end: finishSwipe, guardClick: guardSwipeClick } = pager
 provide(NativeSwipeKey, pager.native)
 function activateWorkspace(page: Workspace): void {
-  if (page === 'list') backToList()
+  if (page === 'home') { runtimeEntry.cancel(); voice.cancel('target'); composerOpen.value = false; phase.value = 'home' }
+  else if (page === 'list') backToList()
   else switchWorkspace(page)
 }
 function slideTo(workspace: Workspace): void {
-  aboutOpen.value = false
   settingsOpen.value = false
   pager.slideTo(workspace)
 }
@@ -405,12 +405,12 @@ onBeforeUnmount(() => {
       :initial-group="runtimeDialogSeed"
       @open="openRuntimeTarget" @close="runtimeDialogProfile = null; runtimeDialogSeed = null" />
       <header class="t-head workspace-header">
+        <nav class="page-text-navigation" aria-label="頁面切換">
         <button class="fixed-brand" :class="{ active: aboutOpen }" aria-label="軟體資訊首頁" @click="showHomepage">
         <span class="m-brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m5 6 6 6-6 6M13 18h6" /></svg></span>
         <div class="m-brand"><span class="m-title">art-term<span class="m-title-dot">.</span></span><span class="m-sub">CONNECTION HUB</span></div>
         </button>
-        <nav class="page-text-navigation" aria-label="頁面切換">
-          <span v-show="!settingsOpen && !aboutOpen" class="workspace-progress-indicator" :style="workspaceIndicatorStyle" aria-hidden="true" />
+          <span v-show="!settingsOpen" class="workspace-progress-indicator" :style="workspaceIndicatorStyle" aria-hidden="true" />
           <button class="page-text-link" :class="{ current: !settingsOpen && !aboutOpen && phase === 'list' }" :aria-current="!settingsOpen && !aboutOpen && phase === 'list' ? 'page' : undefined" data-testid="terminal-to-list" @click="slideTo('list')">Main</button>
           <button class="page-text-link" :class="{ current: !settingsOpen && !aboutOpen && phase === 'session' }" :aria-current="!settingsOpen && !aboutOpen && phase === 'session' ? 'page' : undefined" @click="slideTo('session')">Connect</button>
 
@@ -423,15 +423,15 @@ onBeforeUnmount(() => {
 
 
 
-        <button class="settings-trigger" :class="{ active: settingsOpen }" :aria-pressed="settingsOpen" aria-label="全域設定" title="全域設定" @click="aboutOpen = false; voice.cancel('target'); settingsOpen = true">
+        <button class="settings-trigger" :class="{ active: settingsOpen }" :aria-pressed="settingsOpen" aria-label="全域設定" title="全域設定" @click="voice.cancel('target'); settingsOpen = true">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 3-.6 2.3-2 .9-2.1-.7-2.3 4 1.6 1.7v2.3l-1.6 1.7 2.3 4 2.1-.7 2 .9.6 2.6h5l.6-2.6 2-.9 2.1.7 2.3-4-1.6-1.7v-2.3l1.6-1.7-2.3-4-2.1.7-2-.9L14.5 3Z" /><circle cx="12" cy="12" r="3" /></svg>
         </button>
       </header>
     <div class="workspace-viewport">
-      <ScreenPicker v-if="screenPickerOpen && activeTab" :items="controller.instanceDesktops.value" :selected-id="activeTab.instanceDesktop?.id" :busy="activeTab.desktopBusy" :error="activeTab.desktopError || controller.instanceDesktopsError.value" @select="selectScreen" @clear="clearScreen" @close="screenPickerOpen = false" @settings="screenPickerOpen = false; settingsOpen = true; aboutOpen = false" />
-      <div v-if="aboutOpen" class="software-home-page" role="region" aria-label="軟體資訊首頁"><AppHomepage /></div>
+      <ScreenPicker v-if="screenPickerOpen && activeTab" :items="controller.instanceDesktops.value" :selected-id="activeTab.instanceDesktop?.id" :busy="activeTab.desktopBusy" :error="activeTab.desktopError || controller.instanceDesktopsError.value" @select="selectScreen" @clear="clearScreen" @close="screenPickerOpen = false" @settings="screenPickerOpen = false; settingsOpen = true" />
+      <div v-show="!settingsOpen && (aboutOpen || swipeVisible)" class="software-home-page" :style="{ transform: pageTransform('home') }" role="region" aria-label="軟體資訊首頁"><AppHomepage /></div>
       <div v-if="settingsOpen" class="global-settings-page" role="region" aria-label="全域設定"><ThemeSettings embedded :transport="transport" :hosts="controller.runtimeProfiles.value" @changed="screensChanged" @picker="transferPicker = $event" /></div>
-    <div v-show="!settingsOpen && !aboutOpen && (phase === 'list' || swipeVisible)" class="home-surface" :style="{ transform: pageTransform('list') }">
+    <div v-show="!settingsOpen && (phase === 'list' || swipeVisible)" class="home-surface" :style="{ transform: pageTransform('list') }">
 
 
     <div id="connections-panel" class="page list-page" role="region" aria-label="連線">
@@ -461,7 +461,7 @@ onBeforeUnmount(() => {
     <!-- v-show, not v-if: TerminalPane instances must live for the whole tab
          lifetime so hidden-tab buffers keep draining and scrollback survives
          list↔session navigation. -->
-    <div id="terminal-panel" v-show="!settingsOpen && !aboutOpen && (phase === 'session' || swipeVisible)" class="page term-page" :style="{ transform: pageTransform('session') }" role="region" aria-label="終端">
+    <div id="terminal-panel" v-show="!settingsOpen && (phase === 'session' || swipeVisible)" class="page term-page" :style="{ transform: pageTransform('session') }" role="region" aria-label="終端">
 
 
 
@@ -1087,10 +1087,10 @@ onBeforeUnmount(() => {
 .home-surface { position: absolute; inset: 0; display: flex; flex-direction: column; min-height: 0; background: radial-gradient(ellipse at 90% 0%, var(--page-glow), transparent 48%), var(--bg); touch-action: pan-y; }
 .term-page { position: absolute; inset: 0; background: var(--bg); touch-action: pan-y; }
 .t-head { touch-action: pan-y; }
-.swipe-animating .home-surface, .swipe-animating .term-page { transition: transform 200ms cubic-bezier(.2,.7,.3,1); }
+.swipe-animating .software-home-page, .swipe-animating .home-surface, .swipe-animating .term-page { transition: transform 200ms cubic-bezier(.2,.7,.3,1); }
 .swipe-dragging .home-surface, .swipe-dragging .term-page { user-select: none; }
 .swipe-dragging .home-surface { will-change: transform; }
-@media (prefers-reduced-motion: reduce) { .swipe-animating .home-surface, .swipe-animating .term-page { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .swipe-animating .software-home-page, .swipe-animating .home-surface, .swipe-animating .term-page { transition: none; } }
 
 .page-text-navigation { display: inline-flex; align-items: center; gap: 7px; flex: none; color: var(--text-dim); font-size: 11px; }
 .page-text-link { border: 0; border-radius: 0; background: transparent; padding: 5px 0; color: var(--text-dim); font: inherit; cursor: pointer; }
@@ -1163,10 +1163,16 @@ onBeforeUnmount(() => {
 .fixed-brand { border: 0; padding: 0; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
 .fixed-brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 5px; }
 .fixed-brand.active .m-title { color: var(--accent); }
-.software-home-page { position: absolute; inset: 0; overflow-y: auto; background: var(--bg); }
+.software-home-page { position: absolute; inset: 0; overflow-y: auto; background: var(--bg); touch-action: pan-y; }
 .screen-trigger { width: 30px; height: 30px; padding: 6px; border: 0; border-radius: 5px; background: transparent; color: var(--text-dim); flex: none; cursor: pointer; }
 .screen-trigger[aria-pressed=true] { color: var(--accent); }
 .screen-trigger svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.5; }
 .screen-trigger:focus-visible { outline: 2px solid var(--accent); }
 @media (max-width: 360px) { .workspace-header:has(.screen-trigger) .m-brand { display: none; } }
+
+.workspace-header .page-text-navigation { grid-template-columns: repeat(3, minmax(0, 1fr)); flex: 1; width: 100%; }
+.workspace-header .workspace-progress-indicator { width: calc(100% / 3); }
+.workspace-header .fixed-brand { justify-content: center; min-width: 0; }
+.workspace-header > .flex { display: none; }
+@media (max-width: 440px) { .workspace-header .fixed-brand .m-brand-mark { display: none; } .workspace-header .fixed-brand .m-brand { display: block; } }
 </style>

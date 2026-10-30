@@ -145,7 +145,7 @@ function keyboardReorder(event: KeyboardEvent, row: Row): void {
   if (next) void reorder(row, next.value.id, event.key === 'ArrowDown')
 }
 function startDrag(event: PointerEvent, row: Row): void {
-  if (busy.value || event.button !== 0 || !(event.currentTarget instanceof HTMLElement)) return
+  if (busy.value || drag.value || event.isPrimary === false || event.button !== 0 || !(event.currentTarget instanceof HTMLElement)) return
   event.preventDefault(); event.stopPropagation(); event.currentTarget.setPointerCapture?.(event.pointerId)
   drag.value = { pointer: event.pointerId, row, overId: null, after: false }
 }
@@ -188,7 +188,7 @@ onBeforeUnmount(() => { alive = false; clearPending(); dismissToast(); document.
           <section v-for="group in groups" :key="group.kind" class="connection-group" :aria-label="group.title">
             <h3><ConnectionIcon :kind="group.kind" />{{ group.title }}<small>{{ group.rows.length }}</small></h3>
             <p v-if="!busy && !group.rows.length" class="empty-group">尚未儲存 {{ group.title }} 連線</p>
-            <ul><li v-for="row in group.rows" :key="row.value.id" :data-connection-id="row.value.id" :data-connection-kind="row.kind" :data-host-id="row.kind !== 'screen' ? row.value.id : undefined" :class="{ dragging: drag?.row.value.id === row.value.id, 'drop-before': drag?.overId === row.value.id && !drag.after, 'drop-after': drag?.overId === row.value.id && drag.after }">
+            <ul><li v-for="row in group.rows" :key="row.value.id" :data-connection-id="row.value.id" :data-connection-kind="row.kind" :data-host-id="row.kind !== 'screen' ? row.value.id : undefined" :class="{ dragging: drag?.row.kind === row.kind && drag.row.value.id === row.value.id, 'drop-before': drag?.row.kind === row.kind && drag.overId === row.value.id && !drag.after, 'drop-after': drag?.row.kind === row.kind && drag.overId === row.value.id && drag.after }">
               <button type="button" class="icon-button drag-handle" data-action="reorder" :aria-label="`調整 ${row.value.name} 順序`" title="拖曳排序，或使用上下方向鍵" :disabled="busy || group.rows.length < 2 || !transport.runtimeReorderConnections" @pointerdown="startDrag($event, row)" @pointermove="moveDrag" @pointerup="endDrag($event)" @pointercancel="endDrag($event, true)" @lostpointercapture="endDrag($event, true)" @keydown="keyboardReorder($event, row)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5h.01M16 5h.01M8 12h.01M16 12h.01M8 19h.01M16 19h.01" /></svg></button>
               <div class="connection-name"><ConnectionIcon :kind="row.kind" /><strong>{{ row.value.name }}</strong></div><span class="connection-url">{{ rowUrl(row) }}</span>
               <div class="row-actions">

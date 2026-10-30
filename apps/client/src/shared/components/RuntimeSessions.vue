@@ -41,7 +41,7 @@ async function create(): Promise<void> {
   error.value = ''
   try {
     const target = await props.transport.runtimeCreateHistorySession(props.host.id, props.host.revision)
-    // desktopAvailable/codingCli come from the backend target DTO — the
+    // desktopAvailable comes from the backend target DTO — the
     // explicit endpoint mapping, never the display name.
     if (current(request)) emit('open', { id: props.host.id, label: props.host.name, desktopAvailable: target.desktopAvailable, targets: [target] }, target)
   } catch {

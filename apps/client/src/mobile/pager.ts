@@ -1,8 +1,8 @@
 import { computed, nextTick, onBeforeUnmount, ref, type Ref } from 'vue'
 import type { NativeSwipeEvent } from '../shared/terminal/native'
 
-export type Workspace = 'list' | 'session'
-const pages: Workspace[] = ['list', 'session']
+export type Workspace = 'home' | 'list' | 'session'
+const pages: Workspace[] = ['home', 'list', 'session']
 
 /** One gesture owner for DOM and Android-native terminal drags. */
 export function useWorkspacePager(root: Ref<HTMLElement | null>, page: Ref<Workspace>, activate: (page: Workspace) => void, canStart: () => boolean) {
@@ -17,7 +17,7 @@ export function useWorkspacePager(root: Ref<HTMLElement | null>, page: Ref<Works
   let timer: ReturnType<typeof setTimeout> | undefined
   const visible = computed(() => dragging.value || animating.value)
   const progress = computed(() => visible.value
-    ? Math.max(0, Math.min(1, pages.indexOf(origin.value) - offset.value / width.value))
+    ? Math.max(0, Math.min(pages.length - 1, pages.indexOf(origin.value) - offset.value / width.value))
     : pages.indexOf(page.value))
   const indicatorStyle = computed(() => ({ transform: `translateX(${progress.value * 100}%)` }))
   function transform(target: Workspace): string {
@@ -51,12 +51,13 @@ export function useWorkspacePager(root: Ref<HTMLElement | null>, page: Ref<Works
     clickUntil = performance.now() + 400
     const distance = Math.abs(offset.value)
     const commit = !cancelled && (distance > width.value * .25 || (distance > 45 && performance.now() - startedAt < 300))
-    settle(commit, origin.value === 'list' ? 'session' : 'list')
+    const destination = pages[pages.indexOf(origin.value) + (offset.value < 0 ? 1 : -1)]
+    settle(commit && !!destination, destination ?? origin.value)
   }
   function begin(event: PointerEvent): void {
     if (event.isPrimary === false || event.button !== 0 || animating.value || !canStart()) return
     const target = event.target instanceof Element ? event.target : null
-    if (target?.closest('input, textarea, select, [role="dialog"], .keybar, .tabbar, .mobile-scroll-track')) return
+    if (target?.closest('input, textarea, select, [role="dialog"], .keybar, .tabbar, .mobile-scroll-track, .drag-handle')) return
     pointer = event.pointerId
     startX = event.clientX; startY = event.clientY
     start()
@@ -67,12 +68,12 @@ export function useWorkspacePager(root: Ref<HTMLElement | null>, page: Ref<Works
     if (!dragging.value) {
       if (Math.abs(dy) > 8 && Math.abs(dy) > Math.abs(dx)) { pointer = null; return }
       if (Math.abs(dx) < 9 || Math.abs(dx) < Math.abs(dy) * 1.2) return
-      if ((origin.value === 'list' && dx > 0) || (origin.value === 'session' && dx < 0)) { pointer = null; return }
+      if ((origin.value === pages[0] && dx > 0) || (origin.value === pages.at(-1) && dx < 0)) { pointer = null; return }
       dragging.value = true
       try { root.value?.setPointerCapture(event.pointerId) } catch { /* Capture is optional in browser previews. */ }
     }
     event.preventDefault(); event.stopPropagation()
-    offset.value = origin.value === 'list' ? Math.max(-width.value, Math.min(0, dx)) : Math.min(width.value, Math.max(0, dx))
+    offset.value = Math.max(pages.indexOf(origin.value) === pages.length - 1 ? 0 : -width.value, Math.min(pages.indexOf(origin.value) === 0 ? 0 : width.value, dx))
   }
   function end(event: PointerEvent, cancelled = false): void {
     if (event.pointerId !== pointer) return

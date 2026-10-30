@@ -47,6 +47,32 @@ beforeEach(() => {
 afterEach(() => { for (const wrapper of wrappers.splice(0)) wrapper.unmount(); visibility(false); vi.restoreAllMocks() })
 
 describe('mobile shared runtime settings and Shell routing', () => {
+  it('uses the same homepage for brand navigation and horizontal swipes through Main and Connect', async () => {
+    const { wrapper } = setup(); await flush()
+    Object.defineProperty(wrapper.element, 'clientWidth', { value: 400 })
+    const swipe = async (selector: string, from: number, to: number) => {
+      for (const [type, x] of [['pointerdown', from], ['pointermove', to], ['pointerup', to]] as const) {
+        const event = new MouseEvent(type, { bubbles: true, button: 0, clientX: x, clientY: 120 })
+        Object.defineProperties(event, { pointerId: { value: 1 }, isPrimary: { value: true } })
+        wrapper.get(selector).element.dispatchEvent(event)
+        await nextTick()
+      }
+      await new Promise(resolve => setTimeout(resolve, 220)); await flush()
+    }
+    await swipe('.home-surface', 100, 300)
+    expect(wrapper.get('.software-home-page').isVisible()).toBe(true)
+    expect(wrapper.get('.fixed-brand').classes()).toContain('active')
+    expect(wrapper.get('.home-surface').isVisible()).toBe(false)
+    await swipe('.software-home-page', 300, 100)
+    expect(wrapper.get('.home-surface').isVisible()).toBe(true)
+    await swipe('.home-surface', 300, 100)
+    expect(wrapper.get('#terminal-panel').isVisible()).toBe(true)
+    await new Promise(resolve => setTimeout(resolve, 200))
+    await wrapper.get('.fixed-brand').trigger('click')
+    await new Promise(resolve => setTimeout(resolve, 220)); await flush()
+    expect(wrapper.get('.software-home-page').isVisible()).toBe(true)
+    expect(wrapper.get('.workspace-progress-indicator').attributes('style')).toContain('translateX(0%)')
+  })
   it('opens listed attached Shell only after explicit takeover, retaining shared session/terminal and historical ACK', async () => {
     const { wrapper, transport, terms, controller } = setup(); await flush()
     // Home lists are read-only until the explicit attached-Shell action.
@@ -75,6 +101,7 @@ describe('mobile shared runtime settings and Shell routing', () => {
   it('masks credentials, clears the actual input before awaiting save and discards stale completion after background', async () => {
     const { wrapper, transport } = setup(); await flush()
     await wrapper.get('.settings-trigger').trigger('click'); await flush()
+    await wrapper.get('[data-testid=runtime-create]').trigger('click')
     await wrapper.get('[data-testid="name"]').setValue('新主機')
     await wrapper.get('[data-testid="base-url"]').setValue('https://runtime.example.test')
     const credential = wrapper.get('[data-testid="credential"]')
@@ -87,6 +114,8 @@ describe('mobile shared runtime settings and Shell routing', () => {
     visibility(false); pending.resolve(profile); await flush()
     expect(wrapper.find('.runtime-hosts').exists()).toBe(false)
     await wrapper.get('.settings-trigger').trigger('click'); await flush()
+    expect(wrapper.find('[data-testid=credential]').exists()).toBe(false)
+    await wrapper.get('[data-testid=runtime-create]').trigger('click')
     expect((wrapper.get('[data-testid="credential"]').element as HTMLInputElement).value).toBe('')
     expect(transport.openCalls).toEqual([]); expect(transport.runtimeCreateSession).not.toHaveBeenCalled()
   })

@@ -15,7 +15,6 @@ function setup() {
     return { desktop, toolReady: false }
   })
   transport.instanceClear = vi.fn(async () => {})
-  transport.instanceLaunch = vi.fn(async () => ({ desktop: A, toolReady: true }))
   controller.openTarget({ dto: HOSTS[0], expanded: true }, HOSTS[0].targets[0], false)
   const tab = controller.tabs[0]
   controller.attachTerminal(tab, new FakeTerm())
@@ -159,9 +158,9 @@ describe('direct Screen selection', () => {
     try {
       await flush(); await c.selectInstance(tab, A); await flush()
       const term = tab.term as FakeTerm; const focused = term.focusCount
-      c.launchCodingCli(tab); await flush()
-      expect(t.instanceLaunch).not.toHaveBeenCalled()
       expect(t.sessions.get(tab.sessionId!)!.writes).toEqual([])
+      c.sendInput(tab, 'codex\r'); await flush()
+      expect(t.sessions.get(tab.sessionId!)!.writes.map(bytes => new TextDecoder().decode(Uint8Array.from(bytes)))).toEqual(['codex\r'])
       expect(term.focusCount).toBe(focused); expect(tab.instanceToolReady).toBe(false)
     } finally { c.dispose() }
   })

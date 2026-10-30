@@ -68,7 +68,6 @@ const PROFILES: RuntimeHostDto[] = [
 
 function seed(t: FakeMobileTransport): FakeMobileTransport {
   const hana = makeCatalogTarget('opq-a1', 'hana', 'hana', 'Codex')
-  hana.codingCli = { id: 'assistant', name: 'My Assistant', command: 'assistant', args: ['--label', "owner's workspace", '$(ignored)'] }
   t.runtimeSessionsData.set('hana', makeGroup('hana', [hana], 'hana'))
   t.runtimeSessionsData.set('beta', makeGroup('beta', [makeCatalogTarget('opq-a2', 'beta', 'beta', 'Devin')], 'beta'))
   t.runtimeSessionsData.set('gamma', makeGroup('gamma', [makeCatalogTarget('opq-a3', 'gamma', 'gamma', 'Kiro')], 'gamma'))

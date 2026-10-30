@@ -43,7 +43,6 @@ export class FakeTransport implements Transport {
   instanceSelect?: Transport['instanceSelect']
   instanceRestore?: Transport['instanceRestore']
   instanceClear?: Transport['instanceClear']
-  instanceLaunch?: Transport['instanceLaunch']
 
   async transferExport(_input: TransferExportInput): Promise<{ status: 'saved' | 'cancelled' }> { return { status: 'cancelled' } }
   async transferPickImport(): Promise<TransferPreview> { return { status: 'cancelled', token: null, entries: [] } }

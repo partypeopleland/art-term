@@ -141,6 +141,7 @@ describe('saved runtime Computers in the shared catalog', () => {
     await flush()
     await wrapper.get('[data-testid="settings-connections"]').trigger('click')
     await flush()
+    await wrapper.get('[data-testid=runtime-create]').trigger('click')
     await wrapper.get('[data-testid="name"]').setValue('nuc')
     await wrapper.get('[data-testid="base-url"]').setValue('https://runtime.example.test')
     await wrapper.get('[data-testid="credential"]').setValue('fixture-admin')
