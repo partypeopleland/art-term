@@ -18,8 +18,8 @@ mod runtime_sessions;
 mod runtime_transfer;
 use art_term_core::connections::Connections;
 use runtime_hosts::{
-    gui_runtime_delete_host, gui_runtime_hosts, gui_runtime_reorder_connections, gui_runtime_save_host,
-    gui_runtime_test_host,
+    gui_runtime_delete_host, gui_runtime_hosts, gui_runtime_reorder_connections,
+    gui_runtime_save_host, gui_runtime_test_host,
 };
 use runtime_sessions::{
     gui_runtime_ack, gui_runtime_create_history_session, gui_runtime_create_session,
