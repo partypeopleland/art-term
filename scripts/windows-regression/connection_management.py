@@ -24,7 +24,7 @@ def main():
     args = parser.parse_args()
     root = Path(tempfile.gettempdir()) / ('art-term-connections-' + uuid.uuid4().hex)
     root.mkdir(mode=0o700)
-    result = {'passed': False, 'source': args.source, 'actualWindowsExe': True,
+    result = {'passed': False, 'source': args.source, 'actualWindowsExe': False,
               'mockedIpcReplies': False, 'mockedUpstream': True, 'checks': {}, 'cleanup': {}}
     fixture = app = None
     screens = []
@@ -122,7 +122,8 @@ def main():
         toast('儲存成功')
         require(app.profiles()[0]['displayName'] == '漢' * 20, '20 Chinese characters were not saved')
         action(computer['id'], 'edit').click()
-        app.fill('display-name', '')
+        app.node('display-name').click()
+        ActionChains(app.driver).key_down(Keys.CONTROL).send_keys('a').key_up(Keys.CONTROL).send_keys(Keys.BACKSPACE).perform()
         app.click('儲存', '[data-testid=runtime-host-form] button')
         toast('儲存成功')
         require('displayName' not in app.profiles()[0], 'blank alias did not restore default')
