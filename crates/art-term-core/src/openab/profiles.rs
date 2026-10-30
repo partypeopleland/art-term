@@ -641,7 +641,12 @@ impl HostStore {
         } else {
             Vec::new()
         };
-        for s in selected {
+        let mut selections: Vec<_> = selected.iter().collect();
+        selections.sort_by_key(|s| match s.kind {
+            TransferKind::Host => (0, guard.iter().position(|r| r.profile.id == s.id)),
+            TransferKind::Screen => (1, desktop_records.iter().position(|r| r.profile.id == s.id)),
+        });
+        for s in selections {
             if !seen.insert((s.kind as u8, &s.id)) {
                 return Err(ApiError::Protocol);
             }
@@ -683,16 +688,6 @@ impl HostStore {
                 },
             });
         }
-        entries.sort_by_key(|entry| {
-            guard
-                .iter()
-                .position(|r| r.profile.base_url == entry.origin)
-        });
-        desktops.sort_by_key(|entry| {
-            desktop_records
-                .iter()
-                .position(|r| r.profile.mcp_url == entry.mcp_url)
-        });
         let mut payload = super::transfer::Payload { entries, desktops };
         payload.validate()?;
         Ok(payload)

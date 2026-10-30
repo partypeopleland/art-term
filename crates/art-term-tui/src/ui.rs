@@ -3086,6 +3086,42 @@ mod tests {
         assert!(matches!(hits.at(4, 3), Some(HitAction::Cancel)));
     }
     #[tokio::test]
+    async fn connection_tree_preserves_saved_type_order_and_chinese_aliases() {
+        let (_directory, _backend, mut app) = test_app().await;
+        for (id, category, display_name) in [
+            (
+                "agent-b",
+                art_term_core::connections::Category::Agent,
+                Some("開發助手"),
+            ),
+            ("host-a", art_term_core::connections::Category::Host, None),
+            ("agent-a", art_term_core::connections::Category::Agent, None),
+        ] {
+            app.profiles.hosts.push(HostProfile {
+                id: id.into(),
+                revision: 1,
+                name: id.into(),
+                base_url: format!("https://{id}.test/"),
+                credential_present: true,
+                metadata: Some(art_term_core::connections::ConnectionMetadata {
+                    category,
+                    display_name: display_name.map(String::from),
+                    ..Default::default()
+                }),
+            });
+        }
+        let rows = app.rows();
+        let hosts: Vec<_> = rows.iter().filter(|r| r.key.starts_with("host:")).collect();
+        assert_eq!(
+            hosts.iter().map(|r| r.key.as_str()).collect::<Vec<_>>(),
+            vec!["host:host-a", "host:agent-b", "host:agent-a"]
+        );
+        assert_eq!(hosts[1].label, "  agent-b / 開發助手");
+        assert_eq!(hosts[2].label, "  agent-a");
+        app.stop().await;
+    }
+
+    #[tokio::test]
     async fn tree_is_permanently_expanded_and_selection_survives_inserted_children() {
         let (_directory, backend, mut app) = test_app().await;
         app.profiles.screens.push(DesktopProfile {

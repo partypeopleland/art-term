@@ -855,3 +855,25 @@ fn legacy_v1_output_retains_original_codec_bytes() {
         "fictional-credential"
     );
 }
+
+#[test]
+fn public_transfer_preserves_optional_chinese_display_name_and_legacy_defaults() {
+    let mut source = payload(false);
+    source.entries[0].metadata.display_name = Some("字".repeat(20));
+    let bytes = encode(source, None).unwrap();
+    let Decoded::Public(restored) = decode(&bytes).unwrap() else {
+        panic!("public transfer expected")
+    };
+    assert_eq!(
+        restored.entries[0].metadata.display_name.as_deref(),
+        Some("字".repeat(20).as_str())
+    );
+    let mut invalid = payload(false);
+    invalid.entries[0].metadata.display_name = Some("字".repeat(21));
+    assert!(encode(invalid, None).is_err());
+    let bytes = encode(payload(false), None).unwrap();
+    let Decoded::Public(legacy) = decode(&bytes).unwrap() else {
+        panic!("legacy public transfer expected")
+    };
+    assert!(legacy.entries[0].metadata.display_name.is_none());
+}

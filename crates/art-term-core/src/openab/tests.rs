@@ -1678,3 +1678,177 @@ fn connection_order_is_persistent_bounded_and_keeps_credentials() {
     }
     assert_eq!(store.list().unwrap(), vec![b, h, a]);
 }
+
+#[test]
+fn connection_alias_roundtrip_defaults_and_transfer_order() {
+    use super::profiles::{ExportSelection, ImportAction, ImportSelection, TransferKind};
+    use crate::connections::ConnectionMetadata;
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("connections.toml");
+    let store = HostStore::load(path.clone(), Arc::new(FixtureCipher)).unwrap();
+    let a = store
+        .add_with_metadata(
+            "A".into(),
+            "https://a.test".into(),
+            secret(),
+            Some(ConnectionMetadata {
+                display_name: Some("  開發助手  ".into()),
+                ..Default::default()
+            }),
+        )
+        .unwrap();
+    assert_eq!(
+        a.metadata.as_ref().unwrap().display_name.as_deref(),
+        Some("開發助手")
+    );
+    let b = store
+        .add("B".into(), "https://b.test".into(), secret())
+        .unwrap();
+    let reloaded = HostStore::load(path, Arc::new(FixtureCipher)).unwrap();
+    assert_eq!(reloaded.list().unwrap(), vec![a.clone(), b.clone()]);
+    let payload = store
+        .export_snapshot(
+            &[
+                ExportSelection {
+                    kind: TransferKind::Host,
+                    id: b.id.clone(),
+                    expected_revision: b.revision,
+                },
+                ExportSelection {
+                    kind: TransferKind::Host,
+                    id: a.id.clone(),
+                    expected_revision: a.revision,
+                },
+            ],
+            true,
+            None,
+        )
+        .unwrap();
+    assert_eq!(
+        payload
+            .entries
+            .iter()
+            .map(|e| e.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["A", "B"]
+    );
+    let other = HostStore::load(dir.path().join("other.toml"), Arc::new(FixtureCipher)).unwrap();
+    let preview = other.preview_import(payload).unwrap();
+    let choices = preview
+        .entries
+        .iter()
+        .map(|e| ImportSelection {
+            key: e.key.clone(),
+            action: ImportAction::Add,
+            credential: None,
+        })
+        .collect();
+    other.apply_import(preview, choices).unwrap();
+    assert_eq!(
+        other
+            .list()
+            .unwrap()
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["A", "B"]
+    );
+    assert_eq!(
+        other.list().unwrap()[0]
+            .metadata
+            .as_ref()
+            .unwrap()
+            .display_name
+            .as_deref(),
+        Some("開發助手")
+    );
+    let cleared = store
+        .update_with_metadata(
+            &a.id,
+            a.revision,
+            a.name.clone(),
+            a.base_url.clone(),
+            None,
+            Some(ConnectionMetadata {
+                display_name: Some("   ".into()),
+                ..Default::default()
+            }),
+        )
+        .unwrap();
+    assert!(cleared.metadata.unwrap().display_name.is_none());
+}
+
+#[test]
+fn screen_order_preserves_tokens_and_export_order() {
+    use super::profiles::{ConnectionKind, ExportSelection, TransferKind};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("connections.toml");
+    let store = HostStore::load(path.clone(), Arc::new(FixtureCipher)).unwrap();
+    let host = store
+        .add("Host".into(), "https://host.test".into(), secret())
+        .unwrap();
+    let a = store
+        .save_desktop(
+            None,
+            None,
+            "A".into(),
+            "https://screen-a.test/mcp".into(),
+            Some(secret()),
+        )
+        .unwrap();
+    let b = store
+        .save_desktop(
+            None,
+            None,
+            "B".into(),
+            "https://screen-b.test/mcp".into(),
+            Some(secret()),
+        )
+        .unwrap();
+    let before = [a.id.clone(), b.id.clone()];
+    let after = [b.id.clone(), a.id.clone()];
+    store
+        .reorder_connections(ConnectionKind::Screen, &before, &after)
+        .unwrap();
+    assert_eq!(store.list().unwrap(), vec![host]);
+    assert_eq!(store.desktops().unwrap(), vec![b.clone(), a.clone()]);
+    assert_eq!(
+        store.desktop(&a.id).unwrap().token.expose(),
+        secret().expose()
+    );
+    let loaded = HostStore::load(path.clone(), Arc::new(FixtureCipher)).unwrap();
+    assert_eq!(loaded.desktops().unwrap(), vec![b.clone(), a.clone()]);
+    let payload = store
+        .export_snapshot(
+            &[
+                ExportSelection {
+                    kind: TransferKind::Screen,
+                    id: a.id.clone(),
+                    expected_revision: a.revision,
+                },
+                ExportSelection {
+                    kind: TransferKind::Screen,
+                    id: b.id.clone(),
+                    expected_revision: b.revision,
+                },
+            ],
+            true,
+            None,
+        )
+        .unwrap();
+    assert_eq!(
+        payload
+            .desktops
+            .iter()
+            .map(|d| d.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["B", "A"]
+    );
+    assert!(store
+        .reorder_connections(ConnectionKind::Screen, &before, &after)
+        .is_err());
+    std::fs::write(path, "connections = []").unwrap();
+    assert!(store
+        .reorder_connections(ConnectionKind::Screen, &after, &before)
+        .is_err());
+}
