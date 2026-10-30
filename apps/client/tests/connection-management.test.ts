@@ -137,7 +137,13 @@ describe('unified connection management', () => {
     await vi.advanceTimersByTimeAsync(100)
     expect(outer.scrollTop).toBe(stopped)
     expect(transport.runtimeReorderConnections).not.toHaveBeenCalled()
-    wrapper.unmount(); wrappers.splice(wrappers.indexOf(wrapper), 1); outer.remove()
+    await pointer('pointerdown'); await pointer('pointermove')
+    await vi.advanceTimersByTimeAsync(32)
+    const beforeUnmount = outer.scrollTop
+    wrapper.unmount(); wrappers.splice(wrappers.indexOf(wrapper), 1)
+    await vi.advanceTimersByTimeAsync(100)
+    expect(outer.scrollTop).toBe(beforeUnmount)
+    outer.remove()
   })
   it('places Screen management in connections and has no separate Screen settings page', async () => {
     const { transport } = setup()
