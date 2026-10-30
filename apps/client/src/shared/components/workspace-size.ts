@@ -1,7 +1,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, type Ref } from 'vue'
 
 export function useWorkspaceSize(workspace: Ref<HTMLElement | null>) {
-  const width = ref(200), height = ref(200)
+  const width = ref(360), height = ref(200)
   const bounds = ref({ width: 1000, height: 700 })
   const maxWidth = computed(() => Math.max(160, bounds.value.width - 320))
   const maxHeight = computed(() => Math.max(100, bounds.value.height - 180))

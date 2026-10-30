@@ -85,27 +85,8 @@ function key(init: KeyboardEventInit): KeyboardEvent {
 }
 
 describe('shared App with runtime profiles (no Tauri)', () => {
-  it('shows a configured desktop CLI name and writes quoted words only on click', async () => {
+  it('leaves CLI startup to manually typed terminal input without a launch button', async () => {
     const transport = new FakeTransport(PROFILES)
-    const target = { ...AGENTS.targets[0], codingCli: { id: 'dev-helper', name: 'Dev Helper', command: 'dev-helper', args: ['--label', "owner's workspace", '$(literal)', ''] } }
-    const m = mountApp(transport)
-    try {
-      await flush()
-      m.controller.openTarget({ dto: makeHost('hana', [target]), expanded: true }, target, false)
-      await flush()
-      const tab = m.controller.tabs[0], sid = tab.sessionId!
-      expect(transport.sessions.get(sid)!.writes).toEqual([])
-      const button = m.wrapper.find('[data-testid="launch-coding-cli"]')
-      expect(button.text()).toBe('啟動 Dev Helper')
-      await button.trigger('click'); await flush()
-      expect(transport.sessions.get(sid)!.writes.map(b => new TextDecoder().decode(Uint8Array.from(b)))).toEqual(["'dev-helper' '--label' 'owner'\\''s workspace' '$(literal)' ''\r"])
-      await m.controller.setHidden(true)
-      m.controller.launchCodingCli(tab); await flush()
-      expect(transport.sessions.get(sid)!.writes).toHaveLength(1)
-    } finally { m.wrapper.unmount() }
-  })
-  it('sends the inline Codex command once from the header button', async () => {
-    const transport = new FakeTransport()
     const target = { ...AGENTS.targets[0], codingCli: { id: 'codex', name: 'CODEX', command: 'codex', args: ['--yolo'] } }
     const m = mountApp(transport)
     try {
@@ -113,10 +94,11 @@ describe('shared App with runtime profiles (no Tauri)', () => {
       m.controller.openTarget({ dto: makeHost('hana', [target]), expanded: true }, target, false)
       await flush()
       const sid = m.controller.tabs[0].sessionId!
+      expect(m.wrapper.find('[data-testid="launch-coding-cli"]').exists()).toBe(false)
       expect(transport.sessions.get(sid)!.writes).toEqual([])
-      await m.wrapper.find('[data-testid="launch-coding-cli"]').trigger('click'); await flush()
-      expect(transport.sessions.get(sid)!.writes.map(b => new TextDecoder().decode(Uint8Array.from(b))))
-        .toEqual(['codex --yolo --no-alt-screen\r'])
+      m.terms[0].emitData('codex --yolo\r')
+      await flush()
+      expect(transport.sessions.get(sid)!.writes.flat()).toEqual(Array.from(new TextEncoder().encode('codex --yolo\r')))
     } finally { m.wrapper.unmount() }
   })
   beforeEach(() => {

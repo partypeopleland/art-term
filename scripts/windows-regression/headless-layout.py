@@ -1,6 +1,7 @@
 """Background browser UI checks only. No native App, IPC, DPAPI or real Host claims."""
 import argparse
 import json
+import tempfile
 import subprocess
 from pathlib import Path
 from selenium import webdriver
@@ -19,8 +20,9 @@ def main():
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[2]
     output = Path(args.output).resolve()
-    if not output.is_relative_to(root / 'target' / 'windows-regression'):
-        raise ValueError('Output must stay in target/windows-regression')
+    temp = Path(tempfile.gettempdir()).resolve()
+    if not any(p.name.startswith('art-term-') and p.parent == temp for p in [output, *output.parents]):
+        raise ValueError('Output must stay inside a task-owned art-term-* temporary directory')
     output.mkdir(parents=True, exist_ok=True)
     options = webdriver.EdgeOptions()
     options.add_argument('--headless=new')
@@ -58,12 +60,12 @@ def main():
     try:
         driver.get(args.url)
         node('runtime-demo-host')
-        check(abs(width() - 200) < 1, 'default sidebar is not 200px')
+        check(abs(width() - 360) < 1, 'default sidebar is not 360px')
         driver.set_window_size(1820, 1000)
         wait.until(lambda _: abs(width() - 200) < 1)
-        checks['fixed200AfterWindowExpansion'] = True
+        checks['fixed360AfterWindowExpansion'] = True
         drag('sidebar-divider', 160, 0)
-        wait.until(lambda _: abs(width() - 360) < 2)
+        wait.until(lambda _: abs(width() - 520) < 2)
         driver.set_window_size(1360, 900)
         wait.until(lambda _: abs(width() - 360) < 2)
         checks['dragWidthRetainedOnResize'] = True
@@ -144,14 +146,19 @@ def main():
         check(not driver.find_elements(By.CSS_SELECTOR, '[data-testid=screen-settings], [data-testid=runtime-host-form]'), 'settings spreads all forms')
         driver.save_screenshot(str(output / 'settings-appearance.png'))
         node('settings-connections').click()
+        check(not driver.find_elements(By.CSS_SELECTOR, '[data-testid=runtime-host-form]'), 'add form is visible before add is clicked')
+        node('runtime-create').click()
+        check(len(driver.find_elements(By.CSS_SELECTOR, 'input[type=radio][data-testid^=connection-type-]')) == 3, 'connection type radios missing')
         node('credential').send_keys('fixture-draft')
         check(not driver.find_elements(By.CSS_SELECTOR, '[role=dialog]'), 'connection management still a modal')
         check(driver.find_elements(By.CSS_SELECTOR, '[data-host-id] button'), 'existing connection actions lost')
         driver.save_screenshot(str(output / 'settings-connections.png'))
-        node('settings-screens').click()
-        node('screen-settings')
+        check(not driver.find_elements(By.CSS_SELECTOR, '[data-testid=settings-screens]'), 'separate Screen settings remains')
+        node('settings-appearance').click()
         check(not driver.find_elements(By.CSS_SELECTOR, '[data-testid=credential]'), 'secret form retained across categories')
         node('settings-connections').click()
+        check(not driver.find_elements(By.CSS_SELECTOR, '[data-testid=runtime-host-form]'), 'form reopened across categories')
+        node('runtime-create').click()
         check(node('credential').get_attribute('value') == '', 'secret draft restored after category switch')
         checks['categorizedSharedInlineSettingsAndDraftCleanup'] = True
         result['passed'] = True

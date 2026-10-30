@@ -18,7 +18,8 @@ mod runtime_sessions;
 mod runtime_transfer;
 use art_term_core::connections::Connections;
 use runtime_hosts::{
-    gui_runtime_delete_host, gui_runtime_hosts, gui_runtime_save_host, gui_runtime_test_host,
+    gui_runtime_delete_host, gui_runtime_hosts, gui_runtime_reorder_connections, gui_runtime_save_host,
+    gui_runtime_test_host,
 };
 use runtime_sessions::{
     gui_runtime_ack, gui_runtime_create_history_session, gui_runtime_create_session,
@@ -317,7 +318,6 @@ fn main() {
             crate::instance_desktops::gui_instance_select,
             crate::instance_desktops::gui_instance_clear,
             crate::instance_desktops::gui_instance_restore,
-            crate::instance_desktops::gui_instance_launch,
             gui_open_web_url,
             gui_platform,
             gui_open,
@@ -333,6 +333,7 @@ fn main() {
             runtime_transfer::gui_transfer_apply,
             runtime_transfer::gui_transfer_cancel,
             gui_runtime_hosts,
+            gui_runtime_reorder_connections,
             gui_runtime_save_host,
             gui_runtime_delete_host,
             gui_runtime_test_host,

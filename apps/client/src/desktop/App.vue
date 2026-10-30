@@ -30,7 +30,7 @@ const activeTab = controller.activeTab
 const page = ref<'workspace' | 'settings' | 'home'>('workspace')
 const screenPickerOpen = ref(false), transferPicker = ref(false)
 const zoomOpen = ref(false)
-const settingsSection = ref<'appearance' | 'connections' | 'screens'>('appearance')
+const settingsSection = ref<'appearance' | 'connections'>('appearance')
 const workspace = ref<HTMLElement | null>(null)
 const sizing = useWorkspaceSize(workspace)
 const { sidebarWidth, previewHeight, maxWidth, maxHeight } = sizing
@@ -126,7 +126,6 @@ const statusText = computed(() => !activeTab.value ? '未連線' : activeTab.val
         <TabBar :tabs="controller.tabs" :active-key="controller.activeKey.value" @select="tab => controller.setActive(tab.key)" @close="tab => void controller.closeTab(tab)" />
         <div v-if="activeTab" class="toolbar">
           <span class="t-name">{{ activeTab.hostLabel }} / {{ activeTab.label }}</span><span class="status" :class="activeTab.status">{{ statusText }}</span><span class="spacer" />
-          <button v-if="activeTab.codingCli" class="btn" data-testid="launch-coding-cli" :disabled="activeTab.status !== 'live'" @click="controller.launchCodingCli(activeTab)">啟動 {{ activeTab.codingCli.name }}</button>
           <button v-if="activeTab.status === 'live'" class="btn screen-trigger" data-testid="desktop-toggle" aria-label="選擇 Screen" title="選擇 Screen" :aria-pressed="!!activeTab.instanceDesktop" :disabled="activeTab.desktopBusy" @click="openScreens"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2" /><path d="M8 21h8M12 18v3" /></svg></button>
           <button v-if="activeTab.status === 'error' || activeTab.status === 'exited'" class="btn" @click="controller.reopenTab(activeTab, false)">重新連線</button>
         </div>
@@ -143,7 +142,7 @@ const statusText = computed(() => !activeTab.value ? '未連線' : activeTab.val
     </div>
     <footer class="statusbar"><span class="s-item" :class="activeTab?.status">{{ statusText }}</span><span v-if="activeTab?.remoteSession" class="s-item">{{ activeTab.remoteSession }}</span><span v-if="activeTab?.notice" class="s-item warn">{{ activeTab.notice }}</span><span v-if="controller.uiNotice.value" class="s-item warn">{{ controller.uiNotice.value }}</span><span class="spacer" /><span class="s-item muted">{{ controller.tabs.length }} / 32 分頁</span></footer>
     <PreviewZoom v-if="zoomOpen && page === 'workspace' && activeTab && activeTab.previewVisible && (activeTab.desktopEnabled || activeTab.shot)" :tab="activeTab" :screen-key="`${activeTab.key}:${activeTab.instanceDesktop?.id || 'legacy'}`" mode="windows" @close="zoomOpen = false" />
-    <ScreenPicker v-if="screenPickerOpen && activeTab" :items="controller.instanceDesktops.value" :selected-id="activeTab.instanceDesktop?.id" :busy="activeTab.desktopBusy" :error="activeTab.desktopError || controller.instanceDesktopsError.value" @select="selectScreen" @clear="clearScreen" @close="screenPickerOpen = false" @settings="showSettings('screens')" />
+    <ScreenPicker v-if="screenPickerOpen && activeTab" :items="controller.instanceDesktops.value" :selected-id="activeTab.instanceDesktop?.id" :busy="activeTab.desktopBusy" :error="activeTab.desktopError || controller.instanceDesktopsError.value" @select="selectScreen" @clear="clearScreen" @close="screenPickerOpen = false" @settings="showSettings('connections')" />
   </div>
 </template>
 

@@ -223,6 +223,7 @@ mod tests {
         assert!(!path.exists());
         let secret = "fixture-only-persisted-admin-credential";
         let metadata = ConnectionMetadata {
+            display_name: None,
             category: Category::Agent,
             desktop_transport: Some("runtime-mcp".into()),
             coding_cli: Some(CodingCli {
@@ -268,6 +269,7 @@ mod tests {
         // Explicit category edit under a blank secret applies the new
         // metadata while the DPAPI credential survives the revision bump.
         let trimmed = ConnectionMetadata {
+            display_name: None,
             category: Category::Host,
             desktop_transport: None,
             coding_cli: None,
