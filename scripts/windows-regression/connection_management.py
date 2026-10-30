@@ -40,6 +40,7 @@ def main():
         app = App(exe, driver, root, fixture)
         config = root / 'connections.toml'
         app.launch(config)
+        result['actualWindowsExe'] = True
         app.driver.execute_script("window.__connectionPointers=[];document.addEventListener('pointerdown',e=>{if(e.target.closest('[data-action=reorder]'))window.__connectionPointers.push({trusted:e.isTrusted,type:e.pointerType})},true)")
 
         def manage():
@@ -159,6 +160,19 @@ def main():
         navigation = app.driver.execute_script("return [...document.querySelectorAll('.desktop-sidebar [data-testid^=runtime-]')].map(e=>e.dataset.testid)")
         require(navigation.index('runtime-' + agent_b['id']) < navigation.index('runtime-' + agent_a['id']), 'navigation does not follow saved Agent order')
         result['checks']['restartAndNavigation'] = True
+
+        stage = 'native-delete'
+        print('STAGE ' + stage, flush=True)
+        manage()
+        for item in (agent_a, screen_a):
+            action(item['id'], 'delete').click()
+            app.node('confirm-delete').click()
+            toast('已刪除')
+        require(len(app.profiles()) == 2 and len(app.screens()) == 1, 'native delete did not update both collections')
+        app.close()
+        app.launch(config)
+        require(len(app.profiles()) == 2 and len(app.screens()) == 1, 'deleted entries returned after restart')
+        result['checks']['nativeAgentAndScreenDeletion'] = True
 
         stage = 'manual-terminal'
         print('STAGE ' + stage, flush=True)
