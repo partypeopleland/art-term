@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 import socket
 import subprocess
+import tempfile
 import time
 import uuid
 import xml.etree.ElementTree as ET
@@ -15,12 +16,19 @@ from device import Device, ROOT, PACKAGE, require, wait
 class LinuxEmulator(Device):
     def __init__(self, sdk, run, *, hardware_keyboard=True):
         self.sdk, self.run = Path(sdk).resolve(), Path(run).resolve()
-        require(self.run.is_relative_to((ROOT / 'target/android-regression').resolve()), 'AVD must be under test target')
+        temporary = Path(tempfile.gettempdir()).resolve()
+        owned_temporary = (self.run.is_relative_to(temporary)
+                           and self.run.relative_to(temporary).parts
+                           and self.run.relative_to(temporary).parts[0].startswith('art-term-'))
+        require(self.run.is_relative_to((ROOT / 'target/android-regression').resolve()) or owned_temporary,
+                'AVD must be under test target or an art-term temporary directory')
         self.run.mkdir(parents=True, exist_ok=False, mode=0o700)
         # Serialize owned AVD lifetimes. Checking then releasing a free TCP
         # port races another runner during avdmanager/boot, and concurrent
         # software-rendered AVDs can also stall accessibility dumps.
-        self.lock = (ROOT/'target/android-regression/.linux-emulator.lock').open('a')
+        lock_root = ROOT / 'target/android-regression'
+        lock_root.mkdir(parents=True, exist_ok=True)
+        self.lock = (lock_root / '.linux-emulator.lock').open('a')
         fcntl.flock(self.lock, fcntl.LOCK_EX)
         self.name = 'art-term-scroll-' + uuid.uuid4().hex
         self.adb = self.sdk / 'platform-tools/adb'
