@@ -27,7 +27,7 @@ App native -- direct screenshot -------------------------------> instance-mcp
 
 broker 初始沒有上游授權，未選擇時工具拒絕呼叫且不連上游。App 配置成功後，URL／token 只存在此 broker 的行程記憶體。晚啟動的 Shell client 或 CLI stdio proxy 連同一個 broker；CLI stdio EOF 只斷開該 client，不清除 Shell 的選擇。明確 clear 拒絕後續工具呼叫；Bash 結束、SIGTERM／SIGHUP 或 tmux／Runtime 結束時清記憶體、移除 socket，不留下孤兒 broker。
 
-Unix socket 位於 owner-only 0700 runtime 目錄，驗證 owner、mode 及非 symlink，client 只連相符 binding；同 UID 程序仍是信任邊界。通用程式、非秘密 binding 與 stdio 定義可在磁碟／argv／環境中，選定上游 URL、token 及認證 header 不得放入這些位置、工作 tty、history 或 log。已移除的 NUC／Hana 固定上游設定及 token 環境不可重新引入。
+Unix socket 位於 owner-only 0700 runtime 目錄，驗證 owner、mode 及非 symlink，client 只連相符 binding；同 UID 程序仍是信任邊界。通用程式、非秘密 binding 與 stdio 定義可在磁碟／argv／環境中，選定上游 URL、token 及認證 header 不得放入這些位置、工作 tty、history 或 log。已移除的固定上游設定及 token 環境不可重新引入。
 
 ## App 配置與來源核對
 
@@ -41,7 +41,7 @@ App 以 `exec python3` 啟動短命 configure Shell；接收端先關 echo／can
 
 完整保留 MCP `content`／`isError`／`structuredContent` 與來源 metadata，包括圖片；App 直接截圖避免 PTY 傳圖，不表示工具結果全面過濾圖片。工具呼叫最多 60 秒、list 最多 15 秒、JSON／SSE 最多 16 MiB。URL／DNS／TLS／proxy 與取消規則和[直接預覽](desktop.md#原生-mcp-傳輸)相同，不重播有副作用的呼叫，也不宣稱取消能撤銷上游已開始的操作。
 
-新工作 Shell 的專用 rc 先載入一般 `~/.bashrc`，再提供 Shell 工具及 scoped Codex stdio 接線。使用者可照常輸入 Codex，不需要 App 額外啟動按鈕；CLI 不會自動執行。通用 MCP 定義只帶程式路徑與 binding，不含上游憑證，保留使用者參數及一般設定，包括直接輸入 `codex --yolo`，不修改全域 Codex、Hana 或 Discord 配置。其他 CLI 只在確認支援的配置方式後整合，不宣稱所有引擎或既有 AI 能熱插入。Devin 不自動接線，也不代寫其 project／global 設定；其他支援標準 MCP 的 CLI 可依下一節，用各自原生配置一次登記通用入口。
+新工作 Shell 的專用 rc 先載入一般 `~/.bashrc`，再提供 Shell 工具及 scoped Codex stdio 接線。使用者可照常輸入 Codex，不需要 App 額外啟動按鈕；CLI 不會自動執行。通用 MCP 定義只帶程式路徑與 binding，不含上游憑證，保留使用者參數及一般設定，包括直接輸入 `codex --yolo`，不修改全域 Codex、其他 agent 或 Discord 配置。其他 CLI 只在確認支援的配置方式後整合，不宣稱所有引擎或既有 AI 能熱插入。Devin 不自動接線，也不代寫其 project／global 設定；其他支援標準 MCP 的 CLI 可依下一節，用各自原生配置一次登記通用入口。
 
 ## Codex 批准政策
 

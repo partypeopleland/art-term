@@ -76,11 +76,11 @@ Windows test runner
 
 [Android Emulator 命令列](https://developer.android.com/studio/run/emulator-commandline)、[硬體加速](https://developer.android.com/studio/run/emulator-acceleration)、[ADB](https://developer.android.com/tools/adb)、[WebView 遠端除錯](https://developer.chrome.com/docs/devtools/remote-debugging/webviews)。
 
-## Linux 模擬器：NUC 斷線與歷史捲動
+## Linux 模擬器：遠端 Host 斷線與歷史捲動
 
 針對原生閱讀區新增獨立測試入口，涵蓋真正拖曳、網路中斷後恢復，以及手動脫離再接回同一遠端 Shell。每次建立新的測試 AVD 與專用 Shell，不接管現有裝置或工作。使用 `ls`／`ls -al` 列出測試專用的虛構檔案，透過當次原生內容與畫面變化判斷舊輸出與捲動是否保留。
 
-執行前需準備可除錯的 x86_64 APK、可用的 NUC HTTPS 網址與 repo 外的管理憑證檔。工具啟動測試與真實歷史測試分開回報，沒有連線證據時不得宣稱歷史通過。完整命令、證據與清理方式見[NUC 歷史捲動測試](../../scripts/android-regression/reconnect-scroll.md)。
+執行前需準備可除錯的 x86_64 APK、可用的遠端 Linux Host HTTPS 網址與 repo 外的管理憑證檔。工具啟動測試與真實歷史測試分開回報，沒有連線證據時不得宣稱歷史通過。完整命令、證據與清理方式見[遠端 Host 歷史捲動測試](../../scripts/android-regression/reconnect-scroll.md)。
 
 ## 終端網址
 

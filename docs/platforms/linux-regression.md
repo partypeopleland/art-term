@@ -35,7 +35,7 @@ Host 安裝／升級／桌面交易測試以假的 systemd／Tailnet adapter 操
 
 ## AI 準備與執行
 
-先確認主機、一般使用者、checkout、分支、commit 與 dirty/untracked，沿用同一已發布測試分支。Windows／NUC 不同時修改同一檔案；Git 同步只搬原始碼與文件，不搬私人設定。不能拿舊主機 checkout 的結果代表新來源。
+先確認主機、一般使用者、checkout、分支、commit 與 dirty/untracked，沿用同一已發布測試分支。不同開發主機不得同時修改同一檔案；Git 同步只搬原始碼與文件，不搬私人設定。不能拿舊主機 checkout 的結果代表新來源。
 
 從專案根目錄執行：
 

@@ -248,7 +248,7 @@ rm -r -- "$HOME/.local/share/art-term/.upgrade-backup"
 
 若 backup 仍存在，下一次舊版升級會拒絕。相同官方安裝的檢視／no-op 不需刪 backup。最後記錄可保留；不要取消 linger，除非確認此帳號沒有其他 user service 依賴它。
 
-路徑、UID、私有權限與 digest 在取得 installer flock 後及 commit 前重核對，檔案讀取使用 directory FD 和 O_NOFOLLOW。這保護正常安裝與協作衝突；擁有同一 UID 的惡意程序可同時改私人檔案，超出此個人帳號工具的隔離保證。Runtime session 是記憶體狀態，診斷交給 journald，不是 rollback 的持久資料。Host 升級 fixture 不取代 nuc、Windows GUI、Android 或 Hana 的實機驗收。
+路徑、UID、私有權限與 digest 在取得 installer flock 後及 commit 前重核對，檔案讀取使用 directory FD 和 O_NOFOLLOW。這保護正常安裝與協作衝突；擁有同一 UID 的惡意程序可同時改私人檔案，超出此個人帳號工具的隔離保證。Runtime session 是記憶體狀態，診斷交給 journald，不是 rollback 的持久資料。Host 升級 fixture 不取代原生 Host、容器 Runtime、Windows GUI 或 Android 的實機驗收。
 
 ## instance-mcp 與桌面準備
 
