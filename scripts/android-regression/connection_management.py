@@ -29,10 +29,25 @@ class Connections:
         self.device.start()
         self.app = App(self.device).connect()
         wait(lambda: self.app.has('.settings-trigger'))
-        self.app.evaluate('''(()=>{window.__connectionPointers=[];
+        self.app.evaluate('''(()=>{window.__connectionPointers=[];window.__connectionReorders=[];
 for(const type of ['pointerdown','pointermove','pointerup','pointercancel'])
-document.addEventListener(type,e=>{window.__connectionPointers.push({type,trusted:e.isTrusted,x:e.clientX,y:e.clientY});
-window.__connectionPointers=window.__connectionPointers.slice(-100)},true)})()''')
+document.addEventListener(type,e=>{const hit=document.elementFromPoint(e.clientX,e.clientY)?.closest('[data-connection-id]');
+window.__connectionPointers.push({type,trusted:e.isTrusted,x:e.clientX,y:e.clientY,
+button:e.button,isPrimary:e.isPrimary,pointerId:e.pointerId,pointerType:e.pointerType,
+target:e.target.tagName,disabled:e.target.closest('button')?.disabled,
+hit:hit?.dataset.connectionId,kind:hit?.dataset.connectionKind,
+dragging:document.querySelector('.dragging')?.dataset.connectionId,
+before:document.querySelector('.drop-before')?.dataset.connectionId,
+after:document.querySelector('.drop-after')?.dataset.connectionId});
+window.__connectionPointers=window.__connectionPointers.slice(-100)},true);
+const native=window.ipc.postMessage.bind(window.ipc),callbacks=window.__TAURI_INTERNALS__.callbacks;
+window.ipc={postMessage:data=>{const message=JSON.parse(data);
+if(message.cmd==='gui_runtime_reorder_connections'){
+window.__connectionReorders.push({phase:'request',...message.payload});
+for(const [key,phase]of [['callback','success'],['error','error']]){const callback=callbacks.get(message[key]);
+if(callback)callbacks.set(message[key],value=>{const detail=phase==='error'?(typeof value==='string'?value:JSON.stringify(value)).slice(0,512):undefined;
+window.__connectionReorders.push({phase,detail});return callback(value)})}}
+return native(data)}}})()''')
 
     def restart(self):
         self.app.close()
@@ -70,6 +85,18 @@ window.__connectionPointers=window.__connectionPointers.slice(-100)},true)})()''
     def action(self, identity, action):
         self.app.click(row_selector(identity) + ' [data-action=' + action + ']')
 
+    def seed(self, kind, name, url, token, display=None):
+        if kind == 'screen':
+            command = 'gui_instance_save'
+            value = {'name': name, 'mcpUrl': url, 'token': token}
+        else:
+            command = 'gui_runtime_save_host'
+            value = {'name': name, 'baseUrl': url, 'credential': token, 'category': kind}
+            if display is not None:
+                value['displayName'] = display
+        return self.app.evaluate('window.__TAURI_INTERNALS__.invoke(' + json.dumps(command)
+                                 + ',' + json.dumps({'input': value}) + ')')
+
     def edit_alias(self, identity, value):
         self.action(identity, 'edit')
         require(self.app.evaluate('document.querySelector("[data-testid=credential]").value') == '', 'editing disclosed saved credential')
@@ -92,6 +119,7 @@ tx:b.x+18,ty:b.y+b.height*.2,vw:innerWidth}}}})()''')
                        round(bounds[0] + points['tx'] * scale), round(bounds[1] + points['ty'] * scale)]
         require(all(bounds[0] <= x < bounds[2] for x in coordinates[::2])
                 and all(bounds[1] <= y < bounds[3] for y in coordinates[1::2]), 'drag endpoints outside WebView')
+        app.evaluate('window.__connectionLastDrag=' + json.dumps(points))
         app.evaluate('window.__connectionPointers=[]')
         self.device.call('shell', 'input', 'swipe', *coordinates, 700)
         wait(lambda: app.evaluate('window.__connectionPointers.some(e=>e.type==="pointerup"&&e.trusted)'))
@@ -121,6 +149,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--apk', required=True, type=Path)
     parser.add_argument('--source-sha', required=True)
+    parser.add_argument('--seed-extra-via-ipc', action='store_true',
+                        help='Create the first Computer through UI; seed other records through real native save commands.')
     parser.add_argument('--sdk', type=Path, default=Path('/home/art/Android/Sdk'))
     parser.add_argument('--output', type=Path, default=Path(tempfile.gettempdir()) / ('art-term-connections-' + uuid.uuid4().hex))
     args = parser.parse_args()
@@ -160,17 +190,24 @@ def main():
         stage = 'unified-crud'
         suite.settings()
         computer = suite.save('host', 'Computer', origins[0], fixture.credential)
-        agent_a = suite.save('agent', 'Agent A', origins[1], fixture.credential, '中文開發助手')
-        agent_b = suite.save('agent', 'Agent B', origins[2], fixture.credential)
-        screen_a = suite.save('screen', 'Screen A', screens[0].url, screens[0].token)
-        screen_b = suite.save('screen', 'Screen B', screens[1].url, screens[1].token)
+        create = suite.seed if args.seed_extra_via_ipc else suite.save
+        agent_a = create('agent', 'Agent A', origins[1], fixture.credential, '中文開發助手')
+        agent_b = create('agent', 'Agent B', origins[2], fixture.credential)
+        screen_a = create('screen', 'Screen A', screens[0].url, screens[0].token)
+        screen_b = create('screen', 'Screen B', screens[1].url, screens[1].token)
+        if args.seed_extra_via_ipc:
+            suite.page('Main')
+            suite.settings()
         raw = device.store()
         require(all(secret.encode() not in raw for secret in [fixture.credential, *(screen.token for screen in screens)]), 'plaintext token in settings')
         stored = suite.stored()
         require(all(item.get('credential_ciphertext') for item in stored['connections'])
                 and all(item.get('token_ciphertext') for item in stored['desktops']), 'native encrypted credential missing')
         require(stored['connections'][1]['display_name'] == '中文開發助手', 'Chinese alias absent from native store')
-        result['cases'][stage] = {'passed': True, 'types': 3, 'hosts': 3, 'screens': 2, 'encryptedTokens': True}
+        result['cases'][stage] = {'passed': True, 'types': 3, 'hosts': 3, 'screens': 2, 'encryptedTokens': True,
+                                 'uiCreated': 1 if args.seed_extra_via_ipc else 5,
+                                 'ipcCreated': 4 if args.seed_extra_via_ipc else 0}
+        print('PASS ' + stage, flush=True)
         device.screenshot(output / 'unified-list.png')
         stage = 'native-connection-test-toast'
         suite.action(computer['id'], 'test')
@@ -181,6 +218,7 @@ def main():
         wait(lambda: '連線測試成功' in suite.app.text('[data-testid=connection-toast]'))
         require(any(item['method'] == 'initialize' for item in screens[0].events), 'Screen test never reached actual MCP fixture')
         result['cases'][stage] = {'passed': True, 'runtimeHttps': True, 'screenMcp': True, 'toastExpires': True}
+        print('PASS ' + stage, flush=True)
         stage = 'native-touch-reorder'
         suite.drag(agent_b['id'], agent_a['id'])
         expected_hosts = [computer['id'], agent_b['id'], agent_a['id']]
@@ -194,6 +232,7 @@ def main():
         require(device.store() == before, 'cross-type drag mutated native settings')
         require(suite.app.has('.global-settings-page'), 'sorting triggered workspace navigation')
         result['cases'][stage] = {'passed': True, 'agents': True, 'screens': True, 'crossTypeRejected': True, 'noPagerGesture': True}
+        print('PASS ' + stage, flush=True)
         stage = 'restart-navigation-alias'
         suite.restart()
         require([item['id'] for item in suite.app.profiles()] == expected_hosts, 'native ordering changed after restart')
@@ -219,12 +258,14 @@ def main():
         profile = next(item for item in suite.app.profiles() if item['id'] == agent_a['id'])
         require(not profile.get('displayName'), 'blank alias did not restore default')
         result['cases'][stage] = {'passed': True, 'orderRetained': True, 'chineseAlias': True, 'twentyCharacterBoundary': True, 'emptyAliasDefault': True}
+        print('PASS ' + stage, flush=True)
         stage = 'delete-screen'
         suite.action(screen_a['id'], 'delete')
         suite.app.tap('confirm-delete')
         wait(lambda: not suite.app.has(row_selector(screen_a['id'])))
         require(len(suite.stored()['connections']) == 3 and len(suite.stored()['desktops']) == 1, 'Screen delete changed Host records')
         result['cases'][stage] = {'passed': True, 'hostRecordsPreserved': True}
+        print('PASS ' + stage, flush=True)
         stage = 'mobile-homepage-pager'
         suite.page('Main')
         suite.swipe('.home-surface', True)
@@ -239,6 +280,7 @@ def main():
         wait(lambda: suite.visible('.software-home-page'))
         require(suite.visible('.workspace-header'), 'header vanished during pager navigation')
         result['cases'][stage] = {'passed': True, 'homeMainConnectSwipes': True, 'brandUsesPagerPage': True}
+        print('PASS ' + stage, flush=True)
         stage = 'manual-terminal-command'
         suite.page('Main')
         suite.app.click('[data-testid="runtime-' + computer['id'] + '"] .new-connection')
@@ -251,6 +293,7 @@ def main():
         wait(lambda: any('codex --help\r' in item['input'] for item in fixture.snapshot()['sessions'].values()))
         result['cases'][stage] = {'passed': True, 'launchButtonAbsent': True, 'typedCommandReachedNativeRuntime': True,
                                  'fixtureDoesNotExecuteCli': True}
+        print('PASS ' + stage, flush=True)
         result['webview'] = suite.app.metadata
         result['passed'] = True
     except Exception as error:
@@ -260,6 +303,8 @@ def main():
             try:
                 result['failure']['touch'] = getattr(suite.app, 'touch_diagnostic', None)
                 result['failure']['pointers'] = suite.app.evaluate('window.__connectionPointers')
+                result['failure']['drag'] = suite.app.evaluate('window.__connectionLastDrag')
+                result['failure']['reorders'] = suite.app.evaluate('window.__connectionReorders')
                 html = suite.app.evaluate('document.documentElement.outerHTML')
                 for secret in [fixture.credential, *(screen.token for screen in screens)]:
                     html = html.replace(secret, '[redacted]')
