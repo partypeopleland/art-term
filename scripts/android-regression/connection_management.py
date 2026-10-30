@@ -287,9 +287,9 @@ def main():
         wait(lambda: suite.app.evaluate('Object.keys(window.__reg.sessions).length') == 1, 40)
         wait(lambda: suite.current('Connect'))
         require(not suite.app.has('[data-testid=launch-coding-cli]'), 'dedicated CLI launch button remains')
-        suite.app.tap('k-composer')
-        suite.app.set('composer-text', 'codex --help')
-        suite.app.tap('composer-send-enter')
+        suite.app.tap('k-keyboard')
+        device.call('shell', 'input', 'text', 'codex%s--help')
+        device.key(66)
         wait(lambda: any('codex --help\r' in item['input'] for item in fixture.snapshot()['sessions'].values()))
         result['cases'][stage] = {'passed': True, 'launchButtonAbsent': True, 'typedCommandReachedNativeRuntime': True,
                                  'fixtureDoesNotExecuteCli': True}
