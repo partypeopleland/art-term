@@ -63,7 +63,7 @@ const sections = computed(() => [
       <div v-show="!collapsed.screens" id="category-content-screens" class="section-content">
         <p v-if="screensError" class="dashboard-error" role="alert">{{ screensError }}</p>
         <div v-for="screen in screens" :key="screen.id" class="saved-screen-row" :data-testid="`screen-${screen.id}`"><span class="screen-status-dot" /><div><strong>{{ screen.name }}</strong><span>{{ screen.mcpUrl }}</span></div></div>
-        <div v-if="!screens.length && !screensError" class="empty-section"><span class="empty-line" aria-hidden="true" /><span>尚未新增 Screen，請到齒輪的畫面設定新增</span></div>
+        <div v-if="!screens.length && !screensError" class="empty-section"><span class="empty-line" aria-hidden="true" /><span>尚未新增 Screen，請到齒輪的連線設定新增</span></div>
       </div>
     </section>
   </div>

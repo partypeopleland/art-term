@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import type { RuntimeHostDto, Transport, TransferPreview, TransferEntry, TransferAction, InstanceDesktop } from '../transport/types'
+import ConnectionToast from './ConnectionToast.vue'
 import { asConnectionError } from '../transport/types'
 const props = defineProps<{ transport: Transport; hosts: RuntimeHostDto[]; mode: 'import' | 'export' }>()
 const emit = defineEmits<{ close: []; changed: []; picker: [active: boolean] }>()
@@ -135,7 +136,7 @@ onBeforeUnmount(() => { alive = false; generation++; clearSecrets(); dropPreview
 <template>
   <div ref="root" class="runtime-transfer" data-testid="runtime-transfer">
     <div class="transfer-heading"><h3>{{ mode === 'export' ? '匯出連線' : '匯入連線' }}</h3><button type="button" @click="close">返回管理</button></div>
-    <p v-if="error" role="alert">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p>
+    <ConnectionToast v-if="error || notice" :notification="{ message: error || notice, error: !!error }" @dismiss="error = ''; notice = ''" />
     <p v-if="busy" role="status">{{ picking ? '請在系統視窗選擇檔案；加密處理可能需要一些時間。' : '正在處理連線檔案，請稍候…' }}</p>
     <form v-if="mode === 'export'" @submit.prevent="exportFile">
       <fieldset :disabled="busy || inventoryLoading || inventoryError"><legend>選擇要搬移的連線</legend>

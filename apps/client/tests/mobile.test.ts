@@ -83,22 +83,16 @@ function runtime(): FakeMobileTransport {
   return seed(new FakeMobileTransport(PROFILES))
 }
 
-describe('explicit coding CLI action', () => {
-  it('starts configured CLI once from the terminal header and never on reconnect', async () => {
+describe('manual coding CLI launch', () => {
+  it('keeps launch controls absent and sends only manually typed terminal input', async () => {
     const m = mountMobile(runtime())
     try {
       await flush(); await tapTarget(m, 'hana')
       const tab = m.controller.tabs[0], first = tab.sessionId!
-      const button = m.wrapper.find('.t-head [data-testid="launch-coding-cli"]')
-      expect(button.exists()).toBe(true)
-      expect(button.text()).toBe('My Assistant')
-      await button.trigger('click'); await flush()
-      expect(m.transport.sessions.get(first)!.writes.map(b => new TextDecoder().decode(Uint8Array.from(b)))).toEqual(["'assistant' '--label' 'owner'\\''s workspace' '$(ignored)'\r"])
-      const initialWrites = m.transport.sessions.get(first)!.writes.slice()
-      await m.controller.setHidden(true)
-      m.transport.feed(first, { bytes: [], exitCode: null, runtime: { batchId: 0, localGeneration: 1, events: [], ended: 'transport' } }); await flush()
-      await m.controller.setHidden(false); await flush()
-      expect(m.transport.sessions.get(tab.sessionId!)!.writes).toEqual(initialWrites)
+      expect(m.wrapper.find('[data-testid="launch-coding-cli"]').exists()).toBe(false)
+      expect(m.transport.sessions.get(first)!.writes).toEqual([])
+      m.controller.sendInput(tab, 'codex\r'); await flush()
+      expect(m.transport.sessions.get(first)!.writes.map(bytes => new TextDecoder().decode(Uint8Array.from(bytes)))).toEqual(['codex\r'])
     } finally { m.wrapper.unmount() }
   })
 })

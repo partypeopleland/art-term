@@ -4,16 +4,15 @@ import { useModalFocus } from './modal-focus'
 import { themes, selectedTheme, selectTheme } from '../theme/theme'
 import RuntimeTransfer from './RuntimeTransfer.vue'
 import RuntimeHosts from './RuntimeHosts.vue'
-import ScreenSettings from './ScreenSettings.vue'
 import type { RuntimeHostDto, Transport } from '../transport/types'
 type SettingsSection = 'appearance' | 'connections' | 'screens'
 const props = withDefaults(defineProps<{ embedded?: boolean; desktop?: boolean; initialSection?: SettingsSection; transport?: Transport; hosts?: RuntimeHostDto[] }>(), { hosts: () => [], initialSection: 'appearance' })
 const emit = defineEmits<{ close: []; changed: []; picker: [active: boolean] }>()
 const transferMode = ref<'import' | 'export' | null>(null)
-const section = ref<SettingsSection>(props.initialSection)
+const section = ref<SettingsSection>(props.initialSection === 'screens' ? 'connections' : props.initialSection)
 const pickerActive = ref(false)
-const sections = [{ id: 'appearance', title: '外觀設定', hint: '主題與配色' }, { id: 'connections', title: '連線設定', hint: '主機、助理與搬移' }, { id: 'screens', title: '畫面設定', hint: '桌面來源與認證' }] as const
-watch(() => props.initialSection, value => { if (!pickerActive.value) section.value = value })
+const sections = [{ id: 'appearance', title: '外觀設定', hint: '主題與配色' }, { id: 'connections', title: '連線設定', hint: '主機、助理、桌面與搬移' }] as const
+watch(() => props.initialSection, value => { if (!pickerActive.value) section.value = value === 'screens' ? 'connections' : value })
 function picker(active: boolean) { pickerActive.value = active; emit('picker', active) }
 function choose(value: SettingsSection) { if (!pickerActive.value) { transferMode.value = null; section.value = value } }
 const dialog = ref<HTMLElement | null>(null)
@@ -48,10 +47,9 @@ if (!props.embedded) useModalFocus(dialog, () => emit('close'))
         </div>
         <RuntimeTransfer v-if="transferMode" :key="transferMode" :mode="transferMode" :transport="transport" :hosts="hosts" @close="transferMode = null" @changed="emit('changed')" @picker="picker" />
         <div v-else class="new-connection-settings">
-          <RuntimeHosts embedded :transport="transport" initial-view="create" @changed="emit('changed')" />
+          <RuntimeHosts embedded :transport="transport" @changed="emit('changed')" />
         </div>
       </section>
-      <ScreenSettings v-if="transport?.instanceDesktops && (!desktop || section === 'screens')" :transport="transport" @changed="emit('changed')" />
     </section>
     </div>
   </div>

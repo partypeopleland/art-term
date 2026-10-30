@@ -10,10 +10,10 @@ useModalFocus(dialog, () => emit('close'))
 <template>
   <div class="screen-picker-backdrop"><section ref="dialog" class="screen-picker" role="dialog" aria-modal="true" aria-label="選擇 Screen" tabindex="-1" data-testid="screen-picker">
     <header><h2>選擇 Screen</h2><button aria-label="關閉 Screen 選單" @click="emit('close')">×</button></header>
-    <p v-if="!items.length">尚未設定 Screen，請到齒輪的畫面設定新增。</p>
+    <p v-if="!items.length">尚未設定 Screen，請到齒輪的連線設定新增。</p>
     <button v-for="item in items" :key="item.id" class="screen-choice" :data-testid="`choose-screen-${item.id}`" :disabled="busy" :aria-pressed="selectedId === item.id" @click="emit('select', item)"><strong>{{ item.name }}</strong><span>{{ item.mcpUrl }}</span></button>
     <p v-if="error" role="alert">{{ error }}</p>
-    <footer><button v-if="selectedId" :disabled="busy" data-testid="clear-screen" @click="emit('clear')">取消畫面與工具</button><button @click="emit('settings')">畫面設定</button></footer>
+    <footer><button v-if="selectedId" :disabled="busy" data-testid="clear-screen" @click="emit('clear')">取消畫面與工具</button><button @click="emit('settings')">連線設定</button></footer>
   </section></div>
 </template>
 <style scoped>

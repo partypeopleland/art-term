@@ -418,8 +418,6 @@ onBeforeUnmount(() => {
 
         <span class="flex" />
 
-        <button v-if="!settingsOpen && !aboutOpen && phase === 'session' && activeTab && activeTab.codingCli" class="mbtn slim" data-testid="launch-coding-cli"
-          :disabled="activeTab.status !== 'live'" @click="controller.launchCodingCli(activeTab)">{{ activeTab.codingCli.name }}</button>
         <button v-if="!settingsOpen && !aboutOpen && phase === 'session' && activeTab?.status === 'live'" class="screen-trigger" data-testid="desktop-toggle" :disabled="activeTab.desktopBusy" :aria-pressed="!!activeTab.instanceDesktop" aria-label="選擇 Screen" title="選擇 Screen" @click="openScreenPicker"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2" /><path d="M8 21h8M12 18v3" /></svg></button>
 
 

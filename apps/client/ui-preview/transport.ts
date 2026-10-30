@@ -39,7 +39,8 @@ export function createPreviewTransport(scenario: Scenario = 'populated'): Transp
       const previous = screens.find(item => item.id === input.id)
       if (input.id && (!previous || previous.revision !== input.expectedRevision)) throw new Error('示範設定已變更')
       const saved = { id: previous?.id ?? `screen-${++counter}`, revision: (previous?.revision ?? 0) + 1, name: input.name, mcpUrl: input.mcpUrl, tokenPresent: Boolean(input.token) || Boolean(previous?.tokenPresent) }
-      screens = [...screens.filter(item => item.id !== saved.id), saved]
+      const index = screens.findIndex(item => item.id === saved.id)
+      if (index < 0) screens.push(saved); else screens.splice(index, 1, saved)
       return structuredClone(saved)
     },
     async instanceDelete(id, revision) { screens = screens.filter(item => !(item.id === id && item.revision === revision)) },
@@ -52,7 +53,6 @@ export function createPreviewTransport(scenario: Scenario = 'populated'): Transp
       return { desktop: structuredClone(desktop), toolReady: false }
     },
     async instanceClear(id) { selected.delete(id) },
-    async instanceLaunch(id) { const desktop = selected.get(id); if (!desktop) throw new Error('請先選擇 Screen'); return { desktop: structuredClone(desktop), toolReady: true } },
     async runtimeHosts() {
       if (scenario === 'error') throw new ConnectionError('storage', '示範：無法讀取連線設定，請切換情境後重試。')
       return structuredClone(hosts)
@@ -62,12 +62,25 @@ export function createPreviewTransport(scenario: Scenario = 'populated'): Transp
       const saved: RuntimeHostDto = {
         id: previous?.id ?? `demo-${++counter}`, revision: (previous?.revision ?? 0) + 1,
         name: input.name, baseUrl: input.baseUrl, category: input.category ?? input.metadata?.category ?? 'host',
+        displayName: input.displayName?.trim() || undefined, agentTool: input.displayName?.trim() || previous?.metadata?.coding_cli?.name,
         metadata: input.metadata, credentialPresent: Boolean(input.credential) || Boolean(previous?.credentialPresent)
       }
       // The credential itself is deliberately never retained.
-      hosts = [...hosts.filter(h => h.id !== saved.id), saved]
+      const index = hosts.findIndex(item => item.id === saved.id)
+      if (index < 0) hosts.push(saved); else hosts.splice(index, 1, saved)
       if (!shells.has(saved.id)) shells.set(saved.id, [])
       return structuredClone(saved)
+    },
+    async runtimeReorderConnections(kind, expectedIds, orderedIds) {
+      const group = kind === 'screen' ? screens : hosts.filter(item => (item.category === 'agent' ? 'agent' : 'host') === kind)
+      const current = group.map(item => item.id)
+      if (current.length !== expectedIds.length || current.some((id, index) => id !== expectedIds[index]) || orderedIds.length !== current.length || new Set(orderedIds).size !== current.length || orderedIds.some(id => !current.includes(id))) throw new ConnectionError('stateChanged', '示範設定已變更')
+      if (kind === 'screen') screens.sort((a, b) => orderedIds.indexOf(a.id) - orderedIds.indexOf(b.id))
+      else {
+        const byId = new Map(hosts.map(item => [item.id, item]))
+        let index = 0
+        hosts = hosts.map(item => (item.category === 'agent' ? 'agent' : 'host') === kind ? byId.get(orderedIds[index++])! : item)
+      }
     },
     async runtimeDeleteHost(id, revision) {
       profile(id, revision)

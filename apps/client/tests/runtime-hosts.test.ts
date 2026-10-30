@@ -24,13 +24,13 @@ function setup(initial: RuntimeHostDto[] = []) {
   return { wrapper, transport }
 }
 async function fields(wrapper: ReturnType<typeof mount>, secret = 'fixture-admin') {
-  if (!wrapper.find('[data-testid=name]').exists()) await button(wrapper, '新增 openab-pty 連線')
+  if (!wrapper.find('[data-testid=name]').exists()) await button(wrapper, '新增連線')
   await wrapper.get('[data-testid="name"]').setValue('New Host')
   await wrapper.get('[data-testid="base-url"]').setValue('https://runtime.example.test:443/')
   await wrapper.get('[data-testid="credential"]').setValue(secret)
 }
 async function button(wrapper: ReturnType<typeof mount>, label: string) {
-  const found = wrapper.findAll('button').find((item) => item.text() === label)
+  const found = wrapper.findAll('button').find((item) => item.text() === label || item.attributes('aria-label') === label)
   expect(found, label).toBeDefined()
   await found!.trigger('click')
 }
@@ -71,7 +71,7 @@ describe('runtime Host settings', () => {
     await flushPromises()
     await wrapper.get('[data-testid="settings-connections"]').trigger('click')
     await flushPromises()
-    expect(wrapper.get('.new-connection-settings').text()).toContain('新增 openab-pty 連線')
+    expect(wrapper.get('.new-connection-settings [data-testid=runtime-create]').attributes('aria-label')).toBe('新增連線')
     await fields(wrapper)
     await wrapper.get('form').trigger('submit')
     await flushPromises()
@@ -86,7 +86,7 @@ describe('runtime Host settings', () => {
     expect(wrapper.find('form').exists()).toBe(false)
     await fields(wrapper)
     expect(wrapper.find('[data-testid=runtime-host-list]').exists()).toBe(false)
-    await wrapper.get('[data-testid=runtime-host-category]').setValue('agent')
+    await wrapper.get('input[value=agent]').setValue(true)
     await wrapper.get('form').trigger('submit'); await flushPromises()
     expect(transport.runtimeSaveHost).toHaveBeenCalledWith(expect.objectContaining({ category: 'agent' }))
     expect(wrapper.find('[data-testid=runtime-host-list]').exists()).toBe(true)
@@ -115,14 +115,14 @@ describe('runtime Host settings', () => {
     vi.mocked(transport.runtimeSaveHost!).mockReturnValueOnce(pending.promise)
     await wrapper.get('form').trigger('submit')
     expect(secretValue(wrapper)).toBe('')
-    expect(transport.runtimeSaveHost).toHaveBeenCalledWith({ name: 'New Host', baseUrl: 'https://runtime.example.test', credential: 'fixture-admin', category: 'host' })
+    expect(transport.runtimeSaveHost).toHaveBeenCalledWith({ name: 'New Host', baseUrl: 'https://runtime.example.test', credential: 'fixture-admin', category: 'host', displayName: '' })
     expect(wrapper.text()).not.toContain('fixture-admin')
     await wrapper.get('form').trigger('submit')
     expect(transport.runtimeSaveHost).toHaveBeenCalledTimes(1)
     pending.resolve(host)
     await flushPromises()
     expect(wrapper.emitted('changed')).toHaveLength(1)
-    expect(wrapper.text()).toContain('設定已儲存')
+    expect(wrapper.text()).toContain('儲存成功')
   })
 
   it('preserves a blank edit credential for the same canonical endpoint and sends revision', async () => {
@@ -132,7 +132,7 @@ describe('runtime Host settings', () => {
     await wrapper.get('[data-testid="base-url"]').setValue('https://runtime.example.test:443/')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
-    expect(transport.runtimeSaveHost).toHaveBeenCalledWith({ id: host.id, expectedRevision: 3, name: host.name, baseUrl: host.baseUrl, credential: '', category: 'host' })
+    expect(transport.runtimeSaveHost).toHaveBeenCalledWith({ id: host.id, expectedRevision: 3, name: host.name, baseUrl: host.baseUrl, credential: '', category: 'host', displayName: '' })
   })
 
   it('edits a credential-absent TOML record without requiring a new credential at the same origin', async () => {
@@ -152,7 +152,7 @@ describe('runtime Host settings', () => {
     await wrapper.get('[data-testid="base-url"]').setValue('https://other.example.test')
     await wrapper.get('form').trigger('submit')
     expect(transport.runtimeSaveHost).not.toHaveBeenCalled()
-    expect(wrapper.get('[role="alert"]').text()).toContain('新的管理憑證')
+    expect(wrapper.get('[role="alert"]').text()).toContain('新的 Token')
   })
 
   it.each(['http://runtime.example.test', 'https://user:secret@runtime.example.test', 'https://@runtime.example.test', 'https://runtime.example.test/api', 'https://runtime.example.test/?token=x', 'https://runtime.example.test/?', 'https://runtime.example.test/#x', 'https://runtime.example.test/#'])('rejects unsafe root URL %s and clears submitted secret', async (url) => {
@@ -169,7 +169,7 @@ describe('runtime Host settings', () => {
     const { wrapper, transport } = setup([host])
     await flushPromises()
     await button(wrapper, '刪除')
-    expect(wrapper.text()).toContain('現有遠端 Shell 不會被終止')
+    expect(wrapper.text()).toContain('現有遠端工作不會被終止')
     expect(transport.runtimeDeleteHost).not.toHaveBeenCalled()
     await wrapper.get('[data-testid="confirm-delete"]').trigger('click')
     await flushPromises()
@@ -227,9 +227,8 @@ describe('runtime Host settings', () => {
     await flushPromises()
     expect(secretValue(wrapper)).toBe('')
     expect(transport.runtimeTestHost).toHaveBeenCalledWith(host.id, 3)
-    expect(wrapper.text()).toContain('已通過管理認證；2 個 Shell')
-    expect(wrapper.text()).toContain('輸出連續性未驗證')
-    expect(wrapper.text()).toContain('清理為盡力而為')
+    expect(wrapper.get('[data-testid=connection-toast]').text()).toContain('連線測試成功')
+    expect(wrapper.get('[data-host-id=host-1]').text()).not.toContain('成功')
   })
 
   it.each([
@@ -257,6 +256,7 @@ describe('runtime Host settings', () => {
     invoke.mockReset()
     invoke.mockImplementation(async (cmd: string) => {
       if (cmd === 'gui_runtime_hosts') return [host]
+      if (cmd === 'gui_instance_desktops') return []
       throw { kind: 'auth', message: 'Bearer fixture-admin https://evil.fixture' }
     })
     const wrapper = mount(RuntimeHosts, { props: { transport: createTauriTransport() } })
@@ -286,7 +286,7 @@ describe('runtime Host settings', () => {
     vi.mocked(transport.runtimeTestHost!).mockRejectedValueOnce(rejection)
     await button(wrapper, '測試')
     await flushPromises()
-    expect(wrapper.get('[role="alert"]').text()).toBe('Host 測試失敗。請確認連線、TLS 憑證及管理憑證。')
+    expect(wrapper.get('[role="alert"] > span').text()).toBe('連線測試失敗。請確認網路、TLS 憑證及 Token。')
     expect(wrapper.text()).not.toContain('fixture-admin')
     expect(wrapper.text()).not.toContain('evil.fixture')
   })
@@ -345,7 +345,7 @@ describe('runtime Host settings', () => {
     expect(wrapper.find('[data-host-id="host-1"]').exists()).toBe(false)
     expect((wrapper.get('[data-testid="name"]').element as HTMLInputElement).value).toBe('New Host')
     expect(secretValue(wrapper)).toBe('')
-    expect(wrapper.text()).not.toContain('設定已儲存')
+    expect(wrapper.text()).not.toContain('儲存成功')
   })
 
   it('reopening loads current settings without a refresh button or stale load', async () => {
