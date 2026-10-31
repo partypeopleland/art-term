@@ -76,14 +76,26 @@ def main():
             assert 'artTermTarget' in result and 'desktop-A' in result
             assert 'USER_RC=yes' in s.command('echo USER_RC=$USER_RC_PRESERVED').decode()
             s.command('export PATH="'+str(binpath)+':$PATH"')
-            yolo=s.command('codex --yolo').decode()
-            yolo_line=next(line for line in yolo.splitlines() if line.startswith('CODEX_ARGV='))
-            yolo_args=json.loads(yolo_line.split('=',1)[1]);assert yolo_args[-1]=='--yolo' and len(yolo_args)==7
-            argvout=s.command('codex --model fixture-only "arg with spaces"')
-            line=next(x for x in argvout.decode().splitlines() if x.startswith('CODEX_ARGV='))
-            argv=json.loads(line.split('=',1)[1]);assert argv[-3:]==['--model','fixture-only','arg with spaces']
-            assert 'mcp_servers.art_term.tool_timeout_sec=75' in argv and s.binding in ''.join(argv)
-            assert a.token not in line and b.token not in line
+            for user_args,expected in (
+                    ([],['--no-alt-screen']),
+                    (['--yolo'],['--no-alt-screen','--yolo']),
+                    (['resume','--last'],['--no-alt-screen','resume','--last']),
+                    (['fork','--last'],['--no-alt-screen','fork','--last']),
+                    (['--model','fixture-only','arg with spaces'],['--no-alt-screen','--model','fixture-only','arg with spaces']),
+                    (['--no-alt-screen'],['--no-alt-screen']),
+                    (['--no-alt-screen','resume','session with spaces'],['--no-alt-screen','resume','session with spaces']),
+                    (['--','--no-alt-screen'],['--no-alt-screen','--','--no-alt-screen']),
+                    (['--no-alt-screen','--','--no-alt-screen'],['--no-alt-screen','--','--no-alt-screen'])):
+                output=s.command(shlex.join(['codex',*user_args])).decode()
+                line=next(x for x in output.splitlines() if x.startswith('CODEX_ARGV='))
+                argv=json.loads(line.split('=',1)[1])
+                assert argv[6:]==expected, (user_args,argv[6:],expected)
+                assert argv[:3]==['-c','mcp_servers.art_term.command="python3"','-c']
+                assert argv[3].startswith('mcp_servers.art_term.args=')
+                adapter_args=json.loads(argv[3].split('=',1)[1])
+                assert Path(adapter_args[0]).name=='instance_bridge.py' and adapter_args[1:]==['stdio','--binding',s.binding]
+                assert argv[4:6]==['-c','mcp_servers.art_term.tool_timeout_sec=75']
+                assert a.token not in line and b.token not in line
             # Job control: foreground SIGINT, stop/background/foreground, tty resize.
             os.write(s.master,b'sleep 30\n');time.sleep(.15);os.write(s.master,b'\x03');s.read(b'BROKER_PROMPT> ')
             os.write(s.master,b'sleep 30\n');time.sleep(.15);os.write(s.master,b'\x1a');s.read(b'BROKER_PROMPT> ')

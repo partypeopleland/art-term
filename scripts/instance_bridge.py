@@ -575,7 +575,10 @@ def control(binding, nonce):
 def cli_args(binding, command):
     require(command and Path(command[0]).name == 'codex')
     adapter_args = [str(Path(__file__).resolve()), 'stdio', '--binding', binding]
-    return [command[0], '-c', 'mcp_servers.art_term.command="python3"', '-c', 'mcp_servers.art_term.args='+json.dumps(adapter_args), '-c', 'mcp_servers.art_term.tool_timeout_sec=75', *command[1:]]
+    user_args = command[1:]
+    option_args = user_args[:user_args.index('--')] if '--' in user_args else user_args
+    default_args = [] if '--no-alt-screen' in option_args else ['--no-alt-screen']
+    return [command[0], '-c', 'mcp_servers.art_term.command="python3"', '-c', 'mcp_servers.art_term.args='+json.dumps(adapter_args), '-c', 'mcp_servers.art_term.tool_timeout_sec=75', *default_args, *user_args]
 
 
 if __name__ == '__main__':

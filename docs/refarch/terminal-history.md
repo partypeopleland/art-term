@@ -59,7 +59,7 @@ Windows GUI 與 Android 原生 View 仍須分別驗證呈現與操作；共同�
 
 tmux 的歷史上限設定為 5000 行。這是有限的主機記憶體歷史，tmux 可能批次淘汰較早列，因此不保證每次恰好保留 5000 行。工作仍活著時，App 重開或 Runtime 輸出緩衝區出現 Gap，可重新讀取 tmux 當前畫面及仍保留的歷史；不保證已被 tmux 淘汰的內容。
 
-Host 重開、Runtime 工作到期或被刪除、tmux 工作退出、程式主動清除歷史，都不保證可以恢復。全螢幕 alternate-screen 程式的內容也不等於一般終端歷史。右上角 Codex 按鈕使用 `codex --yolo --no-alt-screen`，讓 Codex 使用一般終端畫面；此按鈕只在使用者按下時執行，重連不會再次啟動。
+Host 重開、Runtime 工作到期或被刪除、tmux 工作退出、程式主動清除歷史，都不保證可以恢復。全螢幕 alternate-screen 程式的內容也不等於一般終端歷史。工作 Shell 的 scoped Codex 接線預設加入 `--no-alt-screen`，因此使用者手動輸入 `codex` 時會使用一般終端畫面，不自動加入 `--yolo`。App 沒有 Codex 啟動按鈕，重連也不會啟動 CLI。這項預設只影響下一次經由接線啟動的程序，不改變仍執行中的 Codex，也不能還原過去全螢幕模式已覆寫的內容；上述有限歷史保留限制仍然適用。繞過 scoped wrapper 的啟動方式見 [Runtime 桌面 helper](runtime-desktop.md)。
 
 ## 主機準備
 

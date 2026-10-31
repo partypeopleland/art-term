@@ -41,7 +41,7 @@ App 以 `exec python3` 啟動短命 configure Shell；接收端先關 echo／can
 
 完整保留 MCP `content`／`isError`／`structuredContent` 與來源 metadata，包括圖片；App 直接截圖避免 PTY 傳圖，不表示工具結果全面過濾圖片。工具呼叫最多 60 秒、list 最多 15 秒、JSON／SSE 最多 16 MiB。URL／DNS／TLS／proxy 與取消規則和[直接預覽](desktop.md#原生-mcp-傳輸)相同，不重播有副作用的呼叫，也不宣稱取消能撤銷上游已開始的操作。
 
-新工作 Shell 的專用 rc 先載入一般 `~/.bashrc`，再提供 Shell 工具及 scoped Codex stdio 接線。使用者可照常輸入 Codex，不需要 App 額外啟動按鈕；CLI 不會自動執行。通用 MCP 定義只帶程式路徑與 binding，不含上游憑證，保留使用者參數及一般設定，包括直接輸入 `codex --yolo`，不修改全域 Codex、其他 agent 或 Discord 配置。其他 CLI 只在確認支援的配置方式後整合，不宣稱所有引擎或既有 AI 能熱插入。Devin 不自動接線，也不代寫其 project／global 設定；其他支援標準 MCP 的 CLI 可依下一節，用各自原生配置一次登記通用入口。
+新工作 Shell 的專用 rc 先載入一般 `~/.bashrc`，再提供 Shell 工具及 scoped Codex stdio 接線。使用者可照常輸入 Codex，不需要 App 額外啟動按鈕；CLI 不會自動執行。此接線預設加入 `--no-alt-screen`，讓下一次手動啟動的 Codex 使用一般終端畫面；使用者已提供該選項時不重複加入，`--` 後的同名文字仍視為原始輸入。這是 Host 共用行為，Windows、APK 與 TUI 使用相同接線，既有執行中的 CLI 不會改變。通用 MCP 定義只帶程式路徑與 binding，不含上游憑證，保留使用者參數及一般設定，包括直接輸入 `codex --yolo`，不修改全域 Codex、其他 agent 或 Discord 配置。其他 CLI 只在確認支援的配置方式後整合，不宣稱所有引擎或既有 AI 能熱插入。Devin 不自動接線，也不代寫其 project／global 設定；其他支援標準 MCP 的 CLI 可依下一節，用各自原生配置一次登記通用入口。
 
 ## Codex 批准政策
 
