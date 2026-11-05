@@ -42,6 +42,7 @@ use zeroize::Zeroizing;
 use BindingAction as LocalCommand;
 
 const COMMANDS: &[(LocalCommand, &str)] = &[
+    (LocalCommand::Settings, "連線設定 / Settings"),
     (LocalCommand::Hosts, "Connections"),
     (LocalCommand::Terminal, "Terminal"),
     (LocalCommand::Preview, "Preview"),
@@ -137,10 +138,54 @@ enum Confirm {
     DeleteShell(ShellView),
     ClearTools(TabId),
 }
+#[derive(Clone, Debug, PartialEq)]
+enum SettingsTarget {
+    Host(HostSelection),
+    Screen(ScreenSelection),
+}
+#[derive(Clone, Copy, PartialEq)]
+enum SettingsAction {
+    NewHost,
+    NewAgent,
+    NewScreen,
+    Edit,
+    Test,
+    Delete,
+    Import,
+    Export,
+    Back,
+}
+const SETTINGS_ACTIONS: &[(SettingsAction, &str)] = &[
+    (SettingsAction::NewHost, "New Host / 新增 Host"),
+    (SettingsAction::NewAgent, "New Agent / 新增 Agent"),
+    (SettingsAction::NewScreen, "New Screen / 新增 Screen"),
+    (SettingsAction::Edit, "Edit target / 編輯所選連線"),
+    (SettingsAction::Test, "Test target / 測試所選連線"),
+    (SettingsAction::Delete, "Delete target / 刪除所選連線"),
+    (SettingsAction::Import, "Import / 匯入連線"),
+    (SettingsAction::Export, "Export / 匯出全部連線"),
+    (SettingsAction::Back, "Back / 返回"),
+];
+#[derive(Clone)]
+enum SettingsRow {
+    Target(SettingsTarget),
+    Action(SettingsAction),
+}
+struct SettingsModal {
+    row: usize,
+    target: Option<SettingsTarget>,
+}
+enum ModalOrigin {
+    Settings {
+        target: Option<SettingsTarget>,
+        row: usize,
+    },
+}
 enum Modal {
     Actions {
         row: usize,
     },
+    Settings(SettingsModal),
     Host(HostForm),
     Screen(ScreenForm),
     Screens {
@@ -368,6 +413,7 @@ struct App {
     profiles: ProfileView,
     page: Page,
     modal: Option<Modal>,
+    modal_origin: Option<ModalOrigin>,
     confirm_yes: bool,
     help_offset: u16,
     tabs: Vec<TabClient>,
@@ -433,6 +479,7 @@ impl App {
             },
             page: Page::Hosts,
             modal: None,
+            modal_origin: None,
             confirm_yes: false,
             help_offset: 0,
             tabs: Vec::new(),
@@ -755,6 +802,267 @@ impl App {
             )
         });
     }
+    fn open_settings(&mut self) {
+        self.modal_origin = None;
+        let target = if self.focus == Focus::Connections && !matches!(self.page, Page::Help) {
+            match self.selected_action() {
+                Some(TreeAction::Host(index)) => self
+                    .profiles
+                    .hosts
+                    .get(index)
+                    .map(|host| SettingsTarget::Host(HostSelection::from(host))),
+                Some(TreeAction::Screen(index)) => self.profiles.screens.get(index).map(|screen| {
+                    SettingsTarget::Screen(ScreenSelection {
+                        id: screen.id.clone(),
+                        revision: screen.revision,
+                    })
+                }),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        self.show_modal(Modal::Settings(SettingsModal { row: 0, target }));
+    }
+    fn resolve_settings_target(&self, target: &Option<SettingsTarget>) -> Option<SettingsTarget> {
+        match target {
+            Some(SettingsTarget::Host(selection)) => self
+                .profiles
+                .hosts
+                .iter()
+                .find(|host| host.id == selection.id && host.revision == selection.revision)
+                .map(|host| SettingsTarget::Host(HostSelection::from(host))),
+            Some(SettingsTarget::Screen(selection)) => self
+                .profiles
+                .screens
+                .iter()
+                .find(|screen| screen.id == selection.id && screen.revision == selection.revision)
+                .map(|screen| {
+                    SettingsTarget::Screen(ScreenSelection {
+                        id: screen.id.clone(),
+                        revision: screen.revision,
+                    })
+                }),
+            None => None,
+        }
+    }
+    fn settings_rows(&self) -> Vec<SettingsRow> {
+        SETTINGS_ACTIONS
+            .iter()
+            .map(|(action, _)| SettingsRow::Action(*action))
+            .chain(
+                self.profiles.hosts.iter().map(|host| {
+                    SettingsRow::Target(SettingsTarget::Host(HostSelection::from(host)))
+                }),
+            )
+            .chain(self.profiles.screens.iter().map(|screen| {
+                SettingsRow::Target(SettingsTarget::Screen(ScreenSelection {
+                    id: screen.id.clone(),
+                    revision: screen.revision,
+                }))
+            }))
+            .collect()
+    }
+    fn settings_target_label(&self, target: &SettingsTarget) -> String {
+        match target {
+            SettingsTarget::Host(selection) => {
+                self.profiles
+                    .hosts
+                    .iter()
+                    .find(|host| host.id == selection.id)
+                    .map(|host| {
+                        let agent = host.metadata.as_ref().is_some_and(|m| {
+                            m.category == art_term_core::connections::Category::Agent
+                        });
+                        let kind = if agent { "Agent" } else { "Host" };
+                        match host
+                            .metadata
+                            .as_ref()
+                            .and_then(|m| m.display_name.as_ref())
+                            .filter(|name| !name.trim().is_empty())
+                        {
+                            Some(name) => format!("{kind}：{} / {}", safe(&host.name), safe(name)),
+                            None => format!("{kind}：{}", safe(&host.name)),
+                        }
+                    })
+                    .unwrap_or_else(|| "Host：?".into())
+            }
+            SettingsTarget::Screen(selection) => self
+                .profiles
+                .screens
+                .iter()
+                .find(|screen| screen.id == selection.id)
+                .map(|screen| format!("Screen：{}", safe(&screen.name)))
+                .unwrap_or_else(|| "Screen：?".into()),
+        }
+    }
+    fn settings_row_text(
+        &self,
+        row: &SettingsRow,
+        resolved: &Option<SettingsTarget>,
+    ) -> (String, bool) {
+        match row {
+            SettingsRow::Target(candidate) => (
+                format!(
+                    "{} {}",
+                    if resolved.as_ref() == Some(candidate) {
+                        "●"
+                    } else {
+                        "○"
+                    },
+                    self.settings_target_label(candidate)
+                ),
+                false,
+            ),
+            SettingsRow::Action(action) => {
+                let label = SETTINGS_ACTIONS
+                    .iter()
+                    .find(|(candidate, _)| candidate == action)
+                    .map(|(_, label)| *label)
+                    .unwrap_or("?");
+                let suffix = match action {
+                    SettingsAction::Edit | SettingsAction::Delete | SettingsAction::Test
+                        if resolved.is_none() =>
+                    {
+                        Some("（需先選擇連線）")
+                    }
+                    SettingsAction::Test if matches!(resolved, Some(SettingsTarget::Screen(_))) => {
+                        Some("（僅適用 Host）")
+                    }
+                    _ => None,
+                };
+                let text = format!("{label}{}", suffix.unwrap_or(""));
+                (text, suffix.is_some())
+            }
+        }
+    }
+    fn restore_settings_modal(&mut self, row: usize, target: Option<SettingsTarget>) {
+        self.modal = Some(Modal::Settings(SettingsModal { row, target }));
+    }
+    fn open_settings_child(&mut self, modal: Modal, target: Option<SettingsTarget>, row: usize) {
+        self.modal_origin = Some(ModalOrigin::Settings { target, row });
+        self.show_modal(modal);
+    }
+    fn restore_origin(&mut self) {
+        let Some(ModalOrigin::Settings { target, row }) = self.modal_origin.take() else {
+            return;
+        };
+        // A just-saved selection carries a revision the cached profiles have not
+        // seen yet; keep it so the in-flight refresh can validate it. Commits
+        // still revalidate through resolve_settings_target.
+        let target = self.resolve_settings_target(&target).or(target);
+        self.modal = Some(Modal::Settings(SettingsModal { row, target }));
+        self.epoch = self.epoch.wrapping_add(1);
+    }
+    fn settings_action(
+        &mut self,
+        action: SettingsAction,
+        target: Option<SettingsTarget>,
+        row: usize,
+    ) {
+        let resolved = self.resolve_settings_target(&target);
+        match action {
+            SettingsAction::Back => (),
+            SettingsAction::NewHost => {
+                self.open_settings_child(Modal::Host(HostForm::new(None)), target, row)
+            }
+            SettingsAction::NewAgent => {
+                self.open_settings_child(Modal::Host(HostForm::agent()), target, row)
+            }
+            SettingsAction::NewScreen => {
+                self.open_settings_child(Modal::Screen(ScreenForm::new(None)), target, row)
+            }
+            SettingsAction::Import => {
+                self.open_settings_child(Modal::Transfer(TransferForm::new(false)), target, row)
+            }
+            SettingsAction::Export => {
+                self.open_settings_child(Modal::Transfer(TransferForm::new(true)), target, row)
+            }
+            SettingsAction::Edit => match &resolved {
+                Some(SettingsTarget::Host(selection)) => {
+                    if let Some(host) = self
+                        .profiles
+                        .hosts
+                        .iter()
+                        .find(|host| host.id == selection.id)
+                    {
+                        self.open_settings_child(
+                            Modal::Host(HostForm::new(Some(host))),
+                            target,
+                            row,
+                        );
+                    } else {
+                        self.restore_settings_modal(row, target);
+                    }
+                }
+                Some(SettingsTarget::Screen(selection)) => {
+                    if let Some(screen) = self
+                        .profiles
+                        .screens
+                        .iter()
+                        .find(|screen| screen.id == selection.id)
+                    {
+                        self.open_settings_child(
+                            Modal::Screen(ScreenForm::new(Some(screen))),
+                            target,
+                            row,
+                        );
+                    } else {
+                        self.restore_settings_modal(row, target);
+                    }
+                }
+                None => {
+                    self.status = "請先選擇要管理的連線。".into();
+                    self.restore_settings_modal(row, target);
+                }
+            },
+            SettingsAction::Test => match &resolved {
+                Some(SettingsTarget::Host(selection)) => {
+                    self.modal_origin = Some(ModalOrigin::Settings { target, row });
+                    let backend = self.backend.clone();
+                    let host = selection.clone();
+                    self.job(async move { JobResult::Tested(backend.test_host(host).await) });
+                }
+                Some(SettingsTarget::Screen(_)) => {
+                    self.status = "測試連線僅適用 Host。".into();
+                    self.restore_settings_modal(row, target);
+                }
+                None => {
+                    self.status = "請先選擇要管理的連線。".into();
+                    self.restore_settings_modal(row, target);
+                }
+            },
+            SettingsAction::Delete => match &resolved {
+                Some(SettingsTarget::Host(selection)) => {
+                    self.modal_origin = Some(ModalOrigin::Settings {
+                        target: resolved.clone(),
+                        row,
+                    });
+                    self.show_modal(Modal::Confirm(Confirm::DeleteHost(selection.clone())));
+                }
+                Some(SettingsTarget::Screen(selection)) => {
+                    self.modal_origin = Some(ModalOrigin::Settings {
+                        target: resolved.clone(),
+                        row,
+                    });
+                    self.show_modal(Modal::Confirm(Confirm::DeleteScreen(selection.clone())));
+                }
+                None => {
+                    self.status = "請先選擇要管理的連線。".into();
+                    self.restore_settings_modal(row, target);
+                }
+            },
+        }
+    }
+    fn refresh_settings_target(&mut self) {
+        let resolved = match &self.modal {
+            Some(Modal::Settings(settings)) => Some(self.resolve_settings_target(&settings.target)),
+            _ => None,
+        };
+        if let (Some(Modal::Settings(settings)), Some(target)) = (self.modal.as_mut(), resolved) {
+            settings.target = target;
+        }
+    }
     fn edit_selected(&mut self) {
         match self.selected_action() {
             Some(TreeAction::Screen(i)) => {
@@ -833,6 +1141,7 @@ impl App {
                 self.profiles();
             }
             LocalCommand::Actions => self.show_modal(Modal::Actions { row: 0 }),
+            LocalCommand::Settings => self.open_settings(),
             LocalCommand::Edit => self.edit_selected(),
             LocalCommand::Delete => self.delete_selected(),
             LocalCommand::NewHost => self.show_modal(Modal::Host(HostForm::new(None))),
@@ -914,6 +1223,10 @@ impl App {
             } else {
                 self.prefix = true;
             }
+            return;
+        }
+        if was_prefix && key.code == KeyCode::Esc && key.modifiers.is_empty() {
+            self.status = "已取消命令模式。".into();
             return;
         }
         if !was_prefix
@@ -1153,6 +1466,7 @@ impl App {
                     backend.cancel_import(preview.ticket).await;
                 }));
             }
+            self.restore_origin();
             return;
         }
         if matches!(modal, Modal::Confirm(_)) {
@@ -1177,6 +1491,26 @@ impl App {
             }
         }
         match &mut modal {
+            Modal::Settings(settings) => {
+                let row = settings.row;
+                let target = settings.target.clone();
+                match key.code {
+                    KeyCode::Down => {
+                        let len = self.settings_rows().len();
+                        settings.row = (row + 1).min(len.saturating_sub(1));
+                    }
+                    KeyCode::Up => settings.row = row.saturating_sub(1),
+                    KeyCode::Enter => match self.settings_rows().get(row).cloned() {
+                        Some(SettingsRow::Target(candidate)) => settings.target = Some(candidate),
+                        Some(SettingsRow::Action(action)) => {
+                            self.settings_action(action, target, row);
+                            return;
+                        }
+                        None => (),
+                    },
+                    _ => (),
+                }
+            }
             Modal::Actions { row } => match key.code {
                 KeyCode::Down => *row = (*row + 1).min(COMMANDS.len() - 1),
                 KeyCode::Up => *row = row.saturating_sub(1),
@@ -1271,7 +1605,10 @@ impl App {
                 }
                 field_key(key, &mut form.active, &mut form.fields);
             }
-            Modal::Confirm(_) if matches!(key.code, KeyCode::Char('n' | 'N')) => return,
+            Modal::Confirm(_) if matches!(key.code, KeyCode::Char('n' | 'N')) => {
+                self.restore_origin();
+                return;
+            }
             Modal::Confirm(_) if matches!(key.code, KeyCode::Char('y' | 'Y')) => {
                 if self.pending.is_some() {
                     self.status = "請等待目前操作完成後再確認。".into();
@@ -1414,6 +1751,7 @@ impl App {
                 } else {
                     1
                 };
+                let settings_len = self.settings_rows().len() as isize;
                 if let Some(modal) = self.modal.as_mut() {
                     match modal {
                         Modal::Actions { row } => {
@@ -1423,6 +1761,11 @@ impl App {
                         Modal::Screens { row } => {
                             *row = (*row as isize + amount)
                                 .clamp(0, self.profiles.screens.len() as isize + 3)
+                                as usize
+                        }
+                        Modal::Settings(settings) => {
+                            settings.row = (settings.row as isize + amount)
+                                .clamp(0, settings_len.saturating_sub(1))
                                 as usize
                         }
                         Modal::Import { scroll, .. } => {
@@ -1502,6 +1845,7 @@ impl App {
             HitAction::ModalRow(index) => {
                 match self.modal.as_mut() {
                     Some(Modal::Actions { row } | Modal::Screens { row }) => *row = index,
+                    Some(Modal::Settings(settings)) => settings.row = index,
                     _ => return,
                 }
                 self.modal_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
@@ -1619,11 +1963,18 @@ impl App {
                     self.profiles.hosts.len(),
                     self.profiles.screens.len()
                 );
+                self.refresh_settings_target();
             }
-            JobResult::ScreenSaved(Ok(_)) => {
+            JobResult::ScreenSaved(Ok(selection)) => {
+                if let Some(ModalOrigin::Settings { target, .. }) = &mut self.modal_origin {
+                    *target = Some(SettingsTarget::Screen(selection));
+                }
                 self.profiles();
             }
-            JobResult::Saved(Ok(_)) => {
+            JobResult::Saved(Ok(selection)) => {
+                if let Some(ModalOrigin::Settings { target, .. }) = &mut self.modal_origin {
+                    *target = Some(SettingsTarget::Host(selection));
+                }
                 self.profiles();
             }
             JobResult::Deleted(Ok(())) => {
@@ -1682,6 +2033,9 @@ impl App {
             | JobResult::Preview(Err(error))
             | JobResult::Imported(Err(error))
             | JobResult::Exported(Err(error)) => self.status = error.to_string(),
+        }
+        if self.modal.is_none() {
+            self.restore_origin();
         }
     }
     fn resize(&mut self, area: Rect) {
@@ -1960,6 +2314,96 @@ fn elide(text: &str, width: u16) -> String {
     }
     text
 }
+fn action_hint(action: BindingAction) -> String {
+    match action {
+        BindingAction::Hosts => "連線".into(),
+        BindingAction::Terminal => "終端".into(),
+        BindingAction::Preview => "預覽".into(),
+        BindingAction::Screens => "桌面".into(),
+        BindingAction::Shells => "Shells".into(),
+        BindingAction::Create => "新Shell".into(),
+        BindingAction::Previous => "上分頁".into(),
+        BindingAction::Next => "下分頁".into(),
+        BindingAction::Close => "關分頁".into(),
+        BindingAction::Up => "上捲".into(),
+        BindingAction::Down => "下捲".into(),
+        BindingAction::Follow => "跟隨".into(),
+        BindingAction::Recover => "復原".into(),
+        BindingAction::Import => "匯入".into(),
+        BindingAction::Export => "匯出".into(),
+        BindingAction::Help => "說明".into(),
+        BindingAction::Quit => "離開".into(),
+        BindingAction::Actions => "選單".into(),
+        BindingAction::Settings => "連線設定".into(),
+        BindingAction::Edit => "編輯".into(),
+        BindingAction::Delete => "刪除".into(),
+        BindingAction::Test => "測試".into(),
+        BindingAction::Refresh => "重整".into(),
+        BindingAction::NewHost => "新Host".into(),
+        BindingAction::NewAgent => "新Agent".into(),
+        BindingAction::NewScreen => "新Screen".into(),
+        BindingAction::ViewerToggle => "預覽開關".into(),
+        BindingAction::ViewerFit => "預覽還原".into(),
+        BindingAction::FocusNext => "切焦點".into(),
+        BindingAction::TreeUp => "樹上".into(),
+        BindingAction::TreeDown => "樹下".into(),
+        BindingAction::TreeActivate => "樹執行".into(),
+        BindingAction::Tab1 => "分頁1".into(),
+        BindingAction::Tab2 => "分頁2".into(),
+        BindingAction::Tab3 => "分頁3".into(),
+        BindingAction::Tab4 => "分頁4".into(),
+        BindingAction::Tab5 => "分頁5".into(),
+        BindingAction::Tab6 => "分頁6".into(),
+        BindingAction::Tab7 => "分頁7".into(),
+        BindingAction::Tab8 => "分頁8".into(),
+        BindingAction::Tab9 => "分頁9".into(),
+    }
+}
+fn leader_hint(app: &App, width: u16) -> String {
+    let mut text = format!("{} 命令模式：Esc 取消", app.bindings.leader_label());
+    let mut used = Span::raw(&text).width();
+    for (key, action) in app.bindings.leader_entries() {
+        let entry = format!(" · {key} {}", action_hint(action));
+        let entry_width = Span::raw(&entry).width();
+        if used + entry_width + 2 > width as usize {
+            text.push_str(" …");
+            break;
+        }
+        text.push_str(&entry);
+        used += entry_width;
+    }
+    text
+}
+fn bound_hint(bindings: &Bindings, action: BindingAction) -> Option<String> {
+    let label = bindings.label(action);
+    (label != "未綁定").then_some(label)
+}
+fn context_hint(app: &App) -> String {
+    if matches!(app.page, Page::Help) {
+        return "↑↓ 捲動說明 · Esc 返回".into();
+    }
+    if app.focus == Focus::Preview {
+        return "Enter 選擇此 Shell 桌面 · 點左下圖片展開預覽".into();
+    }
+    let mut parts = if app.focus == Focus::Terminal && matches!(app.page, Page::Terminal) {
+        vec!["按鍵與貼上送往遠端".to_string()]
+    } else {
+        vec!["↑↓/Enter 連線樹".to_string()]
+    };
+    match bound_hint(&app.bindings, LocalCommand::Settings) {
+        Some(label) => parts.push(format!("{label} 連線設定")),
+        None => parts.push("[連線設定] 管理連線".into()),
+    }
+    for (action, name) in [
+        (LocalCommand::Help, "說明"),
+        (LocalCommand::Actions, "操作選單"),
+    ] {
+        if let Some(label) = bound_hint(&app.bindings, action) {
+            parts.push(format!("{label} {name}"));
+        }
+    }
+    parts.join(" · ")
+}
 fn button(frame: &mut Frame, hits: &mut HitMap, area: Rect, label: &str, action: HitAction) {
     frame.render_widget(
         Paragraph::new(elide(label, area.width)).style(Style::default().fg(Color::Cyan)),
@@ -1979,6 +2423,7 @@ fn draw(app: &App, frame: &mut Frame) -> HitMap {
     let desktop_width = 9.min(area.width);
     for (label, command) in [
         ("[Actions]", LocalCommand::Actions),
+        ("[連線設定]", LocalCommand::Settings),
         ("[Connections]", LocalCommand::Hosts),
         ("[Preview]", LocalCommand::Preview),
         ("[Terminal]", LocalCommand::Terminal),
@@ -2198,6 +2643,9 @@ fn draw(app: &App, frame: &mut Frame) -> HitMap {
             Line::from(format!("{}  {}", app.bindings.label(*command), label))
         }));
         lines.extend([
+            Line::from("[連線設定] 集中管理已保存 Host／Agent／Screen 並提供加密匯入／匯出；刪除只作用於所選連線，不會刪除遠端 Shell。"),
+            Line::from("連線設定預設沒有全域快捷鍵；可在 keybindings.toml 設定 settings = [...] 啟用。"),
+            Line::from("前導鍵待命時，底部列出目前生效的第二鍵與 Esc 取消；連按兩次前導鍵則送入遠端。"),
             Line::from("桌面預覽與遠端工具狀態分開顯示；Tools ready 才代表 broker 配置已確認。"),
             Line::from(
                 "Stop 只停止預覽；Clear tools 取消此 Shell 的桌面工具。關頁不刪除遠端工作。",
@@ -2268,12 +2716,9 @@ fn draw(app: &App, frame: &mut Frame) -> HitMap {
     );
     frame.render_widget(
         Paragraph::new(if app.prefix {
-            format!(
-                "{} 命令模式 | 點擊 Help 查看目前快捷鍵",
-                app.bindings.leader_label()
-            )
+            leader_hint(app, area.width)
         } else {
-            "滑鼠點選 | ↑↓ / Enter 操作連線樹 | [Actions] 全部操作 | [Desktop] 桌面設定".into()
+            context_hint(app)
         })
         .style(Style::default().fg(Color::Cyan)),
         Rect::new(area.x, area.bottom() - 1, area.width, 1),
@@ -2348,7 +2793,7 @@ fn history(value: &HistoryStatus) -> String {
 }
 fn modal_rect(area: Rect) -> Rect {
     let width = area.width.saturating_sub(4).min(88);
-    let height = area.height.saturating_sub(4).min(24);
+    let height = area.height.saturating_sub(2).min(24);
     Rect::new(
         area.x + (area.width - width) / 2,
         area.y + (area.height - height) / 2,
@@ -2398,13 +2843,73 @@ fn draw_modal(app: &App, modal: &Modal, frame: &mut Frame) -> HitMap {
                 &form.fields,
                 form.active,
                 if form.export {
-                    "加密匯出全部 Host / Screen"
+                    "加密匯出全部連線（含憑證；不覆寫既有檔案）"
                 } else {
                     "匯入 Host / Screen（不含密碼可留白）"
                 },
                 rect,
                 frame,
             )
+        }
+        Modal::Settings(settings) => {
+            let rows = app.settings_rows();
+            let block = panel("連線設定 / Connection settings");
+            let inner = block.inner(rect);
+            frame.render_widget(block, rect);
+            let resolved = app.resolve_settings_target(&settings.target);
+            let detail_rows = if inner.height >= 5 { 1 } else { 0 };
+            let height = inner.height.saturating_sub(1 + detail_rows) as usize;
+            let offset = settings.row.saturating_sub(height.saturating_sub(1));
+            for (i, row) in rows.iter().enumerate().skip(offset).take(height) {
+                let region = Rect::new(inner.x, inner.y + (i - offset) as u16, inner.width, 1);
+                let (text, disabled) = app.settings_row_text(row, &resolved);
+                frame.render_widget(
+                    Paragraph::new(elide(&text, inner.width)).style(if i == settings.row {
+                        Style::default().bg(Color::DarkGray)
+                    } else if disabled {
+                        Style::default().fg(Color::DarkGray)
+                    } else if matches!(row, SettingsRow::Target(_)) {
+                        Style::default().fg(Color::Yellow)
+                    } else {
+                        Style::default()
+                    }),
+                    region,
+                );
+                hits.add(region, HitAction::ModalRow(i));
+            }
+            if detail_rows > 0 {
+                let detail = match &resolved {
+                    Some(target) => format!("管理目標：{}", app.settings_target_label(target)),
+                    None => "管理目標：未選擇 — 編輯／刪除／測試已停用".to_string(),
+                };
+                frame.render_widget(
+                    Paragraph::new(elide(&detail, inner.width))
+                        .style(Style::default().fg(Color::Yellow)),
+                    Rect::new(inner.x, inner.bottom() - 2, inner.width, 1),
+                );
+            }
+            if inner.height > 0 {
+                button(
+                    frame,
+                    &mut hits,
+                    Rect::new(inner.x, inner.bottom() - 1, inner.width.min(10), 1),
+                    "[Back]",
+                    HitAction::Cancel,
+                );
+                let hint = "Enter/點擊 選擇或執行 · Esc 返回";
+                let hint_width = Span::raw(hint).width() as u16;
+                if inner.width >= hint_width + 12 {
+                    frame.render_widget(
+                        Paragraph::new(hint).style(Style::default().fg(Color::DarkGray)),
+                        Rect::new(
+                            inner.x + 11,
+                            inner.bottom() - 1,
+                            (inner.width - 11).min(hint_width + 1),
+                            1,
+                        ),
+                    );
+                }
+            }
         }
         Modal::Actions { row } | Modal::Screens { row } => {
             let actions = matches!(modal, Modal::Actions { .. });
@@ -2558,23 +3063,22 @@ fn draw_modal(app: &App, modal: &Modal, frame: &mut Frame) -> HitMap {
             let block = panel("匯入預覽 / Import preview");
             let inner = block.inner(rect);
             frame.render_widget(block, rect);
-            let lines = preview
-                .entries
-                .iter()
-                .map(|entry| {
-                    Line::from(format!(
-                        "{} {} [{}] {}",
-                        entry.kind,
-                        safe(&entry.name),
-                        entry.status,
-                        if entry.has_secret {
-                            "含加密憑證"
-                        } else {
-                            "不含憑證"
-                        }
-                    ))
-                })
-                .collect::<Vec<_>>();
+            let mut lines = vec![Line::from(
+                "新項若不含憑證會略過；Replace 更新可能需要重新連線現有分頁。",
+            )];
+            lines.extend(preview.entries.iter().map(|entry| {
+                Line::from(format!(
+                    "{} {} [{}] {}",
+                    entry.kind,
+                    safe(&entry.name),
+                    entry.status,
+                    if entry.has_secret {
+                        "含加密憑證"
+                    } else {
+                        "不含憑證"
+                    }
+                ))
+            }));
             frame.render_widget(
                 Paragraph::new(lines)
                     .scroll((*scroll, 0))
@@ -2654,11 +3158,21 @@ fn draw_fields(
     } else {
         1
     };
-    for (index, field) in fields.iter().enumerate() {
-        let y = inner.y + index as u16 * field_height;
-        if y + field_height > inner.bottom().saturating_sub(1) {
-            break;
-        }
+    if inner.height == 0 {
+        return hits;
+    }
+    let capacity = ((inner.height.saturating_sub(1)) / field_height.max(1))
+        .max(1)
+        .min(fields.len() as u16) as usize;
+    let scroll = if fields.len() <= capacity {
+        0
+    } else {
+        active
+            .saturating_sub(capacity - 1)
+            .min(fields.len() - capacity)
+    };
+    for (index, field) in fields.iter().enumerate().skip(scroll).take(capacity) {
+        let y = inner.y + (index - scroll) as u16 * field_height;
         let region = Rect::new(inner.x, y, inner.width, field_height);
         let style = Style::default().fg(if index == active {
             Color::Cyan
@@ -3605,5 +4119,135 @@ mod tests {
         );
         assert_eq!(field_cursor(&field, Rect::new(5, 8, 2, 3), true), None);
         assert_eq!(field_cursor(&field, Rect::new(5, 8, 0, 1), false), None);
+    }
+
+    fn seed_profiles(app: &mut App) {
+        app.profiles.hosts.push(HostProfile {
+            id: "host-a".into(),
+            revision: 1,
+            name: "Host A".into(),
+            base_url: "https://a.test".into(),
+            credential_present: true,
+            metadata: None,
+        });
+        app.profiles.screens.push(DesktopProfile {
+            id: "screen-a".into(),
+            revision: 1,
+            name: "Screen A".into(),
+            mcp_url: "http://127.0.0.1:9/mcp".into(),
+            token_present: true,
+        });
+    }
+    fn settings_target(app: &App) -> Option<SettingsTarget> {
+        match &app.modal {
+            Some(Modal::Settings(settings)) => settings.target.clone(),
+            _ => panic!("settings modal expected"),
+        }
+    }
+    #[tokio::test]
+    async fn settings_target_is_typed_explicit_and_children_return() {
+        let (_directory, backend, mut app) = test_app().await;
+        seed_profiles(&mut app);
+        // No saved-record selection: CRUD must stay disabled, never fall back.
+        app.open_settings();
+        assert_eq!(settings_target(&app), None);
+        app.settings_action(SettingsAction::Delete, None, 0);
+        assert!(matches!(app.modal, Some(Modal::Settings(_))));
+        assert!(!matches!(app.modal, Some(Modal::Confirm(_))));
+        assert!(app.status.contains("請先選擇"));
+        // Screen row resolves a Screen target; delete confirms the record only.
+        app.tree_selected = Some("screen:screen-a".into());
+        app.open_settings();
+        let target = settings_target(&app);
+        assert!(matches!(target, Some(SettingsTarget::Screen(_))));
+        app.settings_action(SettingsAction::Delete, target, 0);
+        assert!(matches!(
+            app.modal,
+            Some(Modal::Confirm(Confirm::DeleteScreen(_)))
+        ));
+        assert!(!matches!(
+            app.modal,
+            Some(Modal::Confirm(Confirm::DeleteShell(_)))
+        ));
+        // Declining restores the same settings context and target.
+        app.modal_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE));
+        assert!(matches!(
+            settings_target(&app),
+            Some(SettingsTarget::Screen(_))
+        ));
+        // Host row resolves a Host target; Test uses the typed selection.
+        app.tree_selected = Some("host:host-a".into());
+        app.open_settings();
+        let target = settings_target(&app);
+        assert!(matches!(target, Some(SettingsTarget::Host(_))));
+        app.settings_action(SettingsAction::Test, target, 0);
+        assert!(app.pending.is_some());
+        assert!(matches!(
+            app.modal_origin,
+            Some(ModalOrigin::Settings {
+                target: Some(SettingsTarget::Host(_)),
+                ..
+            })
+        ));
+        app.stop().await;
+        backend.shutdown().await;
+    }
+    #[tokio::test]
+    async fn settings_target_revalidates_revision_and_clears_when_stale() {
+        let (_directory, backend, mut app) = test_app().await;
+        seed_profiles(&mut app);
+        app.tree_selected = Some("host:host-a".into());
+        app.open_settings();
+        let stale = settings_target(&app);
+        app.profiles.hosts[0].revision = 9;
+        assert_eq!(app.resolve_settings_target(&stale), None);
+        app.refresh_settings_target();
+        assert_eq!(settings_target(&app), None);
+        app.stop().await;
+        backend.shutdown().await;
+    }
+    #[tokio::test]
+    async fn settings_edit_cancel_restores_settings_and_leader_esc_cancels() {
+        let (_directory, backend, mut app) = test_app().await;
+        seed_profiles(&mut app);
+        app.tree_selected = Some("host:host-a".into());
+        app.open_settings();
+        let target = settings_target(&app);
+        app.settings_action(SettingsAction::Edit, target, 0);
+        assert!(matches!(app.modal, Some(Modal::Host(_))));
+        app.modal_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(matches!(app.modal, Some(Modal::Settings(_))));
+        assert!(matches!(
+            settings_target(&app),
+            Some(SettingsTarget::Host(_))
+        ));
+        app.modal_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(app.modal.is_none());
+        app.prefix = true;
+        app.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert!(!app.prefix);
+        assert!(!app.status.contains("未知快捷鍵"));
+        app.stop().await;
+        backend.shutdown().await;
+    }
+    #[tokio::test]
+    async fn settings_modal_draws_target_rows_actions_and_back() {
+        let (_directory, backend, mut app) = test_app().await;
+        seed_profiles(&mut app);
+        app.open_settings();
+        let text = draw_test(&mut app, 100, 30);
+        let compact: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+        assert!(compact.contains("連線設定/Connectionsettings"), "{text}");
+        assert!(compact.contains("Host：HostA"), "{text}");
+        assert!(compact.contains("Screen：ScreenA"), "{text}");
+        assert!(text.contains("Delete target"), "{text}");
+        assert!(text.contains("[Back]"), "{text}");
+        assert!(compact.contains("管理目標：未選擇"), "{text}");
+        // Settings rows must not advertise global shortcuts the modal cannot
+        // receive; Enter/click is the advertised activation instead.
+        assert!(!compact.contains("未綁定"), "{text}");
+        assert!(compact.contains("Enter/點擊選擇或執行·Esc返回"), "{text}");
+        app.stop().await;
+        backend.shutdown().await;
     }
 }

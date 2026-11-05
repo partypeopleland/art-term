@@ -64,7 +64,7 @@ def terminal_cell(app, label, last=False):
         offset = line.find(label)
         while offset >= 0:
             column = columns[offset]
-            width, height = min(app.screen.columns - 4, 88), min(app.screen.lines - 4, 24)
+            width, height = min(app.screen.columns - 4, 88), min(app.screen.lines - 2, 24)
             left, top = (app.screen.columns - width) // 2, (app.screen.lines - height) // 2
             if not last or left < column < left + width - 1 and top < row < top + height - 1:
                 matches.append((column, row))
@@ -88,7 +88,7 @@ def action(app, label):
 def choose(app, name):
     if terminal_cell(app, "[Desktop]") is not None:
         click(app, "[Desktop]")
-        width, height = min(app.screen.columns - 4, 88), min(app.screen.lines - 4, 24)
+        width, height = min(app.screen.columns - 4, 88), min(app.screen.lines - 2, 24)
         left, top = (app.screen.columns - width) // 2, (app.screen.lines - height) // 2
         items = (left + 1, top + 1, left + width - 1, top + height - 4)
         app.wait(lambda: bool(app.locations(name, items)), "selectable Screen row " + name)

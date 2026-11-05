@@ -85,7 +85,7 @@ async fn main() -> ExitCode {
 async fn run() -> anyhow::Result<()> {
     let config = match command(std::env::args_os().skip(1))? {
         Command::Help => {
-            println!("art-term {}\n\nRemote Host/Shell terminal client for Ubuntu Server and Desktop.\n\nUsage: art-term [--config PATH]\n       art-term --help\n       art-term --version\n\nRuns directly in your terminal or SSH session. No graphical desktop is required.\nCredentials are encrypted using a private key belonging to your Unix account. No unlock password is required.\n\nInside the app: Ctrl-] then ? opens help; Ctrl-] then q quits.\nCtrl-C and Ctrl-D are sent to the selected remote Shell.\n", env!("CARGO_PKG_VERSION"));
+            println!("art-term {}\n\nRemote Host/Shell terminal client for Ubuntu Server and Desktop.\n\nUsage: art-term [--config PATH]\n       art-term --help\n       art-term --version\n\nRuns directly in your terminal or SSH session. No graphical desktop is required.\nCredentials are encrypted using a private key belonging to your Unix account. No unlock password is required.\n\nInside the app: F1 opens help; F10 opens the Actions menu whose first entry opens connection settings for saved Hosts, Agents and Screens, including encrypted import/export (also on the [連線設定] toolbar button; it has no default shortcut of its own, so bind `settings` in keybindings.toml to enable one).\nCtrl-] then ? opens help; Ctrl-] then q quits.\nCtrl-C and Ctrl-D are sent to the selected remote Shell.\n", env!("CARGO_PKG_VERSION"));
             return Ok(());
         }
         Command::Version => {

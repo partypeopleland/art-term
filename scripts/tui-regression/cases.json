@@ -102,6 +102,11 @@
       "candidate_artifact_check": false
     },
     {
+      "id": "T-UX",
+      "runner": "ux.py",
+      "candidate_artifact_check": false
+    },
+    {
       "id": "T-RELEASE",
       "runner": null,
       "candidate_artifact_check": true

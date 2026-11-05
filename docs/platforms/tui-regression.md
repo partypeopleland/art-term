@@ -26,6 +26,7 @@ TUI 的功能移植必須有對應的實際操作測試。依[共同功能矩陣
 | T-IMAGE-CLIENT | 真正本機 XTerm 內執行候選 TUI，檢查縮圖／右側展開的螢幕 RGB、字格內圖片細節與 X／遮罩清圖 | native_client.py |
 | T-TRANSFER | 混合 Host／Screen 加密搬移、錯密碼不改檔、取消、重複略過／取代、重開後認證 | catalog.py、核心 transfer 測試 |
 | T-KEYS | 直接編輯檔案後自訂前導鍵／直接鍵生效、停用舊鍵、錯誤設定指出路徑並保留原檔 | catalog.py、keybindings 測試 |
+| T-UX | 頂端連線設定入口與分組管理、明確目標的新增／編輯／測試／刪除不誤傷遠端 Shell、加密匯入／匯出往返、錯密碼／取消／重開、自訂快捷鍵相容、20x8 窄版可用性 | ux.py |
 | T-RELEASE | 實際壓縮套件無 GUI 啟動、免密碼重開、滑鼠模式／TTY 還原、拒絕 debug CA、附預設快捷鍵範例 | 對當次候選 ELF 的獨立 smoke 與套件檢查 |
 
 ## 執行
@@ -37,6 +38,7 @@ cargo build -p art-term-tui --features openab-fixture --locked
 python3 scripts/tui-regression/run.py --binary /absolute/target/debug/art-term --output-dir /tmp/art-term-tui-terminal-result
 python3 scripts/tui-regression/viewer.py --binary /absolute/target/debug/art-term --output-dir /tmp/art-term-tui-viewer-result
 python3 scripts/tui-regression/catalog.py --binary /absolute/target/debug/art-term --output-dir /tmp/art-term-tui-catalog-result
+python3 scripts/tui-regression/ux.py --binary /absolute/target/debug/art-term --output-dir /tmp/art-term-tui-ux-result
 python3 scripts/tui-regression/official_runtime.py --binary /absolute/target/debug/art-term --output-dir /tmp/art-term-tui-tools-result
 ```
 

@@ -26,6 +26,8 @@ art-term --config /home/user/private-art-term/connections.toml
 
 頂端 Connections、Preview、Terminal 可點選切換焦點。分頁標題可點選切換，旁邊的 `[x]` 只關閉本機分頁、保留遠端工作。選擇既有 Shell／接管與刪除遠端工作仍須確認。Actions 選單包含新增、編輯、刪除、測試、重新整理、匯入／匯出、歷史操作、復原及離開，均可用滑鼠或方向鍵與 Enter。
 
+頂端 `[連線設定]` 點擊，或按 F10 開 Actions 後選第一項 Enter（預設快捷鍵），即可開啟連線設定（也是 Actions 第一項）：新增 Host／Agent／Screen 可直接操作；編輯、測試、刪除前先把已保存記錄選為明確管理目標。這些操作只作用於所選連線記錄，即使目前選中的是遠端 Shell 也不會誤刪。同一視窗提供加密匯入／匯出，沿用檔案密碼與預覽確認。設定選單內以方向鍵、Enter 或點擊操作。連線設定沒有預設全域快捷鍵，仍可在 `keybindings.toml` 設定 `settings = [...]` 啟用，顯示的快捷鍵以檔案實際設定為準。
+
 表單可點欄位、Save、Cancel；確認視窗提供 Yes／Cancel，預設不確認。視窗開啟時不會把滑鼠、輸入或貼上送進背後終端。滑鼠滾輪在連線樹移動選取，在終端使用共用歷史 scroll／follow，在說明與選單捲動各自內容。點終端只取得焦點，不把本機滑鼠報告當成遠端輸入。
 
 窄視窗顯示目前焦點區域，仍保留可點的 Actions 與 Desktop 入口。遠端 PTY 尺寸只取終端內容區，不含邊框、側欄與分頁列。背景分頁繼續處理輸出，恢復使用原工作 token，不自動建立或重播輸入。歷史中輸入先回到即時位置，狀態不確定時停止送入。
@@ -34,7 +36,7 @@ art-term --config /home/user/private-art-term/connections.toml
 
 首次啟動會在連線設定同目錄建立 `keybindings.toml`，一般是 `~/.config/art-term-tui/keybindings.toml`。使用 `--config` 時就在指定連線檔旁。直接用文字編輯器修改，重新啟動生效；不會覆寫已有的快捷鍵檔。
 
-預設 F1 開說明、F2 到連線樹、F3 到終端、F4 選桌面、F10 開 Actions。原本的 `Ctrl-]` 前導鍵仍可用；例如先按 `Ctrl-]`、放開、再按 `c` 選桌面。說明畫面顯示目前檔案設定的快捷鍵。
+預設 F1 開說明、F2 到連線樹、F3 到終端、F4 選桌面、F10 開 Actions；連線設定不綁定預設快捷鍵。原本的 `Ctrl-]` 前導鍵仍可用；例如先按 `Ctrl-]`、放開、再按 `c` 選桌面。說明畫面顯示目前檔案設定的快捷鍵。
 
 ```toml
 leader = "Ctrl+g"
@@ -47,6 +49,7 @@ help = ["F9"]
 close = ["leader+w"]
 next = ["Alt+l"]
 previous = ["Alt+p"]
+settings = ["F8"]
 
 [navigation]
 save = ["Ctrl+s"]

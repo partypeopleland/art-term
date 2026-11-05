@@ -188,7 +188,7 @@ class Terminal:
     def action(self, label):
         self.click_text("[Actions]")
         self.wait_text("Actions / ")
-        width, height = min(self.screen.columns - 4, 88), min(self.screen.lines - 4, 24)
+        width, height = min(self.screen.columns - 4, 88), min(self.screen.lines - 2, 24)
         left, top = (self.screen.columns - width) // 2, (self.screen.lines - height) // 2
         region = (left + 1, top + 1, left + width - 1, top + height - 1)
         for _ in range(30):

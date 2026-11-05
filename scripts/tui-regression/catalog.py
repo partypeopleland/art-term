@@ -16,7 +16,7 @@ from run import McpFixture, Runtime, Terminal
 class CatalogTerminal(Terminal):
     def modal_region(self):
         width = min(self.screen.columns - 4, 88)
-        height = min(self.screen.lines - 4, 24)
+        height = min(self.screen.lines - 2, 24)
         left = (self.screen.columns - width) // 2
         top = (self.screen.lines - height) // 2
         return left + 1, top + 1, left + width - 1, top + height - 1

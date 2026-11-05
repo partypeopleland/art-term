@@ -33,6 +33,7 @@ pub(crate) enum BindingAction {
     Help,
     Quit,
     Actions,
+    Settings,
     Edit,
     Delete,
     Test,
@@ -155,6 +156,39 @@ fn normalize(mut key: KeyEvent) -> KeyEvent {
         }
     }
     key
+}
+fn key_text(key: KeyEvent) -> String {
+    let mut text = String::new();
+    for (modifier, name) in [
+        (KeyModifiers::CONTROL, "Ctrl+"),
+        (KeyModifiers::ALT, "Alt+"),
+        (KeyModifiers::SHIFT, "Shift+"),
+    ] {
+        if key.modifiers.contains(modifier) {
+            text.push_str(name);
+        }
+    }
+    match key.code {
+        KeyCode::Char(' ') => text.push_str("Space"),
+        KeyCode::Char(c) => text.push(c),
+        KeyCode::F(number) => text.push_str(&format!("F{number}")),
+        KeyCode::Up => text.push_str("Up"),
+        KeyCode::Down => text.push_str("Down"),
+        KeyCode::Left => text.push_str("Left"),
+        KeyCode::Right => text.push_str("Right"),
+        KeyCode::Enter => text.push_str("Enter"),
+        KeyCode::Esc => text.push_str("Esc"),
+        KeyCode::Tab => text.push_str("Tab"),
+        KeyCode::BackTab => text.push_str("BackTab"),
+        KeyCode::Backspace => text.push_str("Backspace"),
+        KeyCode::Delete => text.push_str("Delete"),
+        KeyCode::Home => text.push_str("Home"),
+        KeyCode::End => text.push_str("End"),
+        KeyCode::PageUp => text.push_str("PageUp"),
+        KeyCode::PageDown => text.push_str("PageDown"),
+        _ => text.push('?'),
+    }
+    text
 }
 fn chord(value: &str) -> Result<Chord> {
     anyhow::ensure!(
@@ -345,6 +379,13 @@ impl Bindings {
     pub(crate) fn leader_label(&self) -> &str {
         &self.leader_text
     }
+    pub(crate) fn leader_entries(&self) -> Vec<(String, BindingAction)> {
+        self.actions
+            .iter()
+            .filter(|(chord, _)| chord.leader)
+            .map(|(chord, action)| (key_text(chord.event()), *action))
+            .collect()
+    }
     pub(crate) fn label(&self, action: BindingAction) -> String {
         self.labels
             .get(&action)
@@ -456,6 +497,36 @@ mod tests {
             b.navigation_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE))
                 .code,
             KeyCode::Up
+        );
+    }
+    #[test]
+    fn settings_has_no_default_key_and_legacy_files_still_load() {
+        let b = Bindings::default();
+        assert_eq!(b.label(BindingAction::Settings), "未綁定");
+        assert_eq!(
+            b.action(KeyEvent::new(KeyCode::F(8), KeyModifiers::NONE), false),
+            None
+        );
+        // A file written before `settings` existed keeps every old binding and
+        // leaves the new action unbound instead of failing or inventing a key.
+        let legacy = Bindings::parse("[bindings]\nhelp=['F9']\nhosts=['Alt+h']").unwrap();
+        assert_eq!(legacy.label(BindingAction::Settings), "未綁定");
+        assert_eq!(
+            legacy.action(KeyEvent::new(KeyCode::F(9), KeyModifiers::NONE), false),
+            Some(BindingAction::Help)
+        );
+        assert_eq!(
+            legacy.action(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::ALT), false),
+            Some(BindingAction::Hosts)
+        );
+        let custom = Bindings::parse("[bindings]\nsettings=['F8']").unwrap();
+        assert_eq!(
+            custom.action(KeyEvent::new(KeyCode::F(8), KeyModifiers::NONE), false),
+            Some(BindingAction::Settings)
+        );
+        assert_eq!(
+            custom.action(KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE), false),
+            Some(BindingAction::Help)
         );
     }
     #[test]

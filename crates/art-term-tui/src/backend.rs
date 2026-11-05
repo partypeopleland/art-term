@@ -68,7 +68,7 @@ impl fmt::Display for BackendError {
 }
 impl std::error::Error for BackendError {}
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct HostSelection {
     pub id: String,
     pub revision: u64,
