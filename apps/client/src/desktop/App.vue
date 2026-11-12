@@ -147,7 +147,7 @@ const statusText = computed(() => !activeTab.value ? '未連線' : activeTab.val
 </template>
 
 <style scoped>
-.windows-app { position: relative; overflow: hidden; }
+.windows-app { position: relative; overflow: hidden; overflow-x: clip; }
 .desktop-workspace { display: flex; height: 100%; min-height: 0; }
 .desktop-sidebar { flex: none; min-width: 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; background: var(--bg-panel); }
 .desktop-sidebar .desktop-main-page { flex: 1; min-height: 0; height: auto; padding: 12px 8px; margin: 0; overflow-x: hidden; overflow-y: auto; }
