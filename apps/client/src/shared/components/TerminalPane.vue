@@ -56,6 +56,10 @@ function fitAndReport(): void {
   props.controller.requestResize(props.tab, term.rows, term.cols)
 }
 
+function focusOnPointer(event: PointerEvent): void {
+  if (!nativeReader && props.active && props.tab.status === 'live' && event.button === 0) props.tab.term?.focus()
+}
+
 onMounted(() => {
   if (!el.value) return
   // The instance stays mounted for the tab's whole life (v-show hides it);
@@ -95,7 +99,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="pane" v-show="active">
-    <div ref="el" class="term-host" />
+    <div ref="el" class="term-host" @pointerdown="focusOnPointer" />
     <NativeTerminalReader v-if="nativeReader && active && tab.status === 'live'"
       :key="tab.sessionId ?? tab.key" :terminal="tab.term"
       :history-request="tab.runtime ? historyRequest : undefined" :history-notice="historyNotice"
