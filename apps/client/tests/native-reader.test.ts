@@ -68,6 +68,29 @@ it('uses xterm during a Host alternate screen and resumes Host history when it e
   expect(f.bridge.update.mock.calls.at(-1)![0].visible).toBe(true)
 })
 
+it.each(['unavailable', 'transport'])('recovers the same reader after an initial %s failure without replaying input', async failure => {
+  vi.useFakeTimers()
+  let attempts = 0
+  const request = vi.fn(async (r: Record<string, unknown>) => {
+    if (r.op !== 'viewport') return { kind: 'ack', instance: 'a'.repeat(32), epoch: 1, op: r.op }
+    if (++attempts === 1) {
+      if (failure === 'transport') throw new Error('connection interrupted')
+      return { kind: 'error', error: 'unavailable' }
+    }
+    return { kind: 'page', instance: 'a'.repeat(32), epoch: 1, columns: 80, rows: 1, rowCount: 1, start: 0, end: 1, hasOlder: false, records: [{ id: 1, text: 'Recovered Host viewport', styles: [] }] }
+  })
+  const f = fixture(false, request)
+  await vi.advanceTimersByTimeAsync(250); await flushPromises()
+  expect(f.bridge.update.mock.calls.at(-1)![0].records).toEqual(f.records)
+  const readerId = f.bridge.open.mock.calls[0][0].readerId
+  await vi.advanceTimersByTimeAsync(750); await flushPromises()
+  expect(attempts).toBe(2)
+  expect(f.bridge.open).toHaveBeenCalledTimes(1)
+  expect(f.bridge.update.mock.calls.at(-1)![0]).toMatchObject({ readerId, records: [{ id: 1, text: 'Recovered Host viewport', styles: [] }] })
+  expect(f.terminal.write).not.toHaveBeenCalled()
+  expect(f.terminal.onData).not.toHaveBeenCalled()
+})
+
 it('ACKs only the epoch actually drawn and keeps that epoch when a gesture races a newer candidate', async () => {
   vi.useFakeTimers()
   let current = 1
