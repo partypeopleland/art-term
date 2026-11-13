@@ -224,3 +224,19 @@ it('starts with a wider sidebar and preserves keyboard resizing', async () => {
  await divider.trigger('keydown', { key: 'ArrowRight' })
  expect(divider.attributes('aria-valuenow')).toBe('360')
 })
+
+it('restores terminal focus when the user clicks the live terminal', async () => {
+ const {wrapper,terms,attach}=await setup();await attach()
+ const before=terms[0].focusCount
+ wrapper.get('.term-host').element.dispatchEvent(new MouseEvent('pointerdown',{button:0,bubbles:true}))
+ expect(terms[0].focusCount).toBeGreaterThan(before)
+})
+
+it('shows a failed terminal write instead of leaving a live tab silent', async () => {
+ const {wrapper,transport,terms,attach}=await setup();const tab=await attach()
+ transport.write=async()=>{throw new Error('write rejected')}
+ terms[0].emitData('x');await flush()
+ expect(tab.status).toBe('live')
+ expect(wrapper.get('.statusbar').text()).toContain('輸入未送出')
+ expect(wrapper.get('.statusbar').text()).toContain('write rejected')
+})

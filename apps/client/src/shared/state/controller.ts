@@ -628,6 +628,7 @@ export function createAppController(
     if (hidden || tab.status !== 'live' || !tab.sessionId || tab.closed) return
     const bytes = Array.from(textEncoder.encode(text))
     if (!bytes.length) return
+    tab.errorMsg = ''
     if (tab.writeBuf.length + bytes.length > WRITE_CAP) {
       // Reject this whole input event; never truncate queued command prefixes
       // or retain only a pasted suffix that might contain an execution newline.
@@ -652,7 +653,7 @@ export function createAppController(
           await transport.write(sid, chunk)
         } catch (e) {
           if (tab.connectionGen === generation) {
-            tab.errorMsg = errText(e)
+            tab.errorMsg = `輸入未送出：${errText(e)}`
             tab.writeBuf = []
           }
           break
