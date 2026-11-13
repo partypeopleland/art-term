@@ -152,6 +152,12 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
         (text?.text as? Spannable)?.let { Selection.removeSelection(it) }
         text?.clearFocus()
     }
+    private fun applyPendingPage() {
+        if (dragging || moving || selectingText()) return
+        val page = pending ?: return
+        pending = null
+        applyPage(page)
+    }
     private fun touch(event: MotionEvent) {
         val slop = android.view.ViewConfiguration.get(activity).scaledTouchSlop
         when (event.actionMasked) {
@@ -163,8 +169,16 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
                 val p = press; press = null
                 if (p != null && !selectingText() && event.eventTime - p.time < android.view.ViewConfiguration.getLongPressTimeout()
                     && kotlin.math.hypot((event.x - p.x).toDouble(), (event.y - p.y).toDouble()) < slop) {
-                    if (p.link == null) send("tap")
-                    else if (linkAt(event.x, event.y) == p.link) {
+                    if (p.link == null) {
+                        val tappedReader = readerId
+                        // Run after TextView handles ACTION_UP, which may focus it.
+                        main.post {
+                            if (readerId == tappedReader && !selectingText()) {
+                                text?.clearFocus()
+                                send("tap")
+                            }
+                        }
+                    } else if (linkAt(event.x, event.y) == p.link) {
                         try {
                             openWebUrl(p.link.url)
                         } catch (_: Exception) { Toast.makeText(activity, "無法開啟連結，請確認已安裝瀏覽器。", Toast.LENGTH_SHORT).show() }
@@ -200,9 +214,7 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
                     put("nearBottom", (text?.height ?: 0) - (scroll?.height ?: 0) - (scroll?.scrollY ?: 0) <= dp(64))
                 } }
             }
-            val page = pending
-            pending = null
-            if (page != null) applyPage(page)
+            applyPendingPage()
         }
     }
     private var lastKeyboardVisible: Boolean? = null
@@ -414,7 +426,22 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
                 // Let the native TextView own its long-press selection handles.
                 descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
             }
-            val t = TextView(activity).apply {
+            val t = object : TextView(activity) {
+                override fun onSelectionChanged(selStart: Int, selEnd: Int) {
+                    super.onSelectionChanged(selStart, selEnd)
+                    if (selStart == selEnd) main.post { applyPendingPage() }
+                }
+                override fun onTextContextMenuItem(id: Int): Boolean {
+                    val handled = super.onTextContextMenuItem(id)
+                    if (handled && id == android.R.id.copy) main.post {
+                        if (text === this) {
+                            clearTextSelection()
+                            applyPendingPage()
+                        }
+                    }
+                    return handled
+                }
+            }.apply {
                 textSize = 14f; typeface = Typeface.MONOSPACE
                 setTextColor(Color.rgb(215,215,220)); setLineSpacing(0f, 1.2f)
                 setPadding(dp(12), dp(8), dp(12), dp(24))
@@ -445,7 +472,7 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
         main.post {
             if (args.readerId == readerId) {
                 place(args)
-                if (dragging || moving) pending = args else applyPage(args)
+                if (dragging || moving || selectingText()) pending = args else applyPage(args)
             }
             invoke.resolve()
         }
