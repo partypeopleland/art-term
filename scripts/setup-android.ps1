@@ -5,7 +5,7 @@ $toolRoot = Join-Path $repoRoot 'target/android-tools'
 $sdkRoot = if ($SdkRoot) { [IO.Path]::GetFullPath($SdkRoot) } else { Join-Path $repoRoot 'target/android-sdk' }
 New-Item -ItemType Directory -Force -Path $toolRoot | Out-Null
 $jdkArchive = Join-Path $toolRoot 'jdk17.zip'
-$jdkRoot = Join-Path $toolRoot 'jdk17'
+$jdkRoot = if ($env:RUNNER_TEMP) { Join-Path $env:RUNNER_TEMP 'art-term-jdk17' } else { Join-Path $toolRoot 'jdk17' }
 if (-not (Test-Path $jdkRoot)) {
     $jdkAssets = Invoke-RestMethod 'https://api.adoptium.net/v3/assets/latest/17/hotspot?architecture=x64&image_type=jdk&os=windows&vendor=eclipse'
     $jdkAsset = @($jdkAssets)[0]
@@ -16,6 +16,11 @@ if (-not (Test-Path $jdkRoot)) {
     Expand-Archive -LiteralPath $jdkArchive -DestinationPath $jdkRoot
 }
 $env:JAVA_HOME = (Get-ChildItem $jdkRoot -Directory | Select-Object -First 1).FullName
+foreach ($required in @('bin/java.exe', 'release')) {
+    if (-not (Test-Path (Join-Path $env:JAVA_HOME $required))) { throw "JDK file missing: $required" }
+}
+& "$env:JAVA_HOME/bin/java.exe" -version
+if ($LASTEXITCODE -ne 0) { throw 'JDK 17 could not start' }
 $env:ANDROID_HOME = $sdkRoot
 $env:ANDROID_USER_HOME = Join-Path $toolRoot 'android-user'
 New-Item -ItemType Directory -Force -Path $env:ANDROID_USER_HOME | Out-Null
