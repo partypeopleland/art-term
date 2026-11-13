@@ -896,7 +896,7 @@ impl RuntimeSessions {
             }
         }
         let json = screenshot::run(
-            api,
+            &api,
             snapshot,
             mode,
             ownership,
@@ -1102,7 +1102,7 @@ impl RuntimeSessions {
                     }
                 }
                 let channel = HistoryChannel::open(
-                    api,
+                    &api,
                     snapshot,
                     &key,
                     version,
@@ -1193,7 +1193,7 @@ impl RuntimeSessions {
             profile_id: ownership_key(&binding.profile),
         });
         let result = screenshot::configure(
-            hosts
+            &hosts
                 .admin()
                 .map_err(|_| anyhow::anyhow!("Runtime 不可用"))?,
             snapshot,

@@ -220,6 +220,8 @@ pub fn run() {
             crate::runtime_transfer::gui_transfer_apply,
             crate::runtime_transfer::gui_transfer_cancel,
             crate::runtime_hosts::gui_runtime_hosts,
+            crate::runtime_hosts::gui_runtime_development_mode,
+            crate::runtime_hosts::gui_runtime_set_development_mode,
             crate::runtime_hosts::gui_runtime_save_host,
             crate::runtime_hosts::gui_runtime_reorder_connections,
             crate::runtime_hosts::gui_runtime_delete_host,

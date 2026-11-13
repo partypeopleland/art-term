@@ -183,6 +183,8 @@ export interface Transport {
   runtimeCreateHistorySession?(id: string, expectedRevision: number): Promise<TargetDto>
   runtimeHistory?(sessionId: string, request: HostHistoryRequest): Promise<HostHistoryReply>
   runtimeHosts(): Promise<RuntimeHostDto[]>
+  runtimeDevelopmentMode?(): Promise<boolean>
+  runtimeSetDevelopmentMode?(enabled: boolean): Promise<boolean>
   runtimeSaveHost(input: RuntimeHostInput): Promise<RuntimeHostDto>
   runtimeDeleteHost(id: string, expectedRevision: number): Promise<void>
   runtimeReorderConnections?(kind: 'host' | 'agent' | 'screen', expectedIds: string[], orderedIds: string[]): Promise<void>

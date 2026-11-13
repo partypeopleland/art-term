@@ -358,6 +358,24 @@ impl SessionHandle {
     ) -> Result<Self, SessionError> {
         Self::attach_with(host, grant, since, local_generation, None).await
     }
+    pub async fn attach_development(
+        host: HostSnapshot,
+        grant: SessionGrant,
+        since: u64,
+        local_generation: u64,
+    ) -> Result<Self, SessionError> {
+        let connector = tokio_tungstenite::Connector::Rustls(Arc::new(super::dev_tls::config()));
+        Self::attach_with(host, grant, since, local_generation, Some(connector)).await
+    }
+    pub async fn attach_token_development(
+        binding: SessionBinding,
+        token: Secret,
+        since: u64,
+        local_generation: u64,
+    ) -> Result<Self, SessionError> {
+        let connector = tokio_tungstenite::Connector::Rustls(Arc::new(super::dev_tls::config()));
+        Self::attach_bound(binding, token, since, local_generation, Some(connector)).await
+    }
     /// Reattach with the SAME retained token — official `?since=` resume.
     /// No admin POST happens here; minting a new token (renew) is an
     /// explicit user-directed action elsewhere.

@@ -311,6 +311,8 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            runtime_hosts::gui_runtime_development_mode,
+            runtime_hosts::gui_runtime_set_development_mode,
             crate::instance_desktops::gui_instance_desktops,
             crate::instance_desktops::gui_instance_save,
             crate::instance_desktops::gui_instance_delete,
