@@ -19,6 +19,9 @@ use url::Url;
 const SCHEMA: u32 = 1;
 const MAX_FILE: u64 = 1024 * 1024;
 const MAX_HOSTS: usize = 64;
+fn is_false(value: &bool) -> bool {
+    !*value
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -48,6 +51,8 @@ struct Record {
 #[serde(deny_unknown_fields)]
 struct Document {
     schema_version: u32,
+    #[serde(default, skip_serializing_if = "is_false")]
+    development_mode: bool,
     connections: Vec<DiskConnection>,
     // Preserve newer desktop settings without enabling or decrypting them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -140,9 +145,11 @@ fn encode(records: &[Record], source: Option<&[u8]>) -> Result<Vec<u8>, ApiError
         .transpose();
     // Legacy schemas still migrate normally; schema 5/6 opaque data survives
     // every save, including deleting the final Host connection.
-    let (schema_version, desktops) = match original {
-        Ok(Some(doc)) if matches!(doc.schema_version, 5 | 6) => (doc.schema_version, doc.desktops),
-        _ => (5, None),
+    let (schema_version, desktops, development_mode) = match original {
+        Ok(Some(doc)) if matches!(doc.schema_version, 5 | 6) => {
+            (doc.schema_version, doc.desktops, doc.development_mode)
+        }
+        _ => (5, None, false),
     };
     let connections = records
         .iter()
@@ -163,6 +170,7 @@ fn encode(records: &[Record], source: Option<&[u8]>) -> Result<Vec<u8>, ApiError
         .collect();
     toml::to_string(&Document {
         schema_version,
+        development_mode,
         connections,
         desktops,
     })
@@ -304,6 +312,35 @@ pub struct HostStore {
     source: Mutex<Option<Vec<u8>>>,
 }
 impl HostStore {
+    pub fn development_mode(&self) -> Result<bool, ApiError> {
+        let _records = self.records.lock().map_err(|_| ApiError::StateChanged)?;
+        self.ensure_source()?;
+        let Some(bytes) = read_source(&self.path)? else {
+            return Ok(false);
+        };
+        let value: toml::Value =
+            toml::from_str(std::str::from_utf8(&bytes).map_err(|_| ApiError::Protocol)?)
+                .map_err(|_| ApiError::Protocol)?;
+        match value.get("development_mode") {
+            Some(value) => value.as_bool().ok_or(ApiError::Protocol),
+            None => Ok(false),
+        }
+    }
+    pub fn set_development_mode(&self, enabled: bool) -> Result<(), ApiError> {
+        let records = self.records.lock().map_err(|_| ApiError::StateChanged)?;
+        self.ensure_source()?;
+        let source = read_source(&self.path)?;
+        let mut document: Document = toml::from_str(
+            std::str::from_utf8(&encode(&records, source.as_deref())?)
+                .map_err(|_| ApiError::Protocol)?,
+        )
+        .map_err(|_| ApiError::Protocol)?;
+        document.development_mode = enabled;
+        let bytes = toml::to_string(&document)
+            .map_err(|_| ApiError::Protocol)?
+            .into_bytes();
+        self.persist_bytes(&bytes)
+    }
     pub fn load(path: PathBuf, cipher: Arc<dyn CredentialCipher>) -> Result<Self, ApiError> {
         if !path.is_absolute() {
             return Err(ApiError::Protocol);

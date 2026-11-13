@@ -32,6 +32,12 @@ impl RuntimeHosts {
         art_term_core::openab::session::SessionHandle,
         art_term_core::openab::session::SessionError,
     > {
+        if self.store()?.development_mode()? {
+            return art_term_core::openab::session::SessionHandle::attach_development(
+                host, grant, since, generation,
+            )
+            .await;
+        }
         #[cfg(all(debug_assertions, feature = "openab-fixture"))]
         if let Some(ca) = self
             .fixture_ca
@@ -58,6 +64,12 @@ impl RuntimeHosts {
         art_term_core::openab::session::SessionHandle,
         art_term_core::openab::session::SessionError,
     > {
+        if self.store()?.development_mode()? {
+            return art_term_core::openab::session::SessionHandle::attach_token_development(
+                binding, token, since, generation,
+            )
+            .await;
+        }
         #[cfg(all(debug_assertions, feature = "openab-fixture"))]
         if let Some(ca) = self
             .fixture_ca
@@ -77,8 +89,12 @@ impl RuntimeHosts {
     pub(crate) fn store(&self) -> Result<&HostStore, ApiError> {
         self.store.as_ref().map_err(|error| *error)
     }
-    pub(crate) fn admin(&self) -> Result<&AdminClient, ApiError> {
-        self.admin.as_ref().map_err(|error| *error)
+    pub(crate) fn admin(&self) -> Result<AdminClient, ApiError> {
+        if self.store()?.development_mode()? {
+            AdminClient::with_development_mode(true)
+        } else {
+            self.admin.as_ref().cloned().map_err(|error| *error)
+        }
     }
 }
 
@@ -137,6 +153,30 @@ impl From<ApiError> for HostError {
     }
 }
 type Reply<T> = Result<T, HostError>;
+
+#[tauri::command]
+pub async fn gui_runtime_development_mode(state: State<'_, Arc<RuntimeHosts>>) -> Reply<bool> {
+    let hosts = state.inner().clone();
+    tokio::task::spawn_blocking(move || hosts.store()?.development_mode())
+        .await
+        .map_err(|_| HostError::from(ApiError::StateChanged))?
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn gui_runtime_set_development_mode(
+    state: State<'_, Arc<RuntimeHosts>>,
+    enabled: bool,
+) -> Reply<bool> {
+    let hosts = state.inner().clone();
+    tokio::task::spawn_blocking(move || {
+        hosts.store()?.set_development_mode(enabled)?;
+        Ok::<_, ApiError>(enabled)
+    })
+    .await
+    .map_err(|_| HostError::from(ApiError::StateChanged))?
+    .map_err(Into::into)
+}
 
 #[cfg(all(debug_assertions, feature = "openab-fixture"))]
 pub fn load_fixture_ca() -> Result<Option<Vec<u8>>, ApiError> {

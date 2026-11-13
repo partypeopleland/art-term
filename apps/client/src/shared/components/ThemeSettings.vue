@@ -11,6 +11,26 @@ const emit = defineEmits<{ close: []; changed: []; picker: [active: boolean] }>(
 const transferMode = ref<'import' | 'export' | null>(null)
 const section = ref<SettingsSection>(props.initialSection === 'screens' ? 'connections' : props.initialSection)
 const pickerActive = ref(false)
+const developmentMode = ref(false)
+const developmentBusy = ref(true)
+const developmentError = ref('')
+watch(() => props.transport, async transport => {
+  if (!transport?.runtimeDevelopmentMode) { developmentBusy.value = false; return }
+  developmentBusy.value = true
+  try { developmentMode.value = await transport.runtimeDevelopmentMode(); developmentError.value = '' }
+  catch { developmentError.value = '無法讀取開發模式設定。' }
+  finally { developmentBusy.value = false }
+}, { immediate: true })
+async function setDevelopmentMode(event: Event): Promise<void> {
+  if (!(event.target instanceof HTMLInputElement) || !props.transport?.runtimeSetDevelopmentMode) return
+  const input = event.target
+  developmentBusy.value = true
+  try {
+    developmentMode.value = await props.transport.runtimeSetDevelopmentMode(input.checked)
+    developmentError.value = ''
+  } catch { input.checked = developmentMode.value; developmentError.value = '無法儲存開發模式設定。' }
+  finally { developmentBusy.value = false }
+}
 const sections = [{ id: 'appearance', title: '外觀設定', hint: '主題與配色' }, { id: 'connections', title: '連線設定', hint: '主機、助理、桌面與搬移' }] as const
 watch(() => props.initialSection, value => { if (!pickerActive.value) section.value = value === 'screens' ? 'connections' : value })
 function picker(active: boolean) { pickerActive.value = active; emit('picker', active) }
@@ -41,6 +61,11 @@ if (!props.embedded) useModalFocus(dialog, () => emit('close'))
       <section v-if="transport && (!desktop || section === 'connections')" class="connection-transfer-settings" aria-labelledby="transfer-settings-title">
         <div class="settings-eyebrow">CONNECTIONS</div>
         <h2 id="transfer-settings-title">連線設定</h2>
+        <div v-if="transport.runtimeDevelopmentMode && transport.runtimeSetDevelopmentMode" class="development-setting">
+          <label><input type="checkbox" :checked="developmentMode" :disabled="developmentBusy || pickerActive" @change="setDevelopmentMode">開發模式：略過伺服器憑證驗證</label>
+          <p>僅供開發測試。連線仍加密，但不驗證伺服器身分；變更套用至新連線。</p>
+          <p v-if="developmentError" role="alert">{{ developmentError }}</p>
+        </div>
         <div class="transfer-setting-actions">
           <button data-testid="runtime-import" :disabled="pickerActive" :aria-pressed="transferMode === 'import'" @click="transferMode = 'import'"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M4 16v4h16v-4" /></svg><span>匯入連線</span></button>
           <button data-testid="runtime-export" :disabled="pickerActive" :aria-pressed="transferMode === 'export'" @click="transferMode = 'export'"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3m-4 4 4-4 4 4M4 16v4h16v-4" /></svg><span>匯出連線</span></button>
@@ -78,6 +103,10 @@ button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .settings-note { margin: 15px 0 0; font-size: 10px; color: var(--text-dim); text-align: center; }
 
 .connection-transfer-settings { margin-top: 28px; padding-top: 22px; border-top: 1px solid var(--border); }
+.development-setting { margin: 14px 0; padding: 12px; border: 1px solid var(--border); border-radius: 9px; }
+.development-setting label { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.development-setting input { width: 18px; height: 18px; accent-color: var(--accent); }
+.development-setting p { margin: 8px 0 0; color: var(--text-dim); font-size: 11px; }
 .transfer-setting-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
 .transfer-setting-actions button { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 48px; padding: 10px; border: 1px solid var(--border); border-radius: 9px; color: var(--text); background: var(--bg-panel); font-size: 12px; }
 .transfer-setting-actions button[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
