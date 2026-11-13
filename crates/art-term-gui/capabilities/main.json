@@ -3,5 +3,5 @@
   "identifier": "main",
   "description": "Local main application; no shell, filesystem or remote webview grants.",
   "windows": ["main"],
-  "permissions": ["core:default", "allow-gui", "clipboard-manager:allow-write-text"]
+  "permissions": ["core:default", "allow-gui", "clipboard-manager:allow-write-text", "clipboard-manager:allow-read-text"]
 }

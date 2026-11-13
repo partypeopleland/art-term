@@ -12,6 +12,7 @@ const props = defineProps<{
   controller: AppController
   readerVisible?: boolean
   nativeScroll?: boolean
+  onSelectionFinished?: (tab: TabState) => void
 }>()
 
 const el = ref<HTMLElement | null>(null)
@@ -24,6 +25,8 @@ const historyNotice = (text: string) => { if (!props.tab.closed) props.tab.notic
 let hostViewport: HostTerminalViewport | null = null
 let viewportBarrier: Promise<void> = Promise.resolve()
 let viewportTicket = 0
+let selecting = false
+let selectionTimer: ReturnType<typeof setTimeout> | undefined
 function viewportEnabled(): boolean {
   return !!props.nativeScroll && !nativeReader && props.active && props.readerVisible !== false && props.tab.runtime
     && props.tab.status === 'live' && props.tab.key === props.controller.activeKey.value && !document.hidden && !disposed
@@ -58,6 +61,17 @@ function fitAndReport(): void {
 
 function focusOnPointer(event: PointerEvent): void {
   if (!nativeReader && props.active && props.tab.status === 'live' && event.button === 0) props.tab.term?.focus()
+  if (props.onSelectionFinished && props.active && event.button === 0) selecting = true
+}
+
+function finishSelection(event: PointerEvent): void {
+  if (!selecting || event.button !== 0) return
+  selecting = false
+  clearTimeout(selectionTimer)
+  // xterm completes its selection in its own pointerup handler first.
+  selectionTimer = setTimeout(() => {
+    if (!disposed && props.active) props.onSelectionFinished?.(props.tab)
+  }, 0)
 }
 
 onMounted(() => {
@@ -69,6 +83,8 @@ onMounted(() => {
   props.controller.attachTerminal(props.tab, handle)
   if (props.active) handle.focus()
   document.addEventListener('visibilitychange', syncViewport)
+  window.addEventListener('pointerup', finishSelection)
+  window.addEventListener('pointercancel', finishSelection)
   syncViewport()
 
   observer = new ResizeObserver(() => fitAndReport())
@@ -90,6 +106,9 @@ onBeforeUnmount(() => {
   disposed = true
   syncViewport()
   document.removeEventListener('visibilitychange', syncViewport)
+  window.removeEventListener('pointerup', finishSelection)
+  window.removeEventListener('pointercancel', finishSelection)
+  clearTimeout(selectionTimer)
   observer?.disconnect()
   observer = null
   // The controller disposes the handle on tab close; guard anyway.

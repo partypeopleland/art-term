@@ -15,6 +15,8 @@ import TerminalPane from '../shared/components/TerminalPane.vue'
 import PreviewPanel from '../shared/components/PreviewPanel.vue'
 import PreviewZoom from '../shared/components/PreviewZoom.vue'
 import { useWorkspaceSize } from '../shared/components/workspace-size'
+import { readClipboardText, writeClipboardText } from '../shared/transport/clipboard'
+import { createDesktopClipboard } from './clipboard'
 
 const props = defineProps<{ transport: Transport; terminalFactory?: TerminalFactory; controllerOptions?: ControllerOptions }>()
 const controller: AppController = createAppController(props.transport, { ...props.controllerOptions, closeFinishedTabs: true, backgroundConnection: 'keep' })
@@ -35,6 +37,20 @@ const workspace = ref<HTMLElement | null>(null)
 const sizing = useWorkspaceSize(workspace)
 const { sidebarWidth, previewHeight, maxWidth, maxHeight } = sizing
 const documentHidden = ref(document.hidden)
+const clipboardNotice = ref('')
+let clipboardNoticeTimer: ReturnType<typeof setTimeout> | undefined
+function showClipboardNotice(message: string): void {
+  clipboardNotice.value = message
+  clearTimeout(clipboardNoticeTimer)
+  clipboardNoticeTimer = setTimeout(() => { clipboardNotice.value = '' }, 3000)
+}
+const clipboard = createDesktopClipboard({
+  activeTab: () => terminalVisible.value ? activeTab.value : null,
+  readText: readClipboardText,
+  writeText: writeClipboardText,
+  send: (tab, text) => controller.sendInput(tab, text),
+  notice: showClipboardNotice
+})
 const runtimeConnected = computed(() => runtimeConnectedIds(controller.tabs))
 const covered = computed(() => screenPickerOpen.value)
 const terminalVisible = computed(() => page.value === 'workspace' && !covered.value && !documentHidden.value)
@@ -88,6 +104,7 @@ function onGlobalKey(event: KeyboardEvent): void {
   if (page.value !== 'workspace' || covered.value || documentHidden.value) return
   const target = event.target instanceof HTMLElement ? event.target : null
   if (target?.closest('input,select,[contenteditable=true]') || (target?.closest('textarea') && !target.closest('.xterm'))) return
+  if (target?.closest('.xterm') && clipboard.handleKey(event)) return
   controller.handleKey(event)
 }
 function visibility(): void {
@@ -96,7 +113,7 @@ function visibility(): void {
   void controller.setHidden(document.hidden)
 }
 onMounted(() => { window.addEventListener('keydown', onGlobalKey, true); document.addEventListener('visibilitychange', visibility); void controller.loadCatalog(); void controller.loadInstanceDesktops() })
-onBeforeUnmount(() => { window.removeEventListener('keydown', onGlobalKey, true); document.removeEventListener('visibilitychange', visibility); controller.dispose() })
+onBeforeUnmount(() => { window.removeEventListener('keydown', onGlobalKey, true); document.removeEventListener('visibilitychange', visibility); clearTimeout(clipboardNoticeTimer); controller.dispose() })
 const statusText = computed(() => !activeTab.value ? '未連線' : activeTab.value.status === 'live' ? '已連線' : activeTab.value.status === 'connecting' ? '連線中…' : activeTab.value.status === 'exited' ? '已結束' : `錯誤：${activeTab.value.errorMsg}`)
 </script>
 
@@ -131,8 +148,9 @@ const statusText = computed(() => !activeTab.value ? '未連線' : activeTab.val
         </div>
         <div class="desktop-session-content">
           <div class="term-area">
-            <TerminalPane v-for="tab in controller.tabs" :key="tab.key" :tab="tab" :active="terminalVisible && tab.key === controller.activeKey.value" :controller="controller" :reader-visible="terminalVisible && tab.key === controller.activeKey.value" native-scroll />
+            <TerminalPane v-for="tab in controller.tabs" :key="tab.key" :tab="tab" :active="terminalVisible && tab.key === controller.activeKey.value" :controller="controller" :reader-visible="terminalVisible && tab.key === controller.activeKey.value" :on-selection-finished="clipboard.selectionFinished" native-scroll />
             <div v-if="!controller.tabs.length" class="empty">從左側選擇連線，開始工作。</div>
+            <div v-if="clipboardNotice" class="clipboard-toast" data-testid="clipboard-toast" role="status">{{ clipboardNotice }}</div>
           </div>
         </div>
       </section>
@@ -149,6 +167,7 @@ const statusText = computed(() => !activeTab.value ? '未連線' : activeTab.val
 <style scoped>
 .windows-app { position: relative; overflow: hidden; }
 .desktop-workspace { display: flex; height: 100%; min-height: 0; }
+.clipboard-toast { position: absolute; z-index: 4; left: 50%; bottom: 48px; transform: translateX(-50%); pointer-events: none; padding: 8px 14px; border: 1px solid var(--border); border-radius: 8px; color: var(--text); background: var(--bg-panel); box-shadow: 0 4px 16px #0005; font-size: 13px; }
 .desktop-sidebar { flex: none; min-width: 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; background: var(--bg-panel); }
 .desktop-sidebar .desktop-main-page { flex: 1; min-height: 0; height: auto; padding: 12px 8px; margin: 0; overflow-x: hidden; overflow-y: auto; }
 .desktop-sidebar .desktop-page-heading { margin-bottom: 16px; }

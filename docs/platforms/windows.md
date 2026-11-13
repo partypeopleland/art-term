@@ -29,7 +29,9 @@ Windows App
 
 設定預設放 EXE 旁，或以 `art-term-gui.exe --config C:/art-term-private/connections.toml` 指定可寫路徑。缺檔正常顯示空清單，不嵌入私人預設資料。沒有 Screen 保存 schema 5，有 Screen 保存 schema 6；首次桌面保存前私有備份與降版方式見[設定](../refarch/connections.md)。
 
-切頁用 Alt+[／Alt+] 或 Ctrl+PageUp／PageDown；Ctrl+V 遵守 bracketed-paste，Ctrl+C 由遠端解讀。表單輸入不被終端快捷鍵攔截，關頁／關窗只做本機 detach。點終端 HTTP(S) 網址會開啟系統預設瀏覽器；即時畫面與歷史均可使用，拖曳選取不會開啟網址。終端在設定／首頁遮蓋時仍繼續處理輸出，回工作區後重新 fit／focus，不重開連線。
+切頁用 Alt+[／Alt+] 或 Ctrl+PageUp／PageDown。終端聚焦時 Alt+C 複製選取文字、Alt+V 貼上剪貼簿純文字；滑鼠反白放開後也會自動複製並短暫顯示「已複製」。Ctrl+C 一律交給遠端作中斷，Ctrl+V 不作為本功能的貼上鍵。Alt+C／Alt+V 因此不再傳到遠端作 Meta 快捷鍵。貼上需授權桌面 App 讀取本機文字剪貼簿；Android 仍只有寫入權限。
+
+遠端啟用 bracketed paste 時，多行文字透過其框架送入，不額外送 Enter。未啟用時，對每個換行先送 Readline 的 Ctrl+V 字面插入鍵，再送原換行；已在 Bash/Readline 驗證貼上當下不執行，仍需由使用者另按 Enter。這是 Shell 專用相容方法，其他遠端程式可能不支援相同按鍵，不能保證都不執行。表單輸入不被終端快捷鍵攔截，關頁／關窗只做本機 detach。點終端 HTTP(S) 網址會開啟系統預設瀏覽器；即時畫面與歷史均可使用，拖曳選取不會開啟網址。終端在設定／首頁遮蓋時仍繼續處理輸出，回工作區後重新 fit／focus，不重開連線。
 
 Windows 的即時畫面與歷史使用同一個 xterm 視窗。上捲時，受控端沿原連線呈現較早內容；向下捲到底便自然接續最新輸出，不切換閱讀畫面、不改變字型或亮度，也沒有「返回即時」按鈕。文字選取、複製、連結與全站主題都由原終端處理。
 

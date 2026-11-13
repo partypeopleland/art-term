@@ -1,2 +1,2 @@
-// Only clipboard writes are granted to the local app; no clipboard reads.
-export { writeText as writeClipboardText } from '@tauri-apps/plugin-clipboard-manager'
+// Desktop grants read-text for explicit terminal paste; Android keeps write-only.
+export { readText as readClipboardText, writeText as writeClipboardText } from '@tauri-apps/plugin-clipboard-manager'
