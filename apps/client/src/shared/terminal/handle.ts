@@ -18,6 +18,8 @@ export interface TerminalHandle {
   readonly rows: number
   /** Whether xterm currently has remote bracketed paste mode enabled. */
   bracketedPasteMode?(): boolean
+  /** xterm's logical selection omits line wraps but retains real newlines. */
+  getSelection?(): string
   readStyledText?(window?: NativeBufferWindow): NativeTerminalBuffer
   setNativeReaderActive?(active: boolean): void
   /** Resolves when xterm has parsed the chunk (write-callback backpressure). */
@@ -184,6 +186,7 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
       return term.rows
     },
     bracketedPasteMode: () => term.modes.bracketedPasteMode,
+    getSelection: () => term.getSelection(),
     readStyledText: window => projection?.read(window) ?? { records: [], supported: false },
     setNativeReaderActive(active) {
       if (!mobileScroll || terminalDisposed) return
