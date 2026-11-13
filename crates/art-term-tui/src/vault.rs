@@ -31,6 +31,19 @@ const METADATA_BYTES: usize = METADATA_HEADER + KEY_BYTES + TAG_BYTES;
 const RECORD_HEADER: usize = RECORD_MAGIC.len() + NONCE_BYTES;
 const CONFIG_LIMIT: u64 = 1024 * 1024;
 
+struct VaultLock {
+    file: File,
+    owner_pid: u32,
+}
+
+impl Drop for VaultLock {
+    fn drop(&mut self) {
+        if self.owner_pid == std::process::id() {
+            let _ = self.file.unlock();
+        }
+    }
+}
+
 pub(crate) struct VaultPaths {
     config: PathBuf,
     metadata: PathBuf,
@@ -101,14 +114,17 @@ impl VaultPaths {
         })
     }
 
-    fn acquire(&self) -> Result<Arc<File>, ApiError> {
+    fn acquire(&self) -> Result<Arc<VaultLock>, ApiError> {
         writable_parent(&self.config)?;
         let lock = private_file(&self.lock, true)?;
         if lock.metadata().map_err(|_| ApiError::Storage)?.len() != 0 {
             return Err(ApiError::Storage);
         }
         lock.try_lock().map_err(|_| ApiError::Storage)?;
-        Ok(Arc::new(lock))
+        Ok(Arc::new(VaultLock {
+            file: lock,
+            owner_pid: std::process::id(),
+        }))
     }
 }
 
@@ -232,7 +248,7 @@ fn install_metadata(path: &Path, bytes: &[u8]) -> Result<(), ApiError> {
 
 struct TtyCipher {
     key: Zeroizing<[u8; KEY_BYTES]>,
-    _lock: Arc<File>,
+    _lock: Arc<VaultLock>,
 }
 
 impl TtyCipher {
@@ -328,7 +344,7 @@ impl Vault {
     fn load(
         paths: VaultPaths,
         key: Zeroizing<[u8; KEY_BYTES]>,
-        lock: Arc<File>,
+        lock: Arc<VaultLock>,
     ) -> Result<Self, ApiError> {
         let store = HostStore::load(paths.config, Arc::new(TtyCipher { key, _lock: lock }))
             .map_err(|_| ApiError::Storage)?;
@@ -354,7 +370,7 @@ mod tests {
         tempfile::Builder::new()
             .prefix("art-term-vault-")
             .permissions(fs::Permissions::from_mode(0o700))
-            .tempdir_in("/tmp")
+            .tempdir_in(std::env::temp_dir())
             .unwrap()
     }
 
@@ -369,7 +385,10 @@ mod tests {
     fn cipher(value: u8) -> TtyCipher {
         TtyCipher {
             key: Zeroizing::new([value; KEY_BYTES]),
-            _lock: Arc::new(tempfile::tempfile().unwrap()),
+            _lock: Arc::new(VaultLock {
+                file: tempfile::tempfile().unwrap(),
+                owner_pid: std::process::id(),
+            }),
         }
     }
 
@@ -736,7 +755,70 @@ mod tests {
     #[ignore = "Invoked by the cross-process lock test with its private path"]
     fn lock_probe() {
         let path = PathBuf::from(std::env::var_os("ART_TERM_TEST_VAULT_LOCK_PROBE").unwrap());
-        assert!(path.starts_with("/tmp") && path.to_string_lossy().contains("art-term-vault-"));
+        assert!(
+            path.starts_with(std::env::temp_dir())
+                && path.to_string_lossy().contains("art-term-vault-")
+        );
         assert!(private_file(&path, false).unwrap().try_lock().is_err());
+    }
+    struct InheritedLockChild {
+        release: std::os::unix::net::UnixStream,
+        pid: libc::pid_t,
+    }
+
+    impl InheritedLockChild {
+        fn spawn() -> Self {
+            use std::os::fd::AsRawFd;
+            let (waiting, release) = std::os::unix::net::UnixStream::pair().unwrap();
+            let waiting_fd = waiting.as_raw_fd();
+            let release_fd = release.as_raw_fd();
+            // SAFETY: the child only calls async-signal-safe functions before _exit.
+            let pid = unsafe { libc::fork() };
+            assert!(pid >= 0);
+            if pid == 0 {
+                // SAFETY: these are valid inherited socket descriptors and byte storage.
+                unsafe {
+                    libc::close(release_fd);
+                    let mut byte = 0_u8;
+                    while libc::read(waiting_fd, (&mut byte as *mut u8).cast(), 1) < 0 {}
+                    libc::_exit(0);
+                }
+            }
+            Self { release, pid }
+        }
+    }
+
+    impl Drop for InheritedLockChild {
+        fn drop(&mut self) {
+            let _ = self.release.write_all(&[1]);
+            loop {
+                // SAFETY: pid identifies the child created by this guard.
+                let result = unsafe { libc::waitpid(self.pid, std::ptr::null_mut(), 0) };
+                if result >= 0
+                    || std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted
+                {
+                    break;
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn dropped_owner_does_not_leave_inherited_child_lock() {
+        let root = directory();
+        let vault = Vault::open_account(paths(root.path())).unwrap();
+        let store = vault.store();
+        let child = InheritedLockChild::spawn();
+        drop(vault);
+        assert!(Vault::open_account(paths(root.path())).is_err());
+        drop(store);
+        let reopened = Vault::open_account(paths(root.path()));
+        // SAFETY: signal zero only checks the liveness of our unreaped child.
+        assert_eq!(unsafe { libc::kill(child.pid, 0) }, 0);
+        drop(child);
+        assert!(
+            reopened.is_ok(),
+            "the unrelated pre-exec child retained the released vault lock"
+        );
     }
 }
