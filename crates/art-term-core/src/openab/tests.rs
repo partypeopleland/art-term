@@ -499,24 +499,39 @@ fn development_mode_defaults_off_and_survives_connection_saves() {
         secret().expose()
     );
     let screen = reopened
-        .save_desktop(None, None, "Screen".into(), "https://screen.test/mcp".into(), Some(secret()))
+        .save_desktop(
+            None,
+            None,
+            "Screen".into(),
+            "https://screen.test/mcp".into(),
+            Some(secret()),
+        )
         .unwrap();
     assert!(reopened.development_mode().unwrap());
     let host = reopened.list().unwrap().remove(0);
     let payload = reopened
-        .export_snapshot(&[ExportSelection {
-            kind: TransferKind::Host,
-            id: host.id,
-            expected_revision: host.revision,
-        }], true, None)
+        .export_snapshot(
+            &[ExportSelection {
+                kind: TransferKind::Host,
+                id: host.id,
+                expected_revision: host.revision,
+            }],
+            true,
+            None,
+        )
         .unwrap();
     let preview = reopened.preview_import(payload).unwrap();
     let key = preview.entries[0].key.clone();
-    reopened.apply_import(preview, vec![ImportSelection {
-        key,
-        action: ImportAction::Update,
-        credential: None,
-    }]).unwrap();
+    reopened
+        .apply_import(
+            preview,
+            vec![ImportSelection {
+                key,
+                action: ImportAction::Update,
+                credential: None,
+            }],
+        )
+        .unwrap();
     assert!(reopened.development_mode().unwrap());
     assert_eq!(reopened.desktops().unwrap(), vec![screen]);
     reopened.set_development_mode(false).unwrap();
