@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-showKeyboard"
+description = "Enables the showKeyboard command without any pre-configured scope."
+commands.allow = ["showKeyboard"]
+
+[[permission]]
+identifier = "deny-showKeyboard"
+description = "Denies the showKeyboard command without any pre-configured scope."
+commands.deny = ["showKeyboard"]

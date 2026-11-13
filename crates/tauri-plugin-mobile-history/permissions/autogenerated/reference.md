@@ -9,6 +9,7 @@ Local terminal text projection, native touch events, and opening HTTP/S links in
 - `allow-update`
 - `allow-close`
 - `allow-keyboardStatus`
+- `allow-showKeyboard`
 - `allow-register-listener`
 - `allow-registerListener`
 - `allow-remove-listener`
@@ -227,6 +228,32 @@ Enables the remove_listener command without any pre-configured scope.
 <td>
 
 Denies the remove_listener command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`mobile-history:allow-showKeyboard`
+
+</td>
+<td>
+
+Enables the showKeyboard command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`mobile-history:deny-showKeyboard`
+
+</td>
+<td>
+
+Denies the showKeyboard command without any pre-configured scope.
 
 </td>
 </tr>
