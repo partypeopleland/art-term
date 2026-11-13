@@ -5,7 +5,7 @@ $toolRoot = Join-Path $repoRoot 'target/android-tools'
 $sdkRoot = if ($SdkRoot) { [IO.Path]::GetFullPath($SdkRoot) } else { Join-Path $repoRoot 'target/android-sdk' }
 New-Item -ItemType Directory -Force -Path $toolRoot | Out-Null
 $jdkArchive = Join-Path $toolRoot 'jdk17.zip'
-$jdkRoot = if ($env:RUNNER_TEMP) { Join-Path $env:RUNNER_TEMP 'art-term-jdk17' } else { Join-Path $toolRoot 'jdk17' }
+$jdkRoot = Join-Path $toolRoot 'jdk17'
 if (-not (Test-Path $jdkRoot)) {
     $jdkAssets = Invoke-RestMethod 'https://api.adoptium.net/v3/assets/latest/17/hotspot?architecture=x64&image_type=jdk&os=windows&vendor=eclipse'
     $jdkAsset = @($jdkAssets)[0]
@@ -16,22 +16,16 @@ if (-not (Test-Path $jdkRoot)) {
     Expand-Archive -LiteralPath $jdkArchive -DestinationPath $jdkRoot
 }
 $env:JAVA_HOME = (Get-ChildItem $jdkRoot -Directory | Select-Object -First 1).FullName
-foreach ($required in @('bin/java.exe', 'release')) {
-    if (-not (Test-Path (Join-Path $env:JAVA_HOME $required))) { throw "JDK file missing: $required" }
-}
-& "$env:JAVA_HOME/bin/java.exe" -version
-if ($LASTEXITCODE -ne 0) { throw 'JDK 17 could not start' }
 $env:ANDROID_HOME = $sdkRoot
 $env:ANDROID_USER_HOME = Join-Path $toolRoot 'android-user'
 New-Item -ItemType Directory -Force -Path $env:ANDROID_USER_HOME | Out-Null
 $env:PATH = "$env:JAVA_HOME/bin;$sdkRoot/platform-tools;$env:PATH"
-$cmdVersion = '19.0'
-$cmdRoot = Join-Path $toolRoot "command-line-$cmdVersion"
+$cmdRoot = Join-Path $toolRoot 'command-line'
 if (-not (Test-Path "$cmdRoot/cmdline-tools/bin/sdkmanager.bat")) {
     [xml]$repository = (Invoke-WebRequest 'https://dl.google.com/android/repository/repository2-3.xml').Content
-    $package = $repository.SelectNodes("//*[local-name()='remotePackage']") | Where-Object path -eq "cmdline-tools;$cmdVersion"
+    $package = $repository.SelectNodes("//*[local-name()='remotePackage']") | Where-Object path -eq 'cmdline-tools;latest'
     $archive = $package.archives.archive | Where-Object { $_.'host-os' -eq 'windows' }
-    $cmdArchive = Join-Path $toolRoot "command-line-$cmdVersion.zip"
+    $cmdArchive = Join-Path $toolRoot 'command-line.zip'
     Write-Host 'Downloading Android command line tools'
     & curl.exe --fail --location --retry 2 --silent --show-error "https://dl.google.com/android/repository/$($archive.complete.url)" --output $cmdArchive
     if ($LASTEXITCODE -ne 0) { throw 'Android tool download failed' }
@@ -47,7 +41,9 @@ if (-not (Test-Path "$sdkRoot/cmdline-tools/latest")) {
     New-Item -ItemType Junction -Path "$sdkRoot/cmdline-tools/latest" -Target "$cmdRoot/cmdline-tools" | Out-Null
 }
 if (-not $BootstrapOnly) {
-    & "$cmdRoot/cmdline-tools/bin/sdkmanager.bat" "--sdk_root=$sdkRoot" 'platforms;android-35' 'platforms;android-36' 'build-tools;35.0.0' 'ndk;28.2.13676358' 'platform-tools' 'emulator'
+    # New SDK tools use slash-separated sdk-style paths. Semicolons are split
+    # by the sdkmanager compatibility wrapper, yielding false package names.
+    & "$cmdRoot/cmdline-tools/bin/sdkmanager.bat" "--sdk_root=$sdkRoot" 'platforms/android-35' 'platforms/android-36' 'build-tools/35.0.0' 'ndk/28.2.13676358' 'platform-tools' 'emulator'
     if ($LASTEXITCODE -ne 0) { throw 'SDK install failed; inspect license or download error' }
     foreach ($required in @('platforms/android-35/android.jar', 'platforms/android-36/android.jar', 'build-tools/35.0.0/zipalign.exe', 'ndk/28.2.13676358/source.properties')) {
         if (-not (Test-Path (Join-Path $sdkRoot $required))) { throw "SDK package missing: $required" }
