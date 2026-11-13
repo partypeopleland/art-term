@@ -80,6 +80,26 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
   const fitAddon = new FitAddon()
   term.loadAddon(fitAddon)
   term.open(el)
+  if (!mobileScroll) el.classList.add('desktop-ime-wrap')
+  // xterm positions its composition view at the cursor and forces one line.
+  // Keep the original cursor column as the first-line indent while allowing
+  // an uncommitted IME preedit to wrap across the terminal width.
+  const compositionView = !mobileScroll ? el.querySelector<HTMLElement>('.composition-view') : null
+  const compositionTextarea = compositionView ? term.textarea : null
+  const compositionScreen = compositionView ? el.querySelector<HTMLElement>('.xterm-screen') : null
+  const syncCompositionWrap = () => {
+    if (!compositionView || !compositionScreen) return
+    compositionView.style.setProperty('--composition-start-x', compositionView.style.left || '0px')
+    const screenHeight = compositionScreen.clientHeight
+    if (!screenHeight) return
+    compositionView.style.maxHeight = `${screenHeight}px`
+    compositionView.style.transform = ''
+    const top = Number.parseFloat(compositionView.style.top) || 0
+    const visibleHeight = compositionView.getBoundingClientRect().height
+    compositionView.style.transform = `translateY(-${Math.max(0, top + visibleHeight - screenHeight)}px)`
+    compositionView.scrollTop = compositionView.scrollHeight
+  }
+  compositionTextarea?.addEventListener('compositionupdate', syncCompositionWrap)
   let disposeScroll = mobileScroll ? attachMobileScroll(el, term) : null
   let terminalDisposed = false
   const projection = mobileScroll ? createNativeBufferProjection(term) : null
@@ -192,6 +212,7 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
       try {
         fitAddon.fit()
         disposeScroll?.fit()
+        if (compositionView?.classList.contains('active')) syncCompositionWrap()
       } catch {
         // Element hidden or zero-sized; keep last stable size.
       }
@@ -219,6 +240,8 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
     },
     dispose() {
       terminalDisposed = true
+      el.classList.remove('desktop-ime-wrap')
+      compositionTextarea?.removeEventListener('compositionupdate', syncCompositionWrap)
       hostViewport = null
       replyObservers.forEach(observer => observer.dispose())
       projection?.dispose()

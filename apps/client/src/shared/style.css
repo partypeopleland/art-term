@@ -392,6 +392,23 @@ body,
   height: 100%;
 }
 
+/* xterm's IME preedit is normally a single line starting at the cursor. Give
+   it the screen width, indent only its first line, and keep long preedit text
+   visible above the bottom edge while the user is still choosing characters. */
+.term-host.desktop-ime-wrap .xterm-helpers { left: 0; right: 0; }
+.term-host.desktop-ime-wrap .composition-view.active {
+  left: 0 !important;
+  right: 0;
+  width: 100%;
+  height: auto !important;
+  box-sizing: border-box;
+  background: transparent;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-y: auto;
+  text-indent: var(--composition-start-x, 0px);
+}
+
 .overlay {
   position: absolute;
   inset: 0;
