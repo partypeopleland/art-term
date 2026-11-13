@@ -242,7 +242,9 @@ PY_RUNTIME
 
 `tls_terminated_upstream = true` 只適用於接下來確實建立的 TLS 入口，不表示可把 HTTP 裸露到 LAN。管理 credential 保存在 `0600` 檔案，由擁有者在自己的互動終端讀取並填入 App；不要貼到聊天、issue、日誌或版本庫。既有安裝不要重產 credential。
 
-準備與網址相符的 `server.crt`、`server.key`，放入 `$runtime`，private key 為 `0600`。網址使用 IP 時，憑證的 SAN 必須包含該 **IP address**；只填 CN 不足以通過檢查。正式連線使用 client 信任的 CA。開發自簽環境可在 art-term 的 **設定 → 連線設定 → 開發模式：略過伺服器憑證驗證** 勾選，連線仍使用 HTTPS／WSS 加密，但不驗證伺服器身分；預設關閉。不要把略過驗證當成沒有 TLS。
+準備 `server.crt`、`server.key`，放入 `$runtime`，private key 為 `0600`。正常驗證時，憑證須由 client 信任的 CA 簽發、在有效期內且符合網址；IP 網址須有對應的 **IP address SAN**，只填 CN 不足以通過檢查。client 使用內建 CA 清單，匯入 Windows 或瀏覽器的自建 CA 不會自動被 art-term 信任。
+
+Windows／Android 正式版可在 **設定 → 連線設定 → 開發模式：略過伺服器憑證驗證** 勾選，供自簽或 LAN IP 開發測試。此設定預設關閉並會保存，影響後續 Runtime HTTPS 管理請求與新建或重新 attach 的 WSS 連線；切換後重新連線即可套用，不需特別重做開發版。開啟時略過 CA、名稱與有效期檢查，因此不必讓 client 匯入自建 CA，也不必先取得公開 CA 憑證或符合網址的 SAN。入口仍須提供 TLS 憑證與私鑰，傳輸仍使用 HTTPS／WSS 加密與 token 授權，但不驗證伺服器身分，僅供開發使用。此開關不影響 Screen MCP，Ubuntu 終端機版目前仍使用正常驗證。完整範圍與保存方式見[開發模式設定](refarch/connections.md#runtime-開發模式)。
 
 建立下列兩個 user service。`%h` 與 `%u` 由 systemd 展開。這些範例使用上方固定的 `openab-pty-native` 目錄；若變更路徑，同步修改 unit 與設定。
 
@@ -330,7 +332,7 @@ WSL2 mirrored network 的這次驗證使用 **Host 上實際監聽 LAN IP 的程
 | 有提示符但「輸入未送出／送達尚未確認」 | 檢查歷史 helper 是否 ready，以及專用 manifest 的 owner、`600` 權限與 default ACL。不要盲目重送可能已執行的輸入。 |
 | helper 關閉 `4004` | 此次實例是 manifest `0664` 被拒絕；核對權限、檔案型別與對應 Runtime 身分，不把所有 `4004` 都視為同一原因。 |
 | 「無法恢復 Shell 的既有 Screen／Shell broker 查詢」 | 確認四個 `tools/` 檔完整，以相同帳號安裝。建立新 Shell 載入 supervisor；不必先安裝桌面。 |
-| HTTPS 憑證驗證失敗 | 核對 IP SAN／DNS、有效期及 client 信任來源；開發自簽環境使用明確的開發模式。 |
+| HTTPS 憑證驗證失敗 | 正常模式核對 IP SAN／DNS、有效期與內建 CA 信任鏈；Windows／Android 自簽測試可啟用開發模式後重新連線。只匯入作業系統 CA 不會改變 art-term 的信任清單。 |
 | localhost 可連、LAN 逾時 | 核對 Host listener、正常來源路徑與網路政策，尤其是 WSL。HTTP 入口與 PTY／輸入能力分別驗證。 |
 | 更新 helper 後仍顯示舊錯誤 | 保留工作資料，關閉舊分頁並建立新 Shell；不要為套用工具刪除全部工作。 |
 

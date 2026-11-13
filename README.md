@@ -38,6 +38,8 @@ Linux TUI, captured in a real terminal with fictional Host, Shell output, and Sc
 
 art-term connects through the Runtime's HTTPS API and WSS terminal protocol, independently of its installation method. Desktop preview is optional and needs a separately configured shared desktop with instance-mcp. Install any coding CLI you want to use in the remote Shell environment.
 
+Windows and Android include an opt-in development mode for self-signed Runtime certificates. It is off by default and skips server certificate verification for new Runtime connections while keeping HTTPS/WSS encryption and token authentication. See [TLS modes and connection prerequisites](docs/openab-host-setup.md#選擇-runtime-憑證驗證方式); this setting does not apply to Screen MCP or the Ubuntu terminal client.
+
 ## How the pieces connect
 
 ```text
