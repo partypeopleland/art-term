@@ -62,6 +62,7 @@ export class HostHistoryWindow {
   private closed = false
   private refreshing = false
   private lastRefresh = -Infinity
+  private refreshInterval = 500
   private lastKeep = -Infinity
   private acknowledged = ''
   private shown = ''
@@ -92,7 +93,7 @@ export class HostHistoryWindow {
       try { const p = this.page; const reply = await this.call({ op: 'keep', instance: p.instance, epoch: p.epoch }); if (reply.kind === 'error') this.error(reply) } catch { this.error() }
       return
     }
-    if (Date.now() - this.lastRefresh < 500) return
+    if (Date.now() - this.lastRefresh < this.refreshInterval) return
     this.lastRefresh = Date.now(); this.refreshing = true
     try {
       const reply = await this.call({ op: 'viewport' })
@@ -103,7 +104,8 @@ export class HostHistoryWindow {
           if (reply.error !== 'busy') this.resolved = true
           this.error(reply)
           if (reply.error === 'unsupported') { this.fallback = true; this.held = false }
-          if (!this.page && reply.error === 'unavailable') { this.unsupported = true; this.fallback = true }
+          if (reply.error !== 'busy' && reply.error !== 'unsupported') this.refreshInterval = Math.min(this.refreshInterval * 2, 30000)
+          if (!this.page && reply.error === 'unavailable') this.fallback = true
         }
         return
       }
@@ -114,11 +116,13 @@ export class HostHistoryWindow {
       this.windows.set(offered, reply)
       for (const key of this.windows.keys()) if (key !== offered && key !== shown) this.windows.delete(key)
       this.resolved = true
+      this.refreshInterval = 500
       if (!this.held) { this.page = reply; this.fallback = false }
     } catch {
       if (!this.closed) {
-        this.resolved = true; this.unsupported = true
-        this.notice('主機歷史連線中斷；目前畫面仍保留，請關閉分頁後再接回。')
+        this.resolved = true
+        this.refreshInterval = Math.min(this.refreshInterval * 2, 30000)
+        this.error()
         if (!this.page) this.fallback = true
       }
     } finally { this.refreshing = false }
