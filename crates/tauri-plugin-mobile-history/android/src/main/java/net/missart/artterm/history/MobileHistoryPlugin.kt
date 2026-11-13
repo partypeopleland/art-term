@@ -434,7 +434,7 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
                 override fun onTextContextMenuItem(id: Int): Boolean {
                     val handled = super.onTextContextMenuItem(id)
                     if (handled && id == android.R.id.copy) main.post {
-                        if (text === this) {
+                        if (this@MobileHistoryPlugin.text === this) {
                             clearTextSelection()
                             applyPendingPage()
                         }
