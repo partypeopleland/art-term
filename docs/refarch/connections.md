@@ -32,7 +32,7 @@ Windows 請放在可寫目錄。手動修改或刪除檔案前先關閉 App，�
 
 ## 連線與能力
 
-App 新增連線可選 Computers／Agents／Screens；前兩者保存 Host／Agent Runtime 設定，Screen 使用下節獨立模型。Runtime 表單填寫名稱、可信 HTTPS 根網址與管理憑證。最多 64 筆、整檔最多 1 MiB；名稱 1–128 UTF-8 bytes，不含控制字元；管理憑證最多 1024 UTF-8 bytes，不含空白／控制字元。origin（HTTPS 的 scheme、主機及 port 所組成的入口）不重複，不能有帳密、額外路徑、query 或 fragment，不支援略過 TLS 驗證。
+App 新增連線可選 Computers／Agents／Screens；前兩者保存 Host／Agent Runtime 設定，Screen 使用下節獨立模型。Runtime 表單填寫名稱、HTTPS 根網址與管理憑證。最多 64 筆、整檔最多 1 MiB；名稱 1–128 UTF-8 bytes，不含控制字元；管理憑證最多 1024 UTF-8 bytes，不含空白／控制字元。origin（HTTPS 的 scheme、主機及 port 所組成的入口）不重複，不能有帳密、額外路徑、query 或 fragment。憑證驗證預設開啟，Windows／Android 可明確啟用下方的開發模式。
 
 沒有 Screen 時 App 寫出的結構為 schema 5；以下為不含憑證的手寫範例：
 
@@ -59,6 +59,16 @@ metadata 直接來自這份 TOML。新增／編輯 Runtime 表單修改分類並
 Windows 與 Android 的「連線」頁統一列出 Computer、Agent、Screen，點右上新增圖示才展開共用表單，類型以一行 radio 選項呈現。操作結果在視窗上方顯示短暫提示，網址可換行顯示。拖曳把手或把手上的方向鍵可調整同類型內順序，不能跨類型；左側／Main 清單沿用保存順序。
 
 排序使用原有陣列順序，原子保存前核對目前來源及原本順序，失敗不更動記憶體。只排序，不更新 id、revision 或憑證密文，因此不使現有工作失效。TUI 沿用共用設定順序與顯示名稱，介面重設另行處理。
+
+## Runtime 開發模式
+
+Windows／Android 在 **設定 → 連線設定** 提供 **開發模式：略過伺服器憑證驗證**。這是正式版可用的本機設定，保存於唯一 `connections.toml` 的根欄位 `development_mode`，不是個別 Host 的 profile 欄位。預設與缺少欄位時均為 `false`；透過設定頁保存後，重新開啟 App 仍保留選擇。
+
+關閉時，Runtime HTTPS 與 WSS 使用程式內建的 CA 清單，驗證憑證鏈、網址主機名稱或 IP SAN，以及有效期。它不會因為使用者將自建 CA 匯入 Windows 或瀏覽器就自動信任該 CA。
+
+啟用時，後續 Runtime HTTPS 管理請求，以及新的 WSS attach／同 token 重新 attach，略過伺服器憑證的 CA、名稱與有效期檢查。已建立的 WSS 連線不變，下次 attach 時才套用。傳輸仍使用 HTTPS／WSS；TLS 握手簽章驗證、Runtime 管理憑證與 session token 授權，以及拒絕 redirect／環境 proxy 的規則均保留，不允許 HTTP／WS。連線仍加密，但不驗證伺服器身分，僅供自簽或 LAN IP 開發測試。
+
+此開關不作用於 Screen 的直接 MCP 連線，也未接入 Ubuntu 終端機版；後者目前仍走正常 Runtime 憑證驗證。測試建置的 fixture CA 是另一項機制，會加入指定測試根憑證並保留 TLS 驗證，不等於開發模式。
 
 ## 獨立 Screens 集合
 

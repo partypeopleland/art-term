@@ -28,7 +28,7 @@ settings + credential -> password-encrypted JSON -> unlock -> preview / select
 
 匯入依序為選檔、解鎖、預覽、勾選、一次套用。預覽顯示名稱／網址／類型；新項目含憑證時預設勾選。Host 依 canonical origin、Screen 依完整 canonical MCP URL 分別比對；相同網址預設略過，僅明確選擇才更新本機。若本機同類有多筆相同網址，該項只能略過，需先整理。同名而網址不同不會自動覆蓋。完成後回報新增／更新數；驗收需測試連線、Shell、已宣告的桌面，以及重開 App 後持久性。
 
-Windows 使用原生檔案視窗，Android 使用系統文件選擇器。新裝置仍須自行準備可達 Runtime 的網路／Tailnet 與可信 HTTPS。不含憑證的新項目要明確勾選並補入管理憑證或 Screen token；更新已有相同網址時可保留本機憑證。
+Windows 使用原生檔案視窗，Android 使用系統文件選擇器。新裝置仍須自行準備可達 Runtime 的網路及 HTTPS 入口；正常模式需通過憑證驗證，Windows／Android 的自簽開發環境可依[Runtime 開發模式](connections.md#runtime-開發模式)設定。此開關不影響 Screen MCP。不含憑證的新項目要明確勾選並補入管理憑證或 Screen token；更新已有相同網址時可保留本機憑證。
 
 匯入不啟動 coding CLI，也不恢復來源裝置的 Shell 分頁或接管 session。CLI 名稱、命令及參數會隨能力設定保存，使用者仍須在已連線的 Shell 明確按下啟動按鈕。匯入 Screen 只保存可供選擇的桌面設定，不替分頁選桌面，也不配置 Shell 工具；CLI 能力仍以明確設定為準。
 

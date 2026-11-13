@@ -33,10 +33,12 @@ Linux TUI, captured in a real terminal with fictional Host, Shell output, and Sc
 ## Get started
 
 1. Download the Windows ZIP, Android ARM64 APK, or Ubuntu x86_64 archive from [Releases](https://github.com/partypeopleland/art-term/releases/latest).
-2. Prepare a reachable [openab-pty Runtime](https://github.com/openabdev/openab-pty). Follow its upstream documentation for installation, images, and deployment.
+2. Prepare a reachable [openab-pty Runtime](https://github.com/openabdev/openab-pty). For a native Linux Host, follow the [Host installation guide](docs/openab-host-installation.md), including Python, private Node and tmux, the Shell broker helpers, and the required file permissions and ACL checks. Other deployment methods are covered by the upstream documentation.
 3. Add its HTTPS base URL and management credential in art-term, then create or select a Shell. See [connection prerequisites](docs/openab-host-setup.md), including the host helpers currently required to create new Shells.
 
 art-term connects through the Runtime's HTTPS API and WSS terminal protocol, independently of its installation method. Desktop preview is optional and needs a separately configured shared desktop with instance-mcp. Install any coding CLI you want to use in the remote Shell environment.
+
+Windows and Android include an opt-in development mode for self-signed Runtime certificates. It is off by default and skips server certificate verification for new Runtime connections while keeping HTTPS/WSS encryption and token authentication. See [TLS modes and connection prerequisites](docs/openab-host-setup.md#選擇-runtime-憑證驗證方式); this setting does not apply to Screen MCP or the Ubuntu terminal client.
 
 ## How the pieces connect
 
