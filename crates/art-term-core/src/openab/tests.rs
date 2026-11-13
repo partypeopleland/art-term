@@ -470,6 +470,85 @@ fn tls_snapshot(origin: String) -> super::profiles::HostSnapshot {
         credential: secret(),
     }
 }
+#[test]
+fn development_mode_defaults_off_and_survives_connection_saves() {
+    use super::profiles::{ExportSelection, ImportAction, ImportSelection, TransferKind};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("connections.toml");
+    let store = HostStore::load(path.clone(), Arc::new(FixtureCipher)).unwrap();
+    assert!(!store.development_mode().unwrap());
+    let host = store
+        .add("Local".into(), "https://127.0.0.1/".into(), secret())
+        .unwrap();
+    assert!(!store.development_mode().unwrap());
+    store.set_development_mode(true).unwrap();
+    store
+        .update(
+            &host.id,
+            host.revision,
+            "Renamed".into(),
+            host.base_url,
+            None,
+        )
+        .unwrap();
+    let reopened = HostStore::load(path, Arc::new(FixtureCipher)).unwrap();
+    assert!(reopened.development_mode().unwrap());
+    assert_eq!(reopened.list().unwrap()[0].name, "Renamed");
+    assert_eq!(
+        reopened.snapshot(&host.id).unwrap().credential.expose(),
+        secret().expose()
+    );
+    let screen = reopened
+        .save_desktop(None, None, "Screen".into(), "https://screen.test/mcp".into(), Some(secret()))
+        .unwrap();
+    assert!(reopened.development_mode().unwrap());
+    let host = reopened.list().unwrap().remove(0);
+    let payload = reopened
+        .export_snapshot(&[ExportSelection {
+            kind: TransferKind::Host,
+            id: host.id,
+            expected_revision: host.revision,
+        }], true, None)
+        .unwrap();
+    let preview = reopened.preview_import(payload).unwrap();
+    let key = preview.entries[0].key.clone();
+    reopened.apply_import(preview, vec![ImportSelection {
+        key,
+        action: ImportAction::Update,
+        credential: None,
+    }]).unwrap();
+    assert!(reopened.development_mode().unwrap());
+    assert_eq!(reopened.desktops().unwrap(), vec![screen]);
+    reopened.set_development_mode(false).unwrap();
+    assert!(!reopened.development_mode().unwrap());
+}
+
+#[tokio::test]
+async fn development_tls_accepts_local_certificates_over_ip() {
+    let body = br#"{"sessions":[],"draining":false}"#;
+    let (origin, server) = tls_server(
+        tls_identity("wrong.invalid", true),
+        tls_response(200, body, ""),
+    )
+    .await;
+    let list = AdminClient::with_development_mode(true)
+        .unwrap()
+        .list(&tls_snapshot(origin))
+        .await
+        .unwrap();
+    assert!(list.sessions.is_empty());
+    assert!(!server.await.unwrap().is_empty());
+
+    let (origin, server) =
+        wss_fixture(tls_identity("wrong.invalid", true), vec![wss_notice(0)], 0).await;
+    let handle =
+        super::session::SessionHandle::attach_development(tls_snapshot(origin), wss_grant(), 0, 1)
+            .await
+            .unwrap();
+    handle.shutdown().await;
+    server.await.unwrap();
+}
+
 #[tokio::test]
 async fn native_tls_validates_ca_hostname_expiry_before_authorization() {
     let identity = tls_identity("localhost", false);

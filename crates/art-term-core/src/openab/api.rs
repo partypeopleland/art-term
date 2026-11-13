@@ -203,7 +203,16 @@ impl AdminClient {
         .await
     }
     pub fn new() -> Result<Self, ApiError> {
-        let client = Self::secure_builder().build().map_err(network_error)?;
+        Self::with_development_mode(false)
+    }
+    pub fn with_development_mode(enabled: bool) -> Result<Self, ApiError> {
+        let builder = Self::secure_builder();
+        let builder = if enabled {
+            builder.use_preconfigured_tls(super::dev_tls::config())
+        } else {
+            builder
+        };
+        let client = builder.build().map_err(network_error)?;
         Ok(Self { client })
     }
     async fn request(

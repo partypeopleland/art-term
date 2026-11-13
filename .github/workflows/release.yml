@@ -5,6 +5,14 @@ on:
     tags:
       - 'v[0-9]*'
   workflow_dispatch:
+    inputs:
+      platform:
+        description: Platform to build
+        type: choice
+        default: all
+        options:
+          - all
+          - windows
 
 permissions:
   contents: read
@@ -19,7 +27,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [windows, android]
+        platform: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.platform == 'windows' && '["windows"]' || '["windows", "android"]') }}
     runs-on: windows-2022
     timeout-minutes: 90
     defaults:
@@ -150,6 +158,7 @@ jobs:
           if-no-files-found: error
 
   build-linux:
+    if: github.event_name != 'workflow_dispatch' || inputs.platform != 'windows'
     name: Build Linux TUI
     runs-on: ubuntu-24.04
     timeout-minutes: 45
