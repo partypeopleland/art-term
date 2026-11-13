@@ -18,6 +18,7 @@ import android.text.style.StyleSpan
 import android.text.style.UnderlineSpan
 import android.text.style.StrikethroughSpan
 import android.view.MotionEvent
+import android.view.inputmethod.InputMethodManager
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
@@ -235,6 +236,25 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
     @Command
     fun keyboardStatus(invoke: Invoke) {
         main.post { invoke.resolve(JSObject().apply { put("visible", keyboardVisible()) }) }
+    }
+    @Command
+    fun showKeyboard(invoke: Invoke) {
+        val args = invoke.parseArgs(ReaderArgs::class.java)
+        main.post {
+            val web = webView
+            if (args.readerId == readerId && pageVisible && web != null && web.isAttachedToWindow) {
+                web.requestFocus()
+                // JS has already focused xterm's textarea. Ask Android to show
+                // the IME after WebView receives the native focus transition.
+                web.post {
+                    if (args.readerId == readerId && pageVisible && web.hasFocus()) {
+                        val imm = activity.getSystemService(Activity.INPUT_METHOD_SERVICE) as InputMethodManager
+                        imm.showSoftInput(web, InputMethodManager.SHOW_IMPLICIT)
+                    }
+                }
+            }
+            invoke.resolve()
+        }
     }
     private fun dp(value: Int) = (value * activity.resources.displayMetrics.density).toInt()
     private fun send(kind: String, id: String = readerId, fill: JSObject.() -> Unit = {}) {

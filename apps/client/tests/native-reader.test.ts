@@ -20,7 +20,7 @@ function fixture(reject = false, historyRequest?: (value: Record<string, unknown
   }
   const bridge = {
     open: vi.fn(async (_value: NativeHistorySnapshot, cb: (e: NativeHistoryEvent) => void) => { receive = cb; if (reject) throw Error('unavailable') }),
-    update: vi.fn(async (_value: NativeHistorySnapshot) => {}), close: vi.fn(async () => {})
+    update: vi.fn(async (_value: NativeHistorySnapshot) => {}), close: vi.fn(async () => {}), showKeyboard: vi.fn(async () => {})
   }
   const wrapper = mount(NativeTerminalReader, { props: { terminal, visible: true }, attrs: { historyRequest }, global: { provide: { [NativeHistoryKey as symbol]: () => bridge } } })
   vi.spyOn(wrapper.element, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, width: 300, height: 500 } as DOMRect)
@@ -170,12 +170,16 @@ it('focuses only native taps for the active reader and never sends touch as term
   f.emit('tap', 'other-reader')
   f.emit('visibility')
   expect(f.terminal.focus).not.toHaveBeenCalled()
+  expect(f.bridge.showKeyboard).not.toHaveBeenCalled()
   f.emit('tap')
   expect(f.terminal.focus).toHaveBeenCalledTimes(1)
+  expect(f.bridge.showKeyboard).toHaveBeenCalledExactlyOnceWith(f.bridge.open.mock.calls[0][0].readerId)
+  expect(vi.mocked(f.terminal.focus).mock.invocationCallOrder[0]).toBeLessThan(f.bridge.showKeyboard.mock.invocationCallOrder[0])
   expect(f.terminal.write).not.toHaveBeenCalled()
   await f.wrapper.setProps({ visible: false }); await flushPromises()
   f.emit('tap')
   expect(f.terminal.focus).toHaveBeenCalledTimes(1)
+  expect(f.bridge.showKeyboard).toHaveBeenCalledTimes(1)
   expect(f.bridge.update.mock.calls.at(-1)?.[0]).toMatchObject({ visible: false, records: f.records })
   expect(f.terminal.setNativeReaderActive).toHaveBeenLastCalledWith(false)
 })

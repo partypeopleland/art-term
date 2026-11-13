@@ -29,7 +29,10 @@ function event(value: NativeHistoryEvent): void {
     return
   }
   // Native tap is deliberately the only touch event that can focus input.
-  if (value.kind === 'tap' && props.visible && !document.hidden) props.terminal?.focus()
+  if (value.kind === 'tap' && props.visible && !document.hidden && props.terminal) {
+    props.terminal.focus()
+    void native?.showKeyboard(readerId).catch(() => {})
+  }
   if (value.kind === 'visibility') void sync()
   if (remote?.visiblePage && props.visible && !document.hidden) {
     if (value.kind === 'reading') { remote.hold(value.sourceEpoch); void sync(); return }
