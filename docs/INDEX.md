@@ -7,6 +7,7 @@
 | 任務／問題 | 先讀 |
 |---|---|
 | 來源目錄、共用與平台邊界、信任邊界、資料流 | [架構](refarch/architecture.md) |
+| 控制器拆分、UI 與 GUI session 的模組責任及測試保護 | [控制模組責任邊界](refarch/controller-module-boundaries.md) |
 | 唯一 TOML、欄位、能力、舊版相容 | [連線設定](refarch/connections.md) |
 | Host／Agent 分類、Shell 選擇、ACK、重連 | [連線與工作生命週期](refarch/sessions.md) |
 | tmux 保存歷史、上捲分頁、主機支援檔 | [終端歷史](refarch/terminal-history.md) |
