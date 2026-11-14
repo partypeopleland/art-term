@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend typecheck and tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: apps/client/package-lock.json
+
+      - name: Install dependencies
+        run: npm --prefix apps/client ci
+
+      - name: Typecheck
+        run: npm --prefix apps/client run typecheck
+
+      - name: Test
+        run: npm --prefix apps/client test
+
+  rust:
+    # 範圍：不依賴 Tauri／WebView 系統套件的 core 與 Linux TUI。
+    # GUI 與 Android 外掛 crate 由發版流程建置，這裡不涵蓋。
+    name: Rust core and TUI tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Rust
+        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ci-linux
+
+      - name: Test
+        run: cargo test --locked -p art-term-core -p art-term-tui
