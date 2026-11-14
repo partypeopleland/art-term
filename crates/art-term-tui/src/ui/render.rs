@@ -882,7 +882,7 @@ pub(super) fn draw_fields(
     let block = panel(title);
     let inner = block.inner(rect);
     frame.render_widget(block, rect);
-    let field_height = if inner.height >= fields.len() as u16 * 3 + 1 {
+    let field_height = if inner.height > fields.len() as u16 * 3 {
         3
     } else {
         1

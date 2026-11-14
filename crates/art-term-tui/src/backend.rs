@@ -132,7 +132,7 @@ pub(crate) enum OpenShell {
         host: HostSelection,
     },
     Attach {
-        selection: ShellSelection,
+        selection: Box<ShellSelection>,
         confirmed: bool,
     },
 }
@@ -545,10 +545,12 @@ impl Backend {
             label,
             handle,
             size,
-            self.inner.store.clone(),
-            self.inner.api.clone(),
-            self.inner.connector.clone(),
-            ownership,
+            tab::SpawnDeps {
+                store: self.inner.store.clone(),
+                api: self.inner.api.clone(),
+                connector: self.inner.connector.clone(),
+                ownership,
+            },
         );
         self.inner
             .tabs

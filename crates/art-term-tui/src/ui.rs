@@ -111,7 +111,7 @@ enum TreeAction {
     NewScreen,
     NewShell(HostSelection),
     Refresh(HostSelection),
-    Shell(HostSelection, ShellView),
+    Shell(HostSelection, Box<ShellView>),
     Screen(usize),
     Host(usize),
 }
@@ -261,7 +261,7 @@ impl HostForm {
             previous: host.map(HostSelection::from),
             category: host
                 .and_then(|h| h.metadata.as_ref())
-                .map(|m| m.category.clone())
+                .map(|m| m.category)
                 .unwrap_or(art_term_core::connections::Category::Host),
             fields: [
                 Field::new(
@@ -367,7 +367,7 @@ enum JobResult {
     ScreenSaved(crate::backend::Result<ScreenSelection>),
     Deleted(crate::backend::Result<()>),
     Tested(crate::backend::Result<usize>),
-    Opened(crate::backend::Result<TabClient>),
+    Opened(crate::backend::Result<Box<TabClient>>),
     RemoteDeleted(crate::backend::Result<()>),
     Preview(crate::backend::Result<ImportView>),
     Imported(crate::backend::Result<crate::backend::ImportSummary>),

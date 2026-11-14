@@ -298,7 +298,7 @@ impl App {
                 }
             }
             Some(TreeAction::Shell(_, shell)) => {
-                self.show_modal(Modal::Confirm(Confirm::DeleteShell(shell)))
+                self.show_modal(Modal::Confirm(Confirm::DeleteShell(*shell)))
             }
             _ => {
                 if let Some(h) = self.host() {
@@ -312,7 +312,12 @@ impl App {
             let backend = self.backend.clone();
             let size = self.size;
             self.job(async move {
-                JobResult::Opened(backend.open(OpenShell::Create { host }, size).await)
+                JobResult::Opened(
+                    backend
+                        .open(OpenShell::Create { host }, size)
+                        .await
+                        .map(Box::new),
+                )
             });
         } else {
             self.status = "請先選擇或新增主機。".into();
