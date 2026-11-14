@@ -269,7 +269,7 @@ impl From<SessionError> for SessionFailure {
 }
 type Reply<T> = Result<T, SessionFailure>;
 #[path = "runtime_sessions/history.rs"]
-mod history;
+mod session_history;
 #[path = "runtime_sessions/instance.rs"]
 mod instance;
 #[path = "runtime_sessions/lifecycle.rs"]
