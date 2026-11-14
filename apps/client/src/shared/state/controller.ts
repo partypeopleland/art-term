@@ -1,10 +1,13 @@
 import { computed, markRaw, reactive, ref } from 'vue'
-import type { ComputedRef, Ref } from 'vue'
 import { asConnectionError } from '../transport/types'
 import { hostErrorText } from '../transport/host-error'
+import { connErrText, errText, KIND_FALLBACK, RUNTIME_TERMINAL_KINDS, sleep } from './controller-errors'
+import { createPreviewController } from './controller-preview'
+import { createTerminalIo } from './controller-terminal-io'
+import type { AppController, ControllerOptions, HostUiState, TabState } from './controller-types'
+export type { AppController, ControllerOptions, HostUiState, ShotState, TabState, TabStatus } from './controller-types'
 import type {
   InstanceDesktop,
-  HostDto,
   OutputDto,
   RuntimeHostDto,
   TargetDto,
@@ -16,193 +19,7 @@ import type { HostHistoryReply, HostHistoryRequest } from '../terminal/native'
 export const MAX_TABS = 32
 export const MAX_RUNTIME_PROFILES = 64
 export const AUTO_CAPTURE_MS = 30_000
-const WRITE_CAP = 256 * 1024
-const WRITE_CHUNK = 16 * 1024
 const DEFAULT_IDLE_POLL_MS = 20
-
-export type TabStatus = 'connecting' | 'live' | 'exited' | 'error'
-
-export interface ShotState {
-  src: string
-  source: string
-  capturedAt: number
-}
-
-export interface TabState {
-  /** Stable key; target identity for reuse. */
-  key: string
-  targetId: string
-  hostId: string
-  hostLabel: string
-  label: string
-  status: TabStatus
-  errorMsg: string
-  notice: string
-  sessionId: string | null
-  remoteSession: string
-  runtime: boolean
-  /**
-   * This tab's runtime Host profile is bound to a declared runtime_agents
-   * entry (backend metadata, exact configured origin match — never a
-   * label guess). Lifecycle-terminal runtime kinds retire the tab instead
-   * of leaving a dead reconnect target: no automatic rebind to a
-   * replacement runtime, pending input/resize die with the tab.
-   */
-  runtimeAgent: boolean
-  exitCode: number | null
-  instanceDesktop?: InstanceDesktop | null
-  instanceToolReady?: boolean
-  desktopAvailable: boolean
-  desktopEnabled: boolean
-  desktopBusy: boolean
-  desktopMsg: string
-  desktopError: string
-  previewVisible: boolean
-  shot: ShotState | null
-  shotError: string
-  captureGen: number
-  /** Internal, markRaw'd once attached. */
-  term: TerminalHandle | null
-  wantDesktop: boolean
-  closed: boolean
-  writeBuf: number[]
-  writing: boolean
-  writeDropped: boolean
-  pendingSize: { rows: number; cols: number } | null
-  resizing: boolean
-  lastSize: { rows: number; cols: number } | null
-  connectionGen: number
-}
-
-export interface HostUiState {
-  dto: HostDto
-  expanded: boolean
-}
-
-export interface ControllerOptions {
-  idlePollMs?: number
-  autoCaptureMs?: number
-  backgroundConnection?: 'detach' | 'keep'
-  /** Mobile returns to target selection when the remote Shell exits. */
-  closeFinishedTabs?: boolean
-}
-
-export interface AppController {
-  historyRequest(tab: TabState, request: HostHistoryRequest): Promise<HostHistoryReply>
-  catalogLoading: Ref<boolean>
-  /** Saved runtime Host metadata (local protected-store snapshot only —
-   *  never a session target and no credential material). */
-  runtimeProfiles: Ref<RuntimeHostDto[]>
-  /** Safe fixed-mapping text for a failed local profile read; '' when ok. */
-  runtimeProfilesError: Ref<string>
-  instanceDesktops: Ref<InstanceDesktop[]>
-  instanceDesktopsError: Ref<string>
-  loadInstanceDesktops(): Promise<void>
-  selectInstance(tab: TabState, desktop: InstanceDesktop): Promise<void>
-  clearInstance(tab: TabState): Promise<void>
-  tabs: TabState[]
-  activeKey: Ref<string | null>
-  activeTab: ComputedRef<TabState | null>
-  uiNotice: Ref<string>
-  /** Monotonic signal: a retired runtime tab closed and the profile list
-   *  was refreshed; the mobile shell surfaces the target selection list.
-   *  Increment-only — works even when other tabs stay open; no payload
-   *  is ever attached. */
-  selectionRequest: Ref<number>
-  loadCatalog(): Promise<void>
-  refreshTargets(): Promise<void>
-  openTarget(host: HostUiState, target: TargetDto, withDesktop: boolean): void
-  attachTerminal(tab: TabState, handle: TerminalHandle): void
-  reopenTab(tab: TabState, withDesktop: boolean): void
-  closeTab(tab: TabState): Promise<void>
-  detachTab(tab: TabState): Promise<void>
-  setHidden(hidden: boolean): Promise<void>
-  setActive(key: string): void
-  stepTab(delta: number): void
-  isSwitchKey(e: KeyboardEvent): boolean
-  handleKey(e: KeyboardEvent): boolean
-  sendInput(tab: TabState, text: string): void
-  requestResize(tab: TabState, rows: number, cols: number): void
-  setDesktop(tab: TabState, enabled: boolean): Promise<void>
-  setPreviewVisible(tab: TabState, visible: boolean): void
-  manualCapture(): void
-  dispose(): void
-}
-
-const textEncoder = new TextEncoder()
-
-function errText(e: unknown): string {
-  const msg = e instanceof Error ? e.message : String(e)
-  const oneLine = msg.replace(/\s+/g, ' ').trim()
-  return oneLine.length > 300 ? `${oneLine.slice(0, 300)}…` : oneLine
-}
-
-/** Kind → frontend-safe Chinese fallback when the backend message is empty. */
-const KIND_FALLBACK: Record<string, string> = {
-  upgradeRequired: '主機 runtime 需要升級',
-  replacement: '遠端 runtime 或 Shell 已更換，請重新選擇',
-  ttlExpired: '遠端 Shell 已到期',
-  takenOver: '此 Shell 已由另一個連線接管',
-  renewed: '此 Shell 的連線憑證已更新',
-  operatorKilled: '遠端 Shell 已被管理者結束',
-  exited: '遠端 Shell 已結束',
-  missing: '遠端 Shell 已不存在',
-  slowConsumer: '輸出佇列已滿，請重新連線',
-  retryExhausted: '自動重連次數已用完，請手動重新連線',
-  busy: '連線操作正在進行，請稍後再試',
-  cancelled: '本機已中斷連線',
-  inputUncertain: '輸入是否送達尚未確認，未自動重送',
-  internal: '遠端 runtime 發生內部錯誤',
-  gatewayUnavailable: '主機入口暫時無法連到服務，請檢查主機服務與轉送設定後重試',
-  protocol: '遠端 runtime 資料格式不符',
-  auth: 'Shell 認證被拒絕',
-  tls: 'WSS 憑證驗證失敗',
-  capacity: '連線佇列或 runtime 容量已達上限',
-  throttled: '主機暫時限制請求，請稍後重試',
-  transport: '無法連線到目標，請檢查網路',
-  timeout: 'Shell 連線中斷或逾時，請確認網路後重新連線',
-  target: '目標無法使用或不存在',
-  stateChanged: '連線設定已變更，請重新整理後再試'
-}
-
-/**
- * Runtime lifecycle-terminal kinds for a declared runtime-agent tab —
- * the backend SessionError camelCase serialization. For these kinds the
- * issued binding can never be reused and an automatic reconnect would
- * silently reach a different runtime, so the tab retires with a catalog
- * refresh and a manual-reselect notice instead.
- */
-const RUNTIME_TERMINAL_KINDS = new Set([
-  'replacement',
-  'missing',
-  'exited',
-  'ttlExpired',
-  'takenOver',
-  'renewed',
-  'operatorKilled',
-  'stateChanged'
-])
-
-/**
- * Display text for any session rejection: a structured ConnectionError
- * keeps its sanitized backend message (never "[object Object]"), with a
- * per-kind Chinese fallback; anything else is flattened by errText.
- */
-function connErrText(e: unknown): string {
-  const conn = asConnectionError(e)
-  if (conn) {
-    const msg = conn.message.replace(/\s+/g, ' ').trim()
-    return (msg.length > 300 ? `${msg.slice(0, 300)}…` : msg) ||
-      KIND_FALLBACK[conn.kind] || '連線失敗'
-  }
-  return errText(e)
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
-const SAFE_IMAGE_MIME = /^image\/(png|jpeg|webp|gif|bmp)$/i
 
 export function createAppController(
   transport: Transport,
@@ -598,111 +415,9 @@ export function createAppController(
     }
   }
 
-  const replyQueues = new WeakMap<TabState, { sid: string; generation: number; bytes: number[]; writing: boolean }>()
-  function sendTerminalReply(tab: TabState, text: string): void {
-    if (disposed || tab.closed || tab.status !== 'live' || !tab.sessionId) return
-    let queue = replyQueues.get(tab)
-    if (!queue || queue.sid !== tab.sessionId || queue.generation !== tab.connectionGen) {
-      queue = { sid: tab.sessionId, generation: tab.connectionGen, bytes: [], writing: false }
-      replyQueues.set(tab, queue)
-    }
-    const bytes = Array.from(textEncoder.encode(text))
-    if (queue.bytes.length + bytes.length > 16 * 1024) return
-    queue.bytes.push(...bytes)
-    if (queue.writing) return
-    const owned = queue
-    owned.writing = true
-    void (async () => {
-      try {
-        while (owned.bytes.length && !tab.closed && !disposed && tab.sessionId === owned.sid && tab.connectionGen === owned.generation) {
-          const chunk = owned.bytes.splice(0, WRITE_CHUNK)
-          await transport.write(owned.sid, chunk, true)
-        }
-      } catch { owned.bytes = [] }
-      finally { owned.bytes = []; owned.writing = false }
-    })()
-  }
-
-  function sendInput(tab: TabState, text: string): void {
-    // A modal password must never fall through to a previously focused terminal.
-    if (hidden || tab.status !== 'live' || !tab.sessionId || tab.closed) return
-    const bytes = Array.from(textEncoder.encode(text))
-    if (!bytes.length) return
-    tab.errorMsg = ''
-    if (tab.writeBuf.length + bytes.length > WRITE_CAP) {
-      // Reject this whole input event; never truncate queued command prefixes
-      // or retain only a pasted suffix that might contain an execution newline.
-      tab.writeDropped = true
-      tab.notice = '輸入佇列已滿，本次輸入未送出；請稍後重試'
-      return
-    } else {
-      tab.writeBuf = tab.writeBuf.concat(bytes)
-    }
-    void flushWrite(tab)
-  }
-
-  async function flushWrite(tab: TabState): Promise<void> {
-    if (tab.writing) return
-    tab.writing = true
-    const sid = tab.sessionId
-    const generation = tab.connectionGen
-    try {
-      while (tab.writeBuf.length && tab.status === 'live' && sid && tab.sessionId === sid && tab.connectionGen === generation && !tab.closed) {
-        const chunk = tab.writeBuf.splice(0, WRITE_CHUNK)
-        try {
-          await transport.write(sid, chunk)
-        } catch (e) {
-          if (tab.connectionGen === generation) {
-            tab.errorMsg = `輸入未送出：${errText(e)}`
-            tab.writeBuf = []
-          }
-          break
-        }
-      }
-    } finally {
-      tab.writing = false
-      if (!tab.writeBuf.length) tab.writeDropped = false
-      // A new connection may receive fresh input while an old write settles.
-      // Its own queue is safe to flush; detach already discarded old input.
-      if (tab.connectionGen !== generation && tab.writeBuf.length && tab.status === 'live') {
-        void flushWrite(tab)
-      }
-    }
-  }
-
-  function requestResize(tab: TabState, rows: number, cols: number): void {
-    if (!rows || !cols || tab.closed) return
-    if (tab.lastSize && tab.lastSize.rows === rows && tab.lastSize.cols === cols) return
-    tab.lastSize = { rows, cols }
-    if (tab.status !== 'live' || !tab.sessionId) return
-    tab.pendingSize = { rows, cols }
-    void flushResize(tab)
-  }
-
-  async function flushResize(tab: TabState): Promise<void> {
-    if (tab.resizing) return
-    tab.resizing = true
-    const sid = tab.sessionId
-    const generation = tab.connectionGen
-    try {
-      // Latest-wins coalescing keeps this bounded and serialized.
-      while (tab.pendingSize && tab.status === 'live' && sid && tab.sessionId === sid && tab.connectionGen === generation && !tab.closed) {
-        const { rows, cols } = tab.pendingSize
-        tab.pendingSize = null
-        try {
-          await transport.resize(sid, rows, cols)
-        } catch (e) {
-          if (tab.connectionGen === generation) tab.errorMsg = errText(e)
-          break
-        }
-      }
-    } finally {
-      tab.resizing = false
-      if (tab.connectionGen !== generation && tab.pendingSize && tab.status === 'live') {
-        void flushResize(tab)
-      }
-    }
-  }
+  const { sendTerminalReply, sendInput, requestResize } = createTerminalIo(
+    transport, () => disposed, () => hidden
+  )
 
   function setActive(key: string): void {
     if (key === activeKey.value) return
@@ -755,7 +470,6 @@ export function createAppController(
     tab.writeBuf = []
     tab.pendingSize = null
     invalidateCapture(tab)
-    if (capturePending === tab) capturePending = null
     const sid = tab.sessionId
     tab.sessionId = null
     tab.status = 'exited'
@@ -889,157 +603,13 @@ export function createAppController(
     }
   }
 
-  // --- desktop / screenshot scheduling ---
-
-  let captureBusy = false
-  let capturePending: TabState | null = null
-
-  function canCapture(tab: TabState | null | undefined): tab is TabState {
-    return (
-      !!tab &&
-      !disposed &&
-      !hidden &&
-      !tab.closed &&
-      tab.status === 'live' &&
-      !!tab.sessionId &&
-      tab.desktopEnabled &&
-      tab.previewVisible &&
-      tab === activeTab.value
-    )
-  }
-
-  function invalidateCapture(tab: TabState): void {
-    tab.captureGen++
-    if (capturePending === tab) capturePending = null
-  }
-
-  function instanceOperation(tab: TabState): number {
-    const next = (instanceOperations.get(tab.key) ?? 0) + 1
-    instanceOperations.set(tab.key, next)
-    invalidateCapture(tab)
-    tab.shot = null
-    tab.shotError = ''
-    return next
-  }
-  async function selectInstance(tab: TabState, desktop: InstanceDesktop): Promise<void> {
-    if (!transport.instanceSelect || hidden || disposed || tab.closed || tab.status !== 'live' || !tab.sessionId) return
-    const sid = tab.sessionId, operation = instanceOperation(tab)
-    tab.desktopBusy = true; tab.desktopError = ''; tab.desktopEnabled = false
-    tab.instanceDesktop = null; tab.instanceToolReady = false
-    try {
-      const result = await transport.instanceSelect(sid, desktop.id, desktop.revision)
-      if (disposed || hidden || tab.closed || tab.sessionId !== sid || instanceOperations.get(tab.key) !== operation) return
-      if (result.desktop.id !== desktop.id || result.desktop.revision !== desktop.revision) throw new Error('Screen 設定已變更，請重新選擇')
-      tab.instanceDesktop = { ...result.desktop }; tab.instanceToolReady = result.toolReady
-      tab.desktopBusy = false
-      await setDesktop(tab, true)
-      if (instanceOperations.get(tab.key) === operation) tab.desktopMsg = ''
-    } catch {
-      if (!tab.closed && tab.sessionId === sid && instanceOperations.get(tab.key) === operation) tab.desktopError = 'Screen 選擇失敗，請確認設定與連線後重試'
-    } finally {
-      if (instanceOperations.get(tab.key) === operation) tab.desktopBusy = false
-    }
-  }
-  async function clearInstance(tab: TabState): Promise<void> {
-    const sid = tab.sessionId, operation = instanceOperation(tab)
-    tab.instanceDesktop = null; tab.instanceToolReady = false; tab.desktopEnabled = false
-    tab.desktopMsg = ''; tab.desktopError = ''; tab.desktopBusy = true
-    try { if (sid) await transport.instanceClear?.(sid) }
-    catch { if (!tab.closed && tab.sessionId === sid && instanceOperations.get(tab.key) === operation) tab.desktopError = '預覽已停止；遠端工具取消尚未確認，請重試或結束 CLI' }
-    finally { if (instanceOperations.get(tab.key) === operation) tab.desktopBusy = false }
-  }
-
-  /** Serialized toggles; a response landing on a closed/replaced tab is dropped. */
-  async function setDesktop(tab: TabState, enabled: boolean): Promise<void> {
-    if (hidden || tab.desktopBusy || tab.closed || tab.status !== 'live' || !tab.sessionId) return
-    tab.desktopBusy = true
-    tab.desktopError = ''
-    const sid = tab.sessionId, captureVersion = tab.captureGen, operation = instanceOperations.get(tab.key)
-    try {
-      const st = await transport.desktop(sid, enabled)
-      if (hidden || tab.closed || tab.sessionId !== sid || tab.captureGen !== captureVersion) return
-      tab.desktopEnabled = st.enabled
-      tab.desktopMsg = st.message
-      if (st.enabled) {
-        tab.previewVisible = true
-        if (tab === activeTab.value) requestCapture(tab)
-      } else {
-        invalidateCapture(tab)
-        // A disabled preview must not keep showing the last frame.
-        tab.shot = null
-        tab.shotError = ''
-      }
-    } catch (e) {
-      if (!tab.closed && tab.sessionId === sid) tab.desktopError = errText(e)
-    } finally {
-      if (instanceOperations.get(tab.key) === operation) tab.desktopBusy = false
-    }
-  }
-
-  function setPreviewVisible(tab: TabState, visible: boolean): void {
-    tab.previewVisible = visible
-    if (visible) {
-      if (tab.sessionId && tab.desktopEnabled) void transport.desktop(tab.sessionId, true).then(() => { if (canCapture(tab)) requestCapture(tab) }).catch(() => undefined)
-    } else {
-      invalidateCapture(tab)
-      tab.shot = null
-      if (tab.sessionId && (tab.desktopEnabled || tab.desktopBusy)) void transport.desktop(tab.sessionId, false).catch(() => undefined)
-    }
-  }
-
-  function requestCapture(tab: TabState): void {
-    if (!canCapture(tab)) return
-    if (captureBusy) {
-      // One global in-flight capture; manual/auto requests coalesce latest-wins.
-      capturePending = tab
-      return
-    }
-    void runCapture(tab)
-  }
-
-  async function runCapture(tab: TabState): Promise<void> {
-    captureBusy = true
-    const sid = tab.sessionId!
-    const gen = ++tab.captureGen
-    try {
-      const s = await transport.screenshot(sid)
-      if (
-        !tab.closed &&
-        tab.sessionId === sid &&
-        tab.captureGen === gen &&
-        tab.desktopEnabled &&
-        tab.previewVisible &&
-        tab === activeTab.value &&
-        (!tab.instanceDesktop || (s.desktopId === tab.instanceDesktop.id && s.desktopRevision === tab.instanceDesktop.revision)) &&
-        SAFE_IMAGE_MIME.test(s.mime)
-      ) {
-        tab.shot = { src: `data:${s.mime};base64,${s.base64}`, source: s.source, capturedAt: s.capturedAt }
-        tab.shotError = ''
-      }
-    } catch (e) {
-      if (!tab.closed && tab.sessionId === sid && tab.captureGen === gen) {
-        // Keep this Screen's last successful frame, but mark it stale.
-        tab.shotError = errText(e)
-      }
-    } finally {
-      captureBusy = false
-      const pending = capturePending
-      capturePending = null
-      if (pending && canCapture(pending)) void runCapture(pending)
-    }
-  }
-
-  function manualCapture(): void {
-    const tab = activeTab.value
-    if (tab && canCapture(tab)) requestCapture(tab)
-  }
-
-  // First capture is immediate (on enable / activate / show), then every
-  // autoCaptureMs for the active tab only. Shell input is never blocked.
-  const captureTimer = setInterval(() => {
-    const tab = activeTab.value
-    if (tab && canCapture(tab)) requestCapture(tab)
-  }, autoCaptureMs)
+  const {
+    canCapture, invalidateCapture, requestCapture, selectInstance, clearInstance,
+    setDesktop, setPreviewVisible, manualCapture, disposePreview
+  } = createPreviewController(
+    transport, activeTab, instanceOperations, autoCaptureMs,
+    () => disposed, () => hidden
+  )
 
   function dispose(): void {
     disposed = true
@@ -1047,8 +617,7 @@ export function createAppController(
     instanceCatalogGen++
     instanceOperations.clear()
     catalogLoading.value = false
-    clearInterval(captureTimer)
-    capturePending = null
+    disposePreview()
     for (const tab of tabs) {
       invalidateCapture(tab)
       tab.connectionGen++

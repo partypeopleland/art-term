@@ -58,3 +58,41 @@ jobs:
 
       - name: Test
         run: cargo test --locked -p art-term-core -p art-term-tui
+
+  gui:
+    # Compile the shared native session modules used by desktop and Android.
+    name: Rust GUI session tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install Tauri Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
+            librsvg2-dev libxdo-dev libssl-dev pkg-config
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: apps/client/package-lock.json
+
+      - name: Build frontend assets
+        run: |
+          npm --prefix apps/client ci
+          npm --prefix apps/client run build
+
+      - name: Set up Rust
+        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ci-gui-linux
+
+      - name: Test shared GUI sessions
+        run: cargo test --locked -p art-term-gui --bin art-term-gui runtime_sessions::tests

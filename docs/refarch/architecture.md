@@ -53,6 +53,8 @@ apps/client/
 
 Ubuntu 的交付目標是獨立 `art-term` 執行檔，可在 Server、Desktop 或 SSH 的終端機使用。它直接依賴 `art-term-core`，不載入 GUI crate、WebKit、GTK、D-Bus keyring 或本機網頁伺服器。受控端繼續使用相同 Runtime／helper，準備方式不因這個客戶端改變。用法見 [Ubuntu 終端機版](../platforms/linux.md)。
 
+控制器、Runtime session 與 TUI 畫面內部的責任切分見[控制模組責任邊界](controller-module-boundaries.md)。
+
 可從 repository 根目錄執行 `git ls-files apps/client/src crates/art-term-gui/src crates/art-term-core/src crates/art-term-tui/src` 查看受版本管理的實際來源檔。建置、測試與預覽命令使用 `apps/client`，例如 `npm --prefix apps/client run typecheck`；完整流程見[本地建置](../platforms/local-build.md)與[畫面預覽](../platforms/ui-preview.md)。
 
 ## 從畫面到遠端 Shell
