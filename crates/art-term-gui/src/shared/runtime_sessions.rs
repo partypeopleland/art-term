@@ -268,14 +268,14 @@ impl From<SessionError> for SessionFailure {
     }
 }
 type Reply<T> = Result<T, SessionFailure>;
-#[path = "runtime_sessions/history.rs"]
-mod session_history;
 #[path = "runtime_sessions/instance.rs"]
 mod instance;
 #[path = "runtime_sessions/lifecycle.rs"]
 mod lifecycle;
 #[path = "runtime_sessions/preview.rs"]
 mod preview;
+#[path = "runtime_sessions/history.rs"]
+mod session_history;
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GuiOutput {
