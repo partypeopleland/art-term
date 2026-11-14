@@ -59,6 +59,25 @@ jobs:
       - name: Test
         run: cargo test --locked -p art-term-core -p art-term-tui
 
+  clippy:
+    name: Rust core and TUI Clippy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Rust with Clippy
+        run: rustup toolchain install stable --profile minimal --component clippy --no-self-update && rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ci-clippy-linux
+
+      - name: Clippy
+        run: cargo clippy --locked -p art-term-core -p art-term-tui -- -D warnings
+
   gui:
     # Compile the shared native session modules used by desktop and Android.
     name: Rust GUI session tests
