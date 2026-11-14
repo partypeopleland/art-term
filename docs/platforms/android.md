@@ -82,8 +82,8 @@ setup 產生 ignored `target/android-tools/environment.json`；SDK 預設在 `ta
 原簽章release與驗證：
 
 ```powershell
-.\scripts\build-android.ps1 -Target aarch64 -OutputApk ./dist/android/art-term-<version>-aarch64.apk
-.\scripts\verify-android.ps1 -Apk ./dist/android/art-term-<version>-aarch64.apk
+.\scripts\build-android.ps1 -Target aarch64
+.\scripts\verify-android.ps1
 ```
 
 
