@@ -90,7 +90,7 @@ Windows／APK 的 debug fixture CA 只限定測試建置，仍實際驗證 TLS�
 完成後列出案例 ID、實際通過／失敗／未執行、受測版本，以及仍需實機確認的項目。
 ```
 
-執行入口分別是 [Windows](../platforms/windows-regression.md)、[Android APK](../platforms/android-regression.md)、[Linux](../platforms/linux-regression.md)。Windows 專屬修改在 Windows 電腦開發與檢查，語音留下一階段；本輪由 AI 完成基本驗收及必要審查後 commit／push `feat/windows-mobile-parity`，不等待 Owner 才提交，也不 merge main／tag／release。Windows fixture、直接真 tmux、真 Codex 與 OS IME 各自記錄結果，不能互相代替；Owner 最終使用回饋另列。
+執行入口分別是 [Windows](../platforms/windows-regression.md)、[Android APK](../platforms/android-regression.md)、[Linux](../platforms/linux-regression.md)。Windows 專屬修改在 Windows 電腦開發與檢查，語音留下一階段；變更依 Issue／PR 流程提交與審查，合併由 Owner 決定，正式發布另行指定。Windows fixture、直接真 tmux、真 Codex 與 OS IME 各自記錄結果，不能互相代替；Owner 最終使用回饋另列。
 
 ## 仍需另外驗收
 
