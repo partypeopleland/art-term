@@ -34,6 +34,7 @@ export function createNativeHistoryReader(): NativeHistoryReader {
       }
     },
     update: snapshot => invoke('plugin:mobile-history|update', snapshot as unknown as Record<string, unknown>),
+    showKeyboard: readerId => invoke('plugin:mobile-history|showKeyboard', { readerId }),
     async close(readerId) {
       epoch++
       const previous = remove; remove = null

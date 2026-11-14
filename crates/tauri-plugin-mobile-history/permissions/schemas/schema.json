@@ -391,6 +391,18 @@
           "markdownDescription": "Denies the remove_listener command without any pre-configured scope."
         },
         {
+          "description": "Enables the showKeyboard command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-showKeyboard",
+          "markdownDescription": "Enables the showKeyboard command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the showKeyboard command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-showKeyboard",
+          "markdownDescription": "Denies the showKeyboard command without any pre-configured scope."
+        },
+        {
           "description": "Enables the update command without any pre-configured scope.",
           "type": "string",
           "const": "allow-update",
@@ -403,10 +415,10 @@
           "markdownDescription": "Denies the update command without any pre-configured scope."
         },
         {
-          "description": "Local terminal text projection, native touch events, and opening HTTP/S links in the system browser.\n#### This default permission set includes:\n\n- `allow-openUrl`\n- `allow-open`\n- `allow-update`\n- `allow-close`\n- `allow-keyboardStatus`\n- `allow-register-listener`\n- `allow-registerListener`\n- `allow-remove-listener`\n- `allow-removeListener`",
+          "description": "Local terminal text projection, native touch events, and opening HTTP/S links in the system browser.\n#### This default permission set includes:\n\n- `allow-openUrl`\n- `allow-open`\n- `allow-update`\n- `allow-close`\n- `allow-keyboardStatus`\n- `allow-showKeyboard`\n- `allow-register-listener`\n- `allow-registerListener`\n- `allow-remove-listener`\n- `allow-removeListener`",
           "type": "string",
           "const": "default",
-          "markdownDescription": "Local terminal text projection, native touch events, and opening HTTP/S links in the system browser.\n#### This default permission set includes:\n\n- `allow-openUrl`\n- `allow-open`\n- `allow-update`\n- `allow-close`\n- `allow-keyboardStatus`\n- `allow-register-listener`\n- `allow-registerListener`\n- `allow-remove-listener`\n- `allow-removeListener`"
+          "markdownDescription": "Local terminal text projection, native touch events, and opening HTTP/S links in the system browser.\n#### This default permission set includes:\n\n- `allow-openUrl`\n- `allow-open`\n- `allow-update`\n- `allow-close`\n- `allow-keyboardStatus`\n- `allow-showKeyboard`\n- `allow-register-listener`\n- `allow-registerListener`\n- `allow-remove-listener`\n- `allow-removeListener`"
         }
       ]
     }

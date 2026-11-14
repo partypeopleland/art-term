@@ -5,6 +5,7 @@ fn main() {
         "update",
         "close",
         "keyboardStatus",
+        "showKeyboard",
         "register_listener",
         "registerListener",
         "remove_listener",

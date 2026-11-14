@@ -29,6 +29,7 @@ export interface NativeHistoryEvent {
 export interface NativeHistoryReader {
   open(snapshot: NativeHistorySnapshot, receive: (event: NativeHistoryEvent) => void): Promise<void>
   update(snapshot: NativeHistorySnapshot): Promise<void>
+  showKeyboard(readerId: string): Promise<void>
   close(readerId: string): Promise<void>
 }
 export const NativeHistoryKey: InjectionKey<() => NativeHistoryReader> = Symbol('NativeTerminalReader')
