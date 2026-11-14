@@ -80,10 +80,16 @@ impl Mcp {
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(20));
         if u.scheme() == "http" {
-            let host = u.host_str().unwrap().trim_matches(['[', ']']);
+            let host = u
+                .host_str()
+                .ok_or_else(|| anyhow::anyhow!("桌面網址格式不符"))?
+                .trim_matches(['[', ']']);
+            let port = u
+                .port_or_known_default()
+                .ok_or_else(|| anyhow::anyhow!("桌面網址格式不符"))?;
             let addrs: Vec<SocketAddr> = tokio::time::timeout(
                 Duration::from_secs(5),
-                tokio::net::lookup_host((host, u.port_or_known_default().unwrap())),
+                tokio::net::lookup_host((host, port)),
             )
             .await??
             .collect();
@@ -202,10 +208,9 @@ impl Mcp {
                 }
             }
         }
-        if id.is_none() {
+        let Some(id) = id else {
             return Ok(Value::Null);
-        }
-        let id = id.unwrap();
+        };
         let replies: Vec<Value> = if sse {
             std::str::from_utf8(&bytes)?
                 .replace("\r\n", "\n")
@@ -438,10 +443,13 @@ mod tests {
         }
     }
     #[tokio::test]
-    async fn direct_http_is_limited_to_tailnet_or_loopback() {
+    async fn direct_http_rejects_untrusted_address() {
         assert!(Mcp::connect(snapshot("http://192.168.1.1/mcp".into()))
             .await
             .is_err());
+    }
+    #[test]
+    fn trusted_http_accepts_loopback_and_tailnet() {
         for ip in [
             "127.0.0.1",
             "::1",
@@ -451,6 +459,9 @@ mod tests {
         ] {
             assert!(trusted_http(ip.parse().unwrap()));
         }
+    }
+    #[test]
+    fn trusted_http_rejects_other_addresses() {
         for ip in [
             "192.168.1.1",
             "10.0.0.1",
@@ -460,6 +471,9 @@ mod tests {
         ] {
             assert!(!trusted_http(ip.parse().unwrap()));
         }
+    }
+    #[test]
+    fn canonical_url_rejects_unsupported_components() {
         for url in [
             "http://user@127.0.0.1/mcp",
             "http://@127.0.0.1/mcp",
