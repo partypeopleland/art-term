@@ -45,7 +45,7 @@ sudo apt-get update
 sudo apt-get install -y git curl python3 ca-certificates coreutils util-linux xz-utils acl openssl socat
 ```
 
-本次確認的版本包括 Python 3.12.3、私有 Node 22.23.5、tmux 3.6a。系統原有 Node 24 與 tmux 3.4 可以保留；art-term 使用固定的私有路徑。
+已驗證的版本組合包括 Python 3.12.3、私有 Node 22.23.5、tmux 3.6a。系統原有 Node 24 與 tmux 3.4 可以保留；art-term 使用固定的私有路徑。
 
 Runtime 使用未修改的官方 binary，不需要 Rust、Cargo 或 Docker。只有自行編譯 tmux 時才需要下列建置依賴：
 
@@ -78,7 +78,7 @@ $HOME/.local/share/art-term/
 
 從 [Node 官方下載目錄](https://nodejs.org/dist/v22.23.5/)取得符合 Host 架構的 Node 22.23.5 archive，使用同目錄的 `SHASUMS256.txt` 核對後解壓，只將 `bin/node` 安裝到上表的 `openab-pty/node`。保留 LICENSE 與來源紀錄，不覆蓋系統 Node。
 
-從 [tmux 官方 3.6a release](https://github.com/tmux/tmux/releases/tag/3.6a)取得 `tmux-3.6a.tar.gz`。本次驗證的 SHA256 為：
+從 [tmux 官方 3.6a release](https://github.com/tmux/tmux/releases/tag/3.6a)取得 `tmux-3.6a.tar.gz`。已驗證的 SHA256 為：
 
 ```text
 b6d8d9c76585db8ef5fa00d4931902fa4b8cbe8166f528f44fc403961a3f3759
@@ -143,7 +143,7 @@ $HOME/.local/share/art-term/tmux-history-v2/
 
 專用 base 與每個工作目錄必須屬於 Runtime 帳號、權限為 `0700`。`manifest.json` 與 `tmux.conf` 必須為 `0600`。不要使用 symlink 導向其他帳號或共用目錄。
 
-**`umask 0077` 不足以取代 ACL 檢查。** 本次 Host 的 HOME 有 default ACL，新狀態檔即使使用此 umask 仍產生 `0664`。Node helper 嚴格要求 `0600`，因此在 ready 前拒絕，client 將輸入維持為「送達尚未確認」，不自動重送。
+**`umask 0077` 不足以取代 ACL 檢查。** 若 Host 的 HOME 有 default ACL，新狀態檔即使使用此 umask 仍可能產生 `0664`。Node helper 嚴格要求 `0600`，因此在 ready 前拒絕，client 將輸入維持為「送達尚未確認」，不自動重送。
 
 以同一一般帳號建立或檢查專用 base。先確認既有路徑的 owner 正確且不是 symlink；以下命令只處理 art-term 專用目錄：
 
@@ -190,7 +190,7 @@ stat -c '%a %U %n' "$state" "$session_state" "$session_state/manifest.json" "$se
 
 ### LAN 首次安裝範例
 
-以下為本次已驗證拓樸的設定範本，僅用於**尚未安裝的 Host**。先選擇服務目錄，已有內容或同名 user service 時停止，先規劃保留原 credential 的遷移；不直接覆寫。
+以下為已驗證拓樸的設定範本，僅用於**尚未安裝的 Host**。先選擇服務目錄，已有內容或同名 user service 時停止，先規劃保留原 credential 的遷移；不直接覆寫。
 
 ```bash
 set -e

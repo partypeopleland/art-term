@@ -78,7 +78,7 @@ sudo apt-get update
 sudo apt-get install -y git curl python3 ca-certificates
 ```
 
-另需系統既有的 Bash、systemd／loginctl、coreutils（含 timeout、sha256sum、install）及 util-linux（flock），以及已登入的 Tailscale。Git 只用於取得 checkout；Runtime 及 Python helper 不透過 Cargo 或 pip 安裝。所選 coding CLI 若有其他工具需求，依該 CLI 的安裝方式準備；已安裝的 Rust／Cargo 不必為本次遷移移除。
+另需系統既有的 Bash、systemd／loginctl、coreutils（含 timeout、sha256sum、install）及 util-linux（flock），以及已登入的 Tailscale。Git 只用於取得 checkout；Runtime 及 Python helper 不透過 Cargo 或 pip 安裝。所選 coding CLI 若有其他工具需求，依該 CLI 的安裝方式準備；已安裝的 Rust／Cargo 不必為遷移或升級移除。
 
 固定來源為 openab-pty commit `b82a36620a76c84a67bc6a7ab316cbc60a30e1a9` 的 `native-b82a366` 產物，以 digest 固定內容，不追蹤可變 tag。請取得完整 checkout，不能只複製 `init-host.sh`。
 

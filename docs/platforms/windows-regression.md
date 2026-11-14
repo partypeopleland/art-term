@@ -4,7 +4,7 @@
 
 給 AI 的工作範圍應包含要修改的功能與預期行為。AI 先讀本頁，從下方功能對照找既有保護，再決定需要增加哪個案例；不要以增加測試數量代替驗證具體行為。
 
-Windows 專屬修改須在 Windows 電腦執行。本輪修正原 CLI 視窗直接上捲與下捲自然追尾，透過共同受控端的原生 viewport 操作，語音與 Android plugin 不在範圍；前端／Rust／真 tmux 的部分歷史結果不能代表最新 Windows GUI、真 Codex 或 OS 中文候選選字已驗收。各次測試需核對實際 source／binary，舊 DesktopHistoryReader 的通過紀錄不能沿用。
+Windows 專屬修改須在 Windows 電腦執行。前端／Rust／真 tmux 的部分歷史結果不能代表最新 Windows GUI、真 Codex 或 OS 中文候選選字已驗收；語音與 Android plugin 不在 Windows 範圍。各次測試需核對實際 source／binary，舊測試入口的通過紀錄不能沿用。
 
 統一連線管理另有 `scripts/windows-regression/connection_management.py --exe <fixture.exe> --driver <msedgedriver.exe> --source <SHA>`。它操作實際 EXE／WebView2／IPC／DPAPI 與自建 HTTPS／MCP 服務，驗證三種類型的共用表單、中文顯示名稱、同類型拖曳、跨類型拒絕、重開與側欄順序、Toast 及手動終端輸入。driver 必須符合實際 WebView2 版本，輸出及私有測試設定放在系統暫存目錄。舊完整 runner 的獨立 Screen 表單、分類 select 與啟動 CLI 按鈕選擇器不作為新版介面的驗收入口。
 
@@ -105,23 +105,21 @@ Microsoft Edge WebDriver 必須匹配 App 使用的 **WebView2 Runtime**，不�
 | 原終端歷史與共同介面 | 前端 `host-terminal-viewport.test.ts`、`terminal-wheel.test.ts`、`windows-parity.test.ts`；Rust history 協定及真 Runtime／helper | 同一 xterm 實例／可見舊行／字型主題、首個小幅上捲、持續輸出保持、下捲追尾、閱讀中輸入、protocol reply、busy／close／晚到回覆、能力不足及 inner alternate 恢復；Android 原五操作另作相容保護。 |
 | 終端滾動／手機輸入與背景 | 前端 `terminal-wheel.test.ts`、`mobile-input.test.ts`、`mobile-runtime-ipc.test.ts`、`runtime-stream.test.ts` | 保留 IME、背景取消、原 binding 恢復；Windows 的手機尺寸／模擬事件不等於 Android 實機。 |
 
-## 本次 Windows 同步的接續驗收
+## 新版建置的驗收
 
-在 Windows 電腦使用交接文件所在 commit，執行上方 All 入口，再重新打包 release；Linux 結果、舊 EXE 或 `-SkipBuild` 都不能代表新 Windows 建置。測試程式若有 UI 選擇器／fixture 適配，仍保留真 EXE、IPC、DPAPI、網路層與原生檔案選擇器，不放寬失敗斷言。
+使用待驗收的 commit 在 Windows 電腦執行上方 All 入口，再重新打包 release；Linux 結果、舊 EXE 或 `-SkipBuild` 都不能代表新 Windows 建置。測試程式若有 UI 選擇器／fixture 適配，仍保留真 EXE、IPC、DPAPI、網路層與原生檔案選擇器，不放寬失敗斷言。
 
-新版 runner 對應同頁工作區／設定、inline Shell／th2 建立及直接 MCP。原生滾輪案例應檢查唯一 xterm、無 overlay／文字 polling、小幅wheel的立即位移、閱讀時新輸出不跳與到底追尾；中文 marker／Backspace 記錄從真 IPC 輸出抵達到畫面可見的時間。這是 loopback 協定 fixture，不是真 tmux／真 Codex，也不涵蓋 OS 候選選字。實際新版 runner 是否執行與結果需逐次記錄，不能套用舊覆蓋層的五組通過紀錄。Screens 來源／解碼、UI布局與其他既有案例保留，各自依當次結果判定。
+runner 對應同頁工作區／設定、inline Shell／th2 建立及直接 MCP。原生滾輪案例應檢查唯一 xterm、無 overlay／文字 polling、小幅wheel的立即位移、閱讀時新輸出不跳與到底追尾；中文 marker／Backspace 記錄從真 IPC 輸出抵達到畫面可見的時間。這是 loopback 協定 fixture，不是真 tmux／真 Codex，也不涵蓋 OS 候選選字。Screens 來源／解碼、UI布局與其他既有案例保留，各自依當次結果判定。
 
 原生回歸之外，使用隔離連線確認：Host 管理入口仍可編輯／刪除／測試；Host-only 舊檔仍可匯入，新增 Screen-only／混合檔經原生選檔器還原並重開後使用 DPAPI token；未選取的本機桌面保留；設定／首頁開啟時輸出繼續處理，關閉後 fit／focus；快捷鍵不攔表單輸入；普通及歷史 Shell 皆由同一 xterm 呈現，舊 helper 清楚回報能力不足。與正式 Runtime 的 new Shell／renew／exit、工具 broker、現場 MCP 另記結果，不把固定 client 寫成真 AI CLI 已測。
 
-本輪語音、Android 原生閱讀器及手機手勢不移植，不需要為 Windows 啟用 Android plugin。任一層未執行就寫 NOT_RUN 或具體 BLOCKED，不能以本輪只交程式為由寫成 Windows 已通過。交接完成後僅推開發分支，未經 Owner 後續決定不 merge／tag／release。
+語音、Android 原生閱讀器及手機手勢不移植到 Windows，不需要為 Windows 啟用 Android plugin。任一層未執行就寫 NOT_RUN 或具體 BLOCKED，不能以只交程式為由寫成 Windows 已通過。變更依 Issue／PR 流程提交與審查，合併由 Owner 決定，正式發布另行指定。
 
 ## 原生 xterm 的分層驗證
 
 先以 normal buffer 驗證原生 scrollback，再用專用工作驗證完整 Windows xterm→官方 Runtime→私有 tmux alternate 路徑。記錄單次小幅wheel前後的原生位置，不以捲條出現或批量文字最後存在作為位移／延遲證據。真tmux直接SGR mouse測試不包含Windows繪製，Windows echo fixture也不包含真tmux，兩者不能合稱整條路徑已過。
 
-共同 viewport 控制需驗證 READY capability、舊 helper 不送未知操作、pending 後 close、兩 owner 隔離、原生 down／follow、使用者輸入只送一次、終端 protocol reply 不退出閱讀，以及 helper／guard 死亡後精確清理。30 秒狀態保活不能夾帶快照輪詢，不改 mouse 或 WheelUpPane 設定。Android 原五操作另作相容回歸。真Codex使用任務自己的新會話，OS中文候選選字與Backspace實測不足就留NOT_RUN，不宣稱Owner問題已解決。
-
-本輪AI完成基本驗收與必要審查後可commit／push開發分支，Owner使用回饋不阻止這個提交步驟；仍禁止main／tag／release。
+共同 viewport 控制需驗證 READY capability、舊 helper 不送未知操作、pending 後 close、兩 owner 隔離、原生 down／follow、使用者輸入只送一次、終端 protocol reply 不退出閱讀，以及 helper／guard 死亡後精確清理。30 秒狀態保活不能夾帶快照輪詢，不改 mouse 或 WheelUpPane 設定。Android 原五操作另作相容回歸。真Codex使用任務自己的新會話，OS中文候選選字與Backspace實測不足就留NOT_RUN，不宣稱使用者回報的問題已解決。
 
 ## 新功能或修正的測試計畫
 
@@ -143,7 +141,7 @@ Microsoft Edge WebDriver 必須匹配 App 使用的 **WebView2 Runtime**，不�
 
 ## GitHub Actions 的使用決定
 
-本專案目前為 private。GitHub 雖提供 Windows runner，私有倉庫使用託管 runner 有免費額度，超額可能計費；不符合本輪「不得因免費額度用完而付費」條件，因此不建立 Actions workflow，驗收以 Windows 本機成功執行為準。未來條件變更時再重新確認官方計費規則，不能直接把這套測試接上託管 runner。相關條件見 [GitHub Actions 計費](https://docs.github.com/en/billing/concepts/product-billing/github-actions)與 [GitHub-hosted runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)。
+本專案目前為 private。GitHub 雖提供 Windows runner，私有倉庫使用託管 runner 有免費額度，超額可能計費；目前決定不為這套測試建立 Actions workflow，驗收以 Windows 本機成功執行為準。未來條件變更時再重新確認官方計費規則，不能直接把這套測試接上託管 runner。相關條件見 [GitHub Actions 計費](https://docs.github.com/en/billing/concepts/product-billing/github-actions)與 [GitHub-hosted runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)。
 
 ## 附錄：實作與參考
 
