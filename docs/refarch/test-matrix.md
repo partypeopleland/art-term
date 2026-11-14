@@ -8,7 +8,7 @@
 
 ## 直接 MCP 與獨立 Screens 的驗收門檻
 
-下表列出本次應驗證的行為，不宣稱已執行；以當次結果與版本判定。固定 client 代替 AI 模型，但必須走正式產品 adapter、HTTP 與工具執行，不能 mock 產品路由。
+下表列出各平台應驗證的行為，不宣稱已執行；以當次結果與版本判定。固定 client 代替 AI 模型，但必須走正式產品 adapter、HTTP 與工具執行，不能 mock 產品路由。
 
 | 範圍 | 必須驗證 |
 |---|---|
@@ -37,7 +37,7 @@ ARM64 手機、現場網路／MCP、實際 Codex CLI 與 AI 模型各自需要�
 | 手動 CLI | Windows／APK 沒有專用啟動控制；移除專用啟動命令後，終端輸入、Screen 選擇及 Shell 工具配置仍正常 |
 | 手機導覽 | art-term 首頁、Main、Connect 三頁可點擊及雙向滑動，頂列保持固定，拖曳排序不觸發頁面滑動 |
 
-以上是驗收條件；每次通過狀態以對應來源及實際檢查結果為準。TUI 本輪沿用共用順序與名稱，互動重新設計不在本輪範圍。
+以上是驗收條件；每次通過狀態以對應來源及實際檢查結果為準。TUI 沿用共用設定順序與顯示名稱。
 
 ## Ubuntu TUI 的對應案例
 
@@ -90,7 +90,7 @@ Windows／APK 的 debug fixture CA 只限定測試建置，仍實際驗證 TLS�
 完成後列出案例 ID、實際通過／失敗／未執行、受測版本，以及仍需實機確認的項目。
 ```
 
-執行入口分別是 [Windows](../platforms/windows-regression.md)、[Android APK](../platforms/android-regression.md)、[Linux](../platforms/linux-regression.md)。Windows 專屬修改在 Windows 電腦開發與檢查，語音留下一階段；本輪由 AI 完成基本驗收及必要審查後 commit／push `feat/windows-mobile-parity`，不等待 Owner 才提交，也不 merge main／tag／release。Windows fixture、直接真 tmux、真 Codex 與 OS IME 各自記錄結果，不能互相代替；Owner 最終使用回饋另列。
+執行入口分別是 [Windows](../platforms/windows-regression.md)、[Android APK](../platforms/android-regression.md)、[Linux](../platforms/linux-regression.md)。Windows 專屬修改在 Windows 電腦開發與檢查；變更依 Issue／PR 流程提交與審查，合併由 Owner 決定，正式發布另行指定。Windows fixture、直接真 tmux、真 Codex 與 OS IME 各自記錄結果，不能互相代替；Owner 最終使用回饋另列。
 
 ## 仍需另外驗收
 

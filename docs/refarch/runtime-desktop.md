@@ -1,8 +1,8 @@
 # 工作 Shell 的記憶體 MCP 工具 bridge
 
-Owner 本次範圍是 App 連入的工作 Shell，以及該 Shell 裡的 coding CLI；暫不包含 Discord Agent，也不使用整台 Host 共用的工具選擇。Android 選定 Screen 的截圖仍由 App 原生層直接向 MCP 取得。工具路徑則由每個新工作 Shell 自己持有 broker，讓先選 Screen、後啟動 CLI 的操作也能成立。
+本 bridge 的範圍是 App 連入的工作 Shell，以及該 Shell 裡的 coding CLI；不包含 Discord Agent，也不使用整台 Host 共用的工具選擇。Android 選定 Screen 的截圖仍由 App 原生層直接向 MCP 取得。工具路徑由每個新工作 Shell 自己持有 broker，讓先選 Screen、後啟動 CLI 的操作也能成立。
 
-本文描述本次整合設計；安裝、真 Runtime／PTY 及手機驗收須依當次結果確認，不能以舊 standalone adapter 或固定 client 成功推定現場已完成。
+安裝、真 Runtime／PTY 及手機驗收以當次實際結果確認，不能以舊 standalone adapter 或固定 client 成功推定現場已完成。
 
 ## Broker 先於 Bash 與 CLI 存在
 
@@ -82,7 +82,7 @@ art-term-screen mcp-config
 bash scripts/install-instance-tools.sh --with-tmux-wrapper
 ```
 
-安裝 `instance_bridge.py`、`instance-shell.py`、`instance-shell.bash`，另將第四個通用 helper 安裝為持久化的 `~/.local/share/art-term/tools/tmux-shell.py`；不帶旗標則只安裝 tools 三檔，不新增此建立入口。App 新建 Shell 優先使用 tools 的 wrapper，缺少時退回原有版本 wrapper。既有 `openab-pty/tmux-v2`、其 image symlink 及 tmux binary 保持原處，不修改映像或要求 Pod 重啟。腳本驗證 owner／非 symlink 及不可由其他帳號寫入，檢查 Python／Bash 語法，以原子替換安裝為 0700 並輸出 SHA256。被替換的既有檔先備份為同目錄 `<原檔名>.pre-shell-screen-<UTC時間>-<隨機識別>`，權限 0600；內容相同不另建備份。不保存私人上游設定、不重啟既有 Shell、Pod 或 Runtime，也不更改全域 CLI／Discord 配置。本次穩定介面為 `instance_bridge.py shell --binding th2-<key>` 啟動 supervisor；`stdio --binding <binding>` 連現有 supervisor，舊 standalone 模式仍供相容。Shell rc 提供 `art-term-screen current`／`list`／`call`；底層 `shell-command --binding <binding> current|list|call|mcp-config` 的 call 從 stdin 讀 `{name, arguments, expected_target}` JSON。先讀 current／list 再帶該來源呼叫，不將 token 放入呼叫資料。上述是目前交付介面，不套用舊 CLI-owned adapter 的生命週期。
+安裝 `instance_bridge.py`、`instance-shell.py`、`instance-shell.bash`，另將第四個通用 helper 安裝為持久化的 `~/.local/share/art-term/tools/tmux-shell.py`；不帶旗標則只安裝 tools 三檔，不新增此建立入口。App 新建 Shell 優先使用 tools 的 wrapper，缺少時退回原有版本 wrapper。既有 `openab-pty/tmux-v2`、其 image symlink 及 tmux binary 保持原處，不修改映像或要求 Pod 重啟。腳本驗證 owner／非 symlink 及不可由其他帳號寫入，檢查 Python／Bash 語法，以原子替換安裝為 0700 並輸出 SHA256。被替換的既有檔先備份為同目錄 `<原檔名>.pre-shell-screen-<UTC時間>-<隨機識別>`，權限 0600；內容相同不另建備份。不保存私人上游設定、不重啟既有 Shell、Pod 或 Runtime，也不更改全域 CLI／Discord 配置。穩定介面為 `instance_bridge.py shell --binding th2-<key>` 啟動 supervisor；`stdio --binding <binding>` 連現有 supervisor，舊 standalone 模式仍供相容。Shell rc 提供 `art-term-screen current`／`list`／`call`；底層 `shell-command --binding <binding> current|list|call|mcp-config` 的 call 從 stdin 讀 `{name, arguments, expected_target}` JSON。先讀 current／list 再帶該來源呼叫，不將 token 放入呼叫資料。上述是目前交付介面，不套用舊 CLI-owned adapter 的生命週期。
 
 既有正在執行的 Shell／CLI 不注入啟動定義、不偷偷輸入命令。helper 安裝後需建立一次新連線，才有 Shell-owned broker；缺 helper 的工作仍可用普通 Bash，但工具不可假報已接入。若一般 `~/.bashrc` 已定義 Codex alias／function，rc 保留它而不覆蓋，因此會繞過接線；rc 載入後執行 `command codex`、絕對路徑，或再次定義同名 alias／function，可能繞過 scoped wrapper；自訂啟動器需明確確認其接線，不承諾每種用法自動接入。
 

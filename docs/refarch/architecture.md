@@ -216,7 +216,7 @@ App -- temporary raw/no-echo configure Shell -> broker memory target
 
 
 
-本次設計由新 tmux 工作 Shell 先啟動 supervisor broker，再以自有 PTY 啟動 Bash，保留 job control／resize 並以 pipe-death guard 清理自有子行程；App 透過短命管理 Shell 配置目前選擇。Shell client 與 coding CLI 的 scoped stdio proxy 使用同一 broker；其他 MCP client 可登記非秘密 `stdio --current-shell` 通用入口，以受限同 UID 祖先核對解析當前活 broker，不掃描 Host 或寫固定 binding／認證，不需要 App 專用 Codex 入口，不使用 Host 共用選擇，也不接入 Discord Agent。管理通道只傳有界配置 frame、回非秘密結果，不轉送圖片。broker 回傳完整上游 MCP 工具結果；固定 `current_target`／`list_target_tools`／`call_target_tool` 以來源版本避免切換時串線。預覽成功與工具就緒分別核對，不能以其中之一替代另一個。CLI EOF 不清除 Shell 選擇，clear／Shell 結束停止工具；既有 Shell 不注入啟動定義，安裝 helper 後需建立新連線。設計與待驗收邊界見[桌面](desktop.md)及[工具 bridge](runtime-desktop.md)。
+新 tmux 工作 Shell 先啟動 supervisor broker，再以自有 PTY 啟動 Bash，保留 job control／resize 並以 pipe-death guard 清理自有子行程；App 透過短命管理 Shell 配置目前選擇。Shell client 與 coding CLI 的 scoped stdio proxy 使用同一 broker；其他 MCP client 可登記非秘密 `stdio --current-shell` 通用入口，以受限同 UID 祖先核對解析當前活 broker，不掃描 Host 或寫固定 binding／認證，不需要 App 專用 Codex 入口，不使用 Host 共用選擇，也不接入 Discord Agent。管理通道只傳有界配置 frame、回非秘密結果，不轉送圖片。broker 回傳完整上游 MCP 工具結果；固定 `current_target`／`list_target_tools`／`call_target_tool` 以來源版本避免切換時串線。預覽成功與工具就緒分別核對，不能以其中之一替代另一個。CLI EOF 不清除 Shell 選擇，clear／Shell 結束停止工具；既有 Shell 不注入啟動定義，安裝 helper 後需建立新連線。設計與待驗收邊界見[桌面](desktop.md)及[工具 bridge](runtime-desktop.md)。
 
 ## tmux 保存工作與按需讀頁
 

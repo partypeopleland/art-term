@@ -1,6 +1,6 @@
 # Android 客戶端
 
-Android 版讓手機操作與 Windows 相同的 Runtime Host 與 Shell，沿用 Rust 的原生 HTTPS／WSS 核心；平台層處理觸控、輸入法、背景生命週期與本機憑證保護。目前以 Android APK 開發及驗收為主，Windows 接續同一開發分支，共用功能依相同契約實作。
+Android 版讓手機操作與 Windows 相同的 Runtime Host 與 Shell，沿用 Rust 的原生 HTTPS／WSS 核心；平台層處理觸控、輸入法、背景生命週期與本機憑證保護。Windows 與 Android 共用同一套非平台專屬功能與契約，各自保留平台專屬的呈現與輸入方式。
 
 ```text
 Shared Vue UI + Rust core
@@ -15,7 +15,7 @@ Android APK -- HTTPS / WSS --> Runtime --> Shell / Desktop
 
 連線設定只保存在本機 `connections.toml`，管理憑證由 operator Keystore（此 App 在 Android 使用的金鑰儲存）保護。APK 不包含私人連線；新手機可在 App 新增或匯入。觸控與背景處理會影響使用者能否持續操作，所以桌面測試與 APK 建置成功都不能取代手機驗收。
 
-目前 package 為 `net.missart.artterm`，minSdk 24／targetSdk 36，release 為 ARM64、16KB page alignment；本版為 0.1.29／code 1058。更新必須使用原簽章，才能維持既有 App 與 Keystore 的連續性。
+目前 package 為 `net.missart.artterm`，minSdk 24／targetSdk 36，release 為 ARM64、16KB page alignment；版本與 versionCode 以 `tauri.conf.json` 與 `tauri.android.conf.json` 為準。更新必須使用原簽章，才能維持既有 App 與 Keystore 的連續性。
 
 ## 操作與背景
 
@@ -45,7 +45,7 @@ Foreground -- onPause --> Background -- resume --> Foreground
 
 binding 指本機分頁與原 Runtime／session 的關聯，回前景只在有限次數與期限內恢復這份關聯，不改接其他工作。取消組字後，晚到的 `compositionend`／echo 會被擋住，直到新組字或明確新輸入，避免中文輸入被補送。Doze、系統回收與實機網路仍可能造成斷線，這套流程不保證無限保活。
 
-每個 live Shell 分頁可明確選 Screen，App 原生層直接向其 instance-mcp 取圖，不透過 Runtime 截圖 Shell。預覽標題顯示 Screen 名稱，圖片下方省略時間與工具狀態；本次工具範圍是 App 連入的工作 Shell 及該 Shell 裡的 coding CLI，不使用 Host 共用選擇，也暫不接入 Discord Agent。新 Shell 的 supervisor 在 Bash／CLI 前存在，App 選 Screen 後，Shell client 及稍後啟動的 scoped Codex 使用同一記憶體選擇；可照常輸入 `codex --yolo`，不需要 App 額外 Codex 入口，不修改全域 CLI 或恢復固定上游憑證。其他支援 MCP 的 CLI 可依原生設定登記 `art-term-screen mcp-config` 輸出的通用入口一次；不宣稱全部零配置。既有 Shell／CLI 不注入命令，helper 安裝後需建立新連線；CLI EOF 不清除 Shell 選擇，Shell 結束清除 broker。預覽成功不等於工具已驗收，實際安裝、PTY／Runtime 及手機結果另行確認。停止預覽不清除工具憑證；「取消桌面工具」才 clear 並停圖，兩者都不停止共享服務。細節見[桌面預覽](../refarch/desktop.md)。
+每個 live Shell 分頁可明確選 Screen，App 原生層直接向其 instance-mcp 取圖，不透過 Runtime 截圖 Shell。預覽標題顯示 Screen 名稱，圖片下方省略時間與工具狀態；工具範圍為 App 連入的工作 Shell 及該 Shell 裡的 coding CLI，不使用 Host 共用選擇，也不接入 Discord Agent。新 Shell 的 supervisor 在 Bash／CLI 前存在，App 選 Screen 後，Shell client 及稍後啟動的 scoped Codex 使用同一記憶體選擇；可照常輸入 `codex --yolo`，不需要 App 額外 Codex 入口，不修改全域 CLI 或恢復固定上游憑證。其他支援 MCP 的 CLI 可依原生設定登記 `art-term-screen mcp-config` 輸出的通用入口一次；不宣稱全部零配置。既有 Shell／CLI 不注入命令，helper 安裝後需建立新連線；CLI EOF 不清除 Shell 選擇，Shell 結束清除 broker。預覽成功不等於工具已驗收，實際安裝、PTY／Runtime 及手機結果另行確認。停止預覽不清除工具憑證；「取消桌面工具」才 clear 並停圖，兩者都不停止共享服務。細節見[桌面預覽](../refarch/desktop.md)。
 
 ## 語音輸入
 
@@ -82,8 +82,8 @@ setup 產生 ignored `target/android-tools/environment.json`；SDK 預設在 `ta
 原簽章release與驗證：
 
 ```powershell
-.\scripts\build-android.ps1 -Target aarch64 -OutputApk ./dist/android/art-term-0.1.23-aarch64.apk
-.\scripts\verify-android.ps1 -Apk ./dist/android/art-term-0.1.23-aarch64.apk
+.\scripts\build-android.ps1 -Target aarch64
+.\scripts\verify-android.ps1
 ```
 
 

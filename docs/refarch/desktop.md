@@ -42,11 +42,11 @@ URL 不允許帳密、query 或 fragment。HTTPS 使用正常憑證驗證；HTTP
 
 ## Windows／Android 選擇供 Shell 與 coding CLI 使用
 
-Owner 最新範圍是 App 連入的工作 Shell，以及它裡面的 coding CLI；Discord Agent 暫不接入，整台 Host 共用的 broker 也不在範圍。新工作 Shell 在 Bash／CLI 啟動前就持有未配置的 supervisor broker，因此可先選 Screen，再由 Shell 命令或稍後啟動的 coding CLI 使用相同選擇。CLI 結束不清除 Shell 選擇，明確取消工具或 Shell 結束才拒絕新工具呼叫。
+工具範圍是 App 連入的工作 Shell，以及它裡面的 coding CLI；Discord Agent 不接入，整台 Host 共用的 broker 也不在範圍。新工作 Shell 在 Bash／CLI 啟動前就持有未配置的 supervisor broker，因此可先選 Screen，再由 Shell 命令或稍後啟動的 coding CLI 使用相同選擇。CLI 結束不清除 Shell 選擇，明確取消工具或 Shell 結束才拒絕新工具呼叫。
 
 App 不新增 Codex 專用啟動按鈕，不自動執行 CLI。新 Shell 的 scoped wrapper 提供 Codex stdio 接線，不修改主機全域配置或恢復固定上游 token。既有正在執行的 Shell／AI 不注入命令；helper 安裝後需建立新連線。其他支援標準 MCP 的 CLI 可用 `art-term-screen mcp-config` 取得無 URL／token／固定 binding 的通用 stdio 入口，依各自原生設定登記一次；啟動時只解析當前 App Shell 的活 broker，不掃描 Host。不宣稱所有 CLI 零配置或既有 AI 熱插入。完整邊界見[Shell 工具 bridge](runtime-desktop.md)。
 
-這是本次整合設計；實際安裝、PTY／Runtime 行為與手機驗收依當次結果確認，預覽成功不等於 Shell／CLI 工具已驗收。
+安裝、PTY／Runtime 行為與手機驗收以當次實際結果確認，預覽成功不等於 Shell／CLI 工具已驗收。
 
 ## 相容與驗收邊界
 

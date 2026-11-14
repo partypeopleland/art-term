@@ -51,7 +51,7 @@ Windows GUI 與 Android 原生 View 仍須分別驗證呈現與操作；共同�
 
 ## 新 Shell 的桌面工具生命週期
 
-本次 Screen 整合在新 tmux 工作中先啟動 Shell-owned supervisor，再啟動互動 Bash，binding 使用完整 `th2-` 工作名稱。Shell client 及其 coding CLI 共用該 Shell 的記憶體選擇；不是 Host 全域服務。CLI EOF 不清除選擇，明確 clear 拒絕新工具呼叫，Shell／tmux／Runtime 結束則移除 socket 並清記憶體。App 背景或切 Main 只停止取圖。
+新 tmux 工作在啟動互動 Bash 前先啟動 Shell-owned supervisor，binding 使用完整 `th2-` 工作名稱。Shell client 及其 coding CLI 共用該 Shell 的記憶體選擇；不是 Host 全域服務。CLI EOF 不清除選擇，明確 clear 拒絕新工具呼叫，Shell／tmux／Runtime 結束則移除 socket 並清記憶體。App 背景或切 Main 只停止取圖。
 
 歷史仍由原 tmux pane 與讀頁 helper 管理，supervisor 以自有 PTY 維持 Bash 前景程序群組及 resize，pipe-death guard 清理 supervisor 非正常結束後的自有 session，不增加常駐 Runtime Shell、不改 namespace／歷史 manifest；Ctrl+C、job control、resize、退出狀態與 kill 清理須另經真 PTY／Runtime 驗證。Screen 工具安裝另將建立 wrapper 放在持久化 `~/.local/share/art-term/tools/tmux-shell.py`，App 新建時優先使用，缺少時退回原有版本 wrapper；該桌面工具安裝不改原 tmux-v2 binary／讀頁 helper。原終端捲動則須更新同一通用讀頁 helper；若目錄指向 image，使用持久化使用者目錄並保留原映像檔，不需要更新映像或重啟 Pod。安裝不重啟既有工作；已執行的 Shell 不注入新啟動定義，需建立新連線，缺 helper 時仍可普通 Bash 相容。設計、工具介面與驗收界線見[Shell 工具 bridge](runtime-desktop.md)。
 
