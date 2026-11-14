@@ -8,7 +8,7 @@
 
 ## 直接 MCP 與獨立 Screens 的驗收門檻
 
-下表列出本次應驗證的行為，不宣稱已執行；以當次結果與版本判定。固定 client 代替 AI 模型，但必須走正式產品 adapter、HTTP 與工具執行，不能 mock 產品路由。
+下表列出各平台應驗證的行為，不宣稱已執行；以當次結果與版本判定。固定 client 代替 AI 模型，但必須走正式產品 adapter、HTTP 與工具執行，不能 mock 產品路由。
 
 | 範圍 | 必須驗證 |
 |---|---|
@@ -90,7 +90,7 @@ Windows／APK 的 debug fixture CA 只限定測試建置，仍實際驗證 TLS�
 完成後列出案例 ID、實際通過／失敗／未執行、受測版本，以及仍需實機確認的項目。
 ```
 
-執行入口分別是 [Windows](../platforms/windows-regression.md)、[Android APK](../platforms/android-regression.md)、[Linux](../platforms/linux-regression.md)。Windows 專屬修改在 Windows 電腦開發與檢查，語音留下一階段；變更依 Issue／PR 流程提交與審查，合併由 Owner 決定，正式發布另行指定。Windows fixture、直接真 tmux、真 Codex 與 OS IME 各自記錄結果，不能互相代替；Owner 最終使用回饋另列。
+執行入口分別是 [Windows](../platforms/windows-regression.md)、[Android APK](../platforms/android-regression.md)、[Linux](../platforms/linux-regression.md)。Windows 專屬修改在 Windows 電腦開發與檢查；變更依 Issue／PR 流程提交與審查，合併由 Owner 決定，正式發布另行指定。Windows fixture、直接真 tmux、真 Codex 與 OS IME 各自記錄結果，不能互相代替；Owner 最終使用回饋另列。
 
 ## 仍需另外驗收
 

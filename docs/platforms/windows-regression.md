@@ -141,7 +141,7 @@ runner 對應同頁工作區／設定、inline Shell／th2 建立及直接 MCP�
 
 ## GitHub Actions 的使用決定
 
-本專案目前為 private。GitHub 雖提供 Windows runner，私有倉庫使用託管 runner 有免費額度，超額可能計費；目前決定不為這套測試建立 Actions workflow，驗收以 Windows 本機成功執行為準。未來條件變更時再重新確認官方計費規則，不能直接把這套測試接上託管 runner。相關條件見 [GitHub Actions 計費](https://docs.github.com/en/billing/concepts/product-billing/github-actions)與 [GitHub-hosted runners](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)。
+目前驗收以 Windows 本機成功執行為準；GitHub Actions 自動化測試之後另行補上。
 
 ## 附錄：實作與參考
 
