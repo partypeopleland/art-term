@@ -200,16 +200,25 @@ struct Tab {
     last_history: tokio::time::Instant,
 }
 
+pub(super) struct SpawnDeps {
+    pub(super) store: Arc<HostStore>,
+    pub(super) api: AdminClient,
+    pub(super) connector: Connector,
+    pub(super) ownership: Arc<dyn ShellOwnership>,
+}
 pub(super) fn spawn(
     id: TabId,
     label: String,
     handle: SessionHandle,
     size: TerminalSize,
-    store: Arc<HostStore>,
-    api: AdminClient,
-    connector: Connector,
-    ownership: Arc<dyn ShellOwnership>,
+    deps: SpawnDeps,
 ) -> (TabClient, Registration) {
+    let SpawnDeps {
+        store,
+        api,
+        connector,
+        ownership,
+    } = deps;
     let binding = handle.binding().clone();
     let host = binding.profile.id.clone();
     let terminal = Terminal::new(size);
@@ -668,20 +677,18 @@ impl Tab {
                 && !self.recovery_requested
                 && self.pending_recovery.is_none()
                 && self.pending_history.is_none()
-            {
-                if !self.history_initialized
+                && (!self.history_initialized
                     || (self.history.is_some()
-                        && self.last_history.elapsed() >= Duration::from_secs(30))
-                {
-                    self.history_initialized = true;
-                    if let Err(error) = self.history_request(
-                        HistoryRequest::Scroll { lines: 0 },
-                        HistoryPurpose::Control,
-                        cancel.clone(),
-                    ) {
-                        self.status = TabStatus::Ended(error.to_string());
-                        closing = true;
-                    }
+                        && self.last_history.elapsed() >= Duration::from_secs(30)))
+            {
+                self.history_initialized = true;
+                if let Err(error) = self.history_request(
+                    HistoryRequest::Scroll { lines: 0 },
+                    HistoryPurpose::Control,
+                    cancel.clone(),
+                ) {
+                    self.status = TabStatus::Ended(error.to_string());
+                    closing = true;
                 }
             }
             if !closing

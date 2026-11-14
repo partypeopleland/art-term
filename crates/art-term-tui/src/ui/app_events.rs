@@ -119,7 +119,7 @@ impl App {
                 if let Some(host) = self.profiles.hosts.iter().find(|h| h.id == tab.host_id()) {
                     self.queue_host(HostSelection::from(host));
                 }
-                self.tabs.push(tab);
+                self.tabs.push(*tab);
                 if current {
                     self.tab = self.tabs.len() - 1;
                     self.navigate(Page::Terminal);

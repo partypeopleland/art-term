@@ -191,16 +191,8 @@ impl AdminClient {
         origin: &str,
         secret: &Secret,
     ) -> Result<Zeroizing<Vec<u8>>, ApiError> {
-        self.request_at(
-            origin,
-            secret,
-            Method::GET,
-            "admin/sessions",
-            None,
-            ADMIN_REPLY_MAX,
-            status_error,
-        )
-        .await
+        self.request_at(origin, secret, Method::GET, "admin/sessions", None)
+            .await
     }
     pub fn new() -> Result<Self, ApiError> {
         Self::with_development_mode(false)
@@ -223,16 +215,8 @@ impl AdminClient {
         body: Option<serde_json::Value>,
     ) -> Result<Zeroizing<Vec<u8>>, ApiError> {
         super::profiles::canonical_origin(&host.profile.base_url)?;
-        self.request_at(
-            &host.profile.base_url,
-            &host.credential,
-            method,
-            path,
-            body,
-            ADMIN_REPLY_MAX,
-            status_error,
-        )
-        .await
+        self.request_at(&host.profile.base_url, &host.credential, method, path, body)
+            .await
     }
     async fn request_at(
         &self,
@@ -241,8 +225,6 @@ impl AdminClient {
         method: Method,
         path: &str,
         body: Option<serde_json::Value>,
-        cap: usize,
-        status_map: fn(StatusCode) -> ApiError,
     ) -> Result<Zeroizing<Vec<u8>>, ApiError> {
         let auth = Zeroizing::new(format!("Bearer {}", secret.expose()));
         let mut header = HeaderValue::from_str(&auth).map_err(|_| ApiError::Protocol)?;
@@ -261,14 +243,17 @@ impl AdminClient {
         // No retry. Dropping this future cancels network work; it never resends a POST.
         let mut response = request.send().await.map_err(network_error)?;
         if !response.status().is_success() {
-            return Err(status_map(response.status()));
+            return Err(status_error(response.status()));
         }
-        if response.content_length().is_some_and(|n| n > cap as u64) {
+        if response
+            .content_length()
+            .is_some_and(|n| n > ADMIN_REPLY_MAX as u64)
+        {
             return Err(ApiError::Protocol);
         }
         let mut bytes = Zeroizing::new(Vec::new());
         while let Some(chunk) = response.chunk().await.map_err(network_error)? {
-            if bytes.len().saturating_add(chunk.len()) > cap {
+            if bytes.len().saturating_add(chunk.len()) > ADMIN_REPLY_MAX {
                 return Err(ApiError::Protocol);
             }
             bytes.extend_from_slice(&chunk);

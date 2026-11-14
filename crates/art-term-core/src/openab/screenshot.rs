@@ -95,7 +95,7 @@ impl Cleanup {
             return;
         };
         if matches!(
-            tokio::time::timeout(CLEANUP_DEADLINE, self.api.delete(&host, &self.name)).await,
+            tokio::time::timeout(CLEANUP_DEADLINE, self.api.delete(host, &self.name)).await,
             Ok(Ok(())) | Ok(Err(super::api::ApiError::SessionMissing))
         ) {
             self.ownership.unmark(&self.name);

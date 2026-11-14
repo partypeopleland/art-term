@@ -492,7 +492,6 @@ impl SessionHandle {
             shared.clone(),
             rx,
             cancel_rx,
-            preview_flow.clone(),
             output_ready.clone(),
             output_drained.clone(),
         ));
@@ -802,10 +801,12 @@ async fn connect(
     request
         .headers_mut()
         .insert(tungstenite::http::header::AUTHORIZATION, header);
-    let mut config = WebSocketConfig::default();
-    config.max_message_size = Some(SOCKET_BYTES);
-    config.max_frame_size = Some(SOCKET_BYTES);
-    config.max_write_buffer_size = 512 * 1024;
+    let config = WebSocketConfig {
+        max_message_size: Some(SOCKET_BYTES),
+        max_frame_size: Some(SOCKET_BYTES),
+        max_write_buffer_size: 512 * 1024,
+        ..Default::default()
+    };
     let (socket, response) = tokio::time::timeout(
         Duration::from_secs(10),
         tokio_tungstenite::connect_async_tls_with_config(request, Some(config), true, connector),
@@ -824,7 +825,6 @@ async fn owner(
     shared: Arc<Mutex<Shared>>,
     mut commands: mpsc::Receiver<Command>,
     mut cancel: watch::Receiver<bool>,
-    _preview_flow: Arc<std::sync::atomic::AtomicBool>,
     output_ready: Arc<tokio::sync::Notify>,
     output_drained: Arc<tokio::sync::Notify>,
 ) {
@@ -844,7 +844,7 @@ async fn owner(
                     let Some(command)=command else{return Err(SessionError::Cancelled)};
                     let message=match &command {Command::Input(input)=>Message::Binary(input.bytes.clone()),Command::Resize(rows,cols)=>Message::Text(serde_json::json!({"v":1,"type":"resize","rows":rows,"cols":cols}).to_string()),Command::Ping=>Message::Text("{\"v\":1,\"type\":\"ping\"}".into())};
                     let result=tokio::time::timeout(Duration::from_secs(2),socket.send(message)).await;
-                    if matches!(command,Command::Input(_)) {if !matches!(&result,Ok(Ok(()))) {if let Ok(mut q)=shared.lock(){q.input_uncertain=true;}return Err(SessionError::InputUncertain)}}
+                    if matches!(command,Command::Input(_)) && !matches!(&result,Ok(Ok(()))) {if let Ok(mut q)=shared.lock(){q.input_uncertain=true;}return Err(SessionError::InputUncertain)}
                     result.map_err(|_|SessionError::Timeout)?.map_err(ws_error)?;
                     if matches!(command,Command::Input(_)){sent_input=true;}
                 }

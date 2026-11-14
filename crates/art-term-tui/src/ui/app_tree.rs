@@ -61,7 +61,10 @@ impl App {
                                 safe(&shell.label),
                                 if shell.attached { " ●" } else { "" }
                             ),
-                            action: Some(TreeAction::Shell(selection.clone(), shell.clone())),
+                            action: Some(TreeAction::Shell(
+                                selection.clone(),
+                                Box::new(shell.clone()),
+                            )),
                         });
                     }
                     if list.draining {
@@ -186,7 +189,12 @@ impl App {
                 let backend = self.backend.clone();
                 let size = self.size;
                 self.job(async move {
-                    JobResult::Opened(backend.open(OpenShell::Create { host }, size).await)
+                    JobResult::Opened(
+                        backend
+                            .open(OpenShell::Create { host }, size)
+                            .await
+                            .map(Box::new),
+                    )
                 });
             }
             Some(TreeAction::Refresh(host)) => self.queue_host(host),
@@ -196,7 +204,7 @@ impl App {
                 }
             }
             Some(TreeAction::Shell(_, shell)) => {
-                self.open_shell(shell, false);
+                self.open_shell(*shell, false);
             }
             Some(TreeAction::Screen(index)) => self.bind_screen(index + 1),
             None => (),
@@ -221,12 +229,13 @@ impl App {
                 backend
                     .open(
                         OpenShell::Attach {
-                            selection: shell.selection,
+                            selection: Box::new(shell.selection),
                             confirmed: true,
                         },
                         size,
                     )
-                    .await,
+                    .await
+                    .map(Box::new),
             )
         });
     }

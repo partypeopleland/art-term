@@ -565,7 +565,7 @@ impl HostStore {
         // Caller creates a private application data directory; never change ACLs here.
         let mut temp =
             tempfile::NamedTempFile::new_in(parent).map_err(|_| ApiError::StateChanged)?;
-        temp.write_all(&bytes).map_err(|_| ApiError::StateChanged)?;
+        temp.write_all(bytes).map_err(|_| ApiError::StateChanged)?;
         temp.as_file()
             .sync_all()
             .map_err(|_| ApiError::StateChanged)?;
@@ -574,7 +574,7 @@ impl HostStore {
         // tempfile persist uses atomic replace (MoveFileExW on Windows), never remove-first.
         temp.persist(&self.path)
             .map_err(|_| ApiError::StateChanged)?;
-        *self.source.lock().map_err(|_| ApiError::StateChanged)? = fingerprint(Some(&bytes));
+        *self.source.lock().map_err(|_| ApiError::StateChanged)? = fingerprint(Some(bytes));
         Ok(())
     }
 }
@@ -612,7 +612,7 @@ pub enum ImportDetails {
         origin: String,
         metadata: crate::connections::ConnectionMetadata,
         has_credential: bool,
-        target: Option<HostProfile>,
+        target: Option<Box<HostProfile>>,
     },
     Screen {
         mcp_url: String,
@@ -761,7 +761,7 @@ impl HostStore {
                         metadata: e.metadata.clone(),
                         has_credential: e.credential.is_some(),
                         target: if matches.len() == 1 {
-                            Some(matches[0].clone())
+                            Some(Box::new(matches[0].clone()))
                         } else {
                             None
                         },
@@ -864,7 +864,7 @@ impl HostStore {
                 (ImportAction::Update, Some(old)) if info.match_status == "duplicate" => {
                     let index = candidate
                         .iter()
-                        .position(|r| r.profile == old)
+                        .position(|r| r.profile == *old)
                         .ok_or(ApiError::StateChanged)?;
                     let secret =
                         if entry.credential.is_none() && !candidate[index].ciphertext.is_empty() {

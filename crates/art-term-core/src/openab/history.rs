@@ -566,7 +566,7 @@ impl HistoryChannel {
             if poll.batch_id != 0 {
                 handle.ack(poll.batch_id, 1)?;
             }
-            if self.buffer.iter().any(|b| *b == b'\n') {
+            if self.buffer.contains(&b'\n') {
                 continue;
             }
             if let Some(error) = poll.ended {

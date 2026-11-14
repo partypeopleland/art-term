@@ -392,13 +392,14 @@ fn finish(
             &ep.expected_host_key,
             &ep.expected_host_key_sha256,
             &ep.tmux_conf,
-        ] {
-            if let Some(value) = value {
-                ensure!(
-                    value.len() <= HOST_KEY_LINE_MAX && !value.chars().any(char::is_control),
-                    "legacy endpoint field exceeds bounds"
-                );
-            }
+        ]
+        .into_iter()
+        .flatten()
+        {
+            ensure!(
+                value.len() <= HOST_KEY_LINE_MAX && !value.chars().any(char::is_control),
+                "legacy endpoint field exceeds bounds"
+            );
         }
         let _ = ep.port;
         if let Some(provider) = &ep.desktop_provider {
