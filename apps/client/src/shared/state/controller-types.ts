@@ -2,7 +2,7 @@ import type { ComputedRef, Ref } from 'vue'
 import type { InstanceDesktop, HostDto, RuntimeHostDto, TargetDto } from '../transport/types'
 import type { TerminalHandle } from '../terminal/handle'
 import type { HostHistoryReply, HostHistoryRequest } from '../terminal/native'
-import type { SplitDirection } from '../terminal/split'
+import type { PaneNode, SplitDirection } from '../terminal/split'
 
 export type TabStatus = 'connecting' | 'live' | 'exited' | 'error'
 
@@ -47,10 +47,21 @@ export interface TabState {
   captureGen: number
   /** Internal, markRaw'd once attached. */
   term: TerminalHandle | null
-  /** Read-only mirror of `term` for the Windows split view; never receives input. */
+  /** Read-only mirrors of this tab's own connection for mirror pane leaves; never receives input. */
   mirrorTerm: TerminalHandle | null
-  split: SplitDirection | null
-  inputPaneHidden: boolean
+  /**
+   * Split pane tree for the Windows view. Null = single connection. Every
+   * `conn` leaf owns a full TabState registered in `tabs` with `paneOf`
+   * pointing back at this tab's key; the leaf whose tab IS this tab is the
+   * original connection and cannot be closed as a single pane.
+   */
+  paneRoot: PaneNode | null
+  /** Leaf id of the pane that currently owns keyboard focus (`conn:${key}` style ids). */
+  focusedLeafId: string | null
+  /** Monotonic suffix for generated pane leaf ids. */
+  paneSeq: number
+  /** Set on pane child tabs: key of the owning split-view tab. */
+  paneOf: string | null
   wantDesktop: boolean
   closed: boolean
   writeBuf: number[]
@@ -103,10 +114,23 @@ export interface AppController {
   attachTerminal(tab: TabState, handle: TerminalHandle): void
   attachMirror(tab: TabState, handle: TerminalHandle): void
   detachMirror(tab: TabState, handle: TerminalHandle): void
-  splitTab(tab: TabState, direction: SplitDirection): boolean
-  unsplitTab(tab: TabState): void
-  hideInputPane(tab: TabState): void
-  showInputPane(tab: TabState): void
+  /** Split `leafId` toward `direction`, adding an empty pane awaiting a session pick. */
+  splitPane(tab: TabState, leafId: string, direction: SplitDirection): boolean
+  /** Split `leafId` toward `direction`, adding a read-only mirror of that conn leaf's tab. */
+  mirrorPane(tab: TabState, leafId: string, direction: SplitDirection): boolean
+  isPaneKey(e: KeyboardEvent): boolean
+  /** Replace an empty leaf with a new independent connection pane. */
+  openPaneTarget(tab: TabState, leafId: string, host: HostDto, target: TargetDto): void
+  /** Close one pane leaf: child conn tabs detach only their own session. */
+  closePaneLeaf(tab: TabState, leafId: string): void
+  /** Remove every non-primary pane leaf (child connections close, mirrors/empties drop). */
+  unsplitPanes(tab: TabState): void
+  /** Point keyboard focus at a conn leaf's tab (null = non-conn leaf focused). */
+  focusPane(tab: TabState, leafId: string | null): void
+  /** Cycle conn-pane focus; delta +1/-1 in display order. */
+  cyclePaneFocus(tab: TabState, delta: number): void
+  /** Conn TabState that should receive paste/clipboard input for this tab. */
+  focusedConnTab(tab: TabState): TabState
   reopenTab(tab: TabState, withDesktop: boolean): void
   closeTab(tab: TabState): Promise<void>
   detachTab(tab: TabState): Promise<void>

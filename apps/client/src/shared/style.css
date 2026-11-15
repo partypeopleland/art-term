@@ -384,33 +384,12 @@ body,
   min-height: 0;
 }
 
-.tab-view.split-view.split-row {
-  flex-direction: row;
-}
-
-.tab-view.split-view.split-column {
-  flex-direction: column;
-}
-
 .tab-view .pane {
   position: relative;
   inset: auto;
   flex: 1 1 0;
   min-width: 0;
   min-height: 0;
-}
-
-.tab-view .split-divider {
-  flex: none;
-  background: var(--border);
-}
-
-.tab-view.split-view.split-row .split-divider {
-  width: 4px;
-}
-
-.tab-view.split-view.split-column .split-divider {
-  height: 4px;
 }
 
 .pane-close {

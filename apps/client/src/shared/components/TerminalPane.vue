@@ -6,9 +6,12 @@ import type { AppController, TabState } from '../state/controller'
 import type { HostHistoryRequest } from '../terminal/native'
 import { TerminalFactoryKey, createDesktopXtermTerminal, type TerminalHandle } from '../terminal/handle'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   tab: TabState
+  /** Pane is on screen (its owning tab-view is visible). */
   active: boolean
+  /** Pane owns keyboard focus; defaults to `active` for single-pane callers. */
+  focused?: boolean
   controller: AppController
   readerVisible?: boolean
   nativeScroll?: boolean
@@ -16,9 +19,11 @@ const props = defineProps<{
   closable?: boolean
   closeLabel?: string
   onSelectionFinished?: (tab: TabState) => void
-}>()
+}>(), { focused: undefined })
 
-const emit = defineEmits<{ close: [] }>()
+const emit = defineEmits<{ close: []; activate: [] }>()
+
+const isFocused = () => props.focused ?? props.active
 
 const el = ref<HTMLElement | null>(null)
 const nativeReader = inject(NativeHistoryKey, null) !== null
@@ -34,8 +39,8 @@ let viewportTicket = 0
 let selecting = false
 let selectionTimer: ReturnType<typeof setTimeout> | undefined
 function viewportEnabled(): boolean {
-  return !!props.nativeScroll && !nativeReader && props.active && props.readerVisible !== false && props.tab.runtime
-    && props.tab.status === 'live' && props.tab.key === props.controller.activeKey.value && !document.hidden && !disposed
+  return !!props.nativeScroll && !nativeReader && props.active && isFocused() && props.readerVisible !== false && props.tab.runtime
+    && props.tab.status === 'live' && !document.hidden && !disposed
 }
 function syncViewport(): void {
   if (props.mirror) return
@@ -57,7 +62,7 @@ function syncViewport(): void {
     hostViewport.start()
   })
 }
-watch(() => [props.active, props.readerVisible, props.nativeScroll, props.tab.term, props.tab.status, props.tab.sessionId, props.controller.activeKey.value], syncViewport)
+watch(() => [props.active, props.focused, props.readerVisible, props.nativeScroll, props.tab.term, props.tab.status, props.tab.sessionId], syncViewport)
 
 function fitAndReport(): void {
   const term = termHandle
@@ -67,9 +72,10 @@ function fitAndReport(): void {
 }
 
 function focusOnPointer(event: PointerEvent): void {
-  if (props.mirror) return
-  if (!nativeReader && props.active && props.tab.status === 'live' && event.button === 0) termHandle?.focus()
-  if (props.onSelectionFinished && props.active && event.button === 0) selecting = true
+  if (event.button !== 0) return
+  emit('activate')
+  if (!nativeReader && isFocused() && props.tab.status === 'live') termHandle?.focus()
+  if (props.onSelectionFinished && props.active) selecting = true
 }
 
 function finishSelection(event: PointerEvent): void {
@@ -91,7 +97,7 @@ onMounted(() => {
   handle.fit()
   if (props.mirror) props.controller.attachMirror(props.tab, handle)
   else props.controller.attachTerminal(props.tab, handle)
-  if (props.active && !props.mirror) handle.focus()
+  if (props.active && isFocused() && !props.mirror) handle.focus()
   document.addEventListener('visibilitychange', syncViewport)
   window.addEventListener('pointerup', finishSelection)
   window.addEventListener('pointercancel', finishSelection)
@@ -102,12 +108,12 @@ onMounted(() => {
 })
 
 watch(
-  () => props.active,
-  (now) => {
+  () => [props.active, props.focused],
+  ([now, focused]) => {
     if (!now || disposed) return
     void nextTick(() => {
       fitAndReport()
-      if (!props.mirror) termHandle?.focus()
+      if (focused ?? now) termHandle?.focus()
     })
   }
 )

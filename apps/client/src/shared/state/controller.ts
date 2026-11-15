@@ -7,6 +7,7 @@ import { createTerminalIo } from './controller-terminal-io'
 import type { AppController, ControllerOptions, HostUiState, TabState } from './controller-types'
 export type { AppController, ControllerOptions, HostUiState, ShotState, TabState, TabStatus } from './controller-types'
 import type {
+  HostDto,
   InstanceDesktop,
   OutputDto,
   RuntimeHostDto,
@@ -15,7 +16,17 @@ import type {
 } from '../transport/types'
 import type { TerminalHandle } from '../terminal/handle'
 import type { HostHistoryReply, HostHistoryRequest } from '../terminal/native'
-import type { SplitDirection } from '../terminal/split'
+import {
+  findPaneLeaf,
+  paneConnTabs,
+  paneLeaves,
+  removePaneLeaf,
+  replacePaneLeaf,
+  splitPaneLeaf,
+  type PaneLeaf,
+  type PaneNode,
+  type SplitDirection
+} from '../terminal/split'
 
 export const MAX_TABS = 32
 export const MAX_RUNTIME_PROFILES = 64
@@ -92,9 +103,66 @@ export function createAppController(
     }
   }
 
+  function newTabState(init: {
+    key: string
+    targetId: string
+    hostId: string
+    hostLabel: string
+    label: string
+    desktopAvailable: boolean
+    paneOf: string | null
+    wantDesktop?: boolean
+  }): TabState {
+    return {
+      key: init.key,
+      targetId: init.targetId,
+      hostId: init.hostId,
+      hostLabel: init.hostLabel,
+      label: init.label,
+      status: 'connecting',
+      errorMsg: '',
+      notice: '',
+      sessionId: null,
+      remoteSession: '',
+      runtime: false,
+      // A runtime HostDto carries the profile id — an agent-bound
+      // profile marks this tab for lifecycle-terminal retirement.
+      runtimeAgent: runtimeProfiles.value.some(
+        (p) => p.id === init.hostId && p.category === 'agent'
+      ),
+      exitCode: null,
+      desktopAvailable: init.desktopAvailable,
+      instanceDesktop: null,
+      instanceToolReady: false,
+      desktopEnabled: false,
+      desktopBusy: false,
+      desktopMsg: '',
+      desktopError: '',
+      previewVisible: true,
+      shot: null,
+      shotError: '',
+      captureGen: 0,
+      term: null,
+      mirrorTerm: null,
+      paneRoot: null,
+      focusedLeafId: null,
+      paneSeq: 0,
+      paneOf: init.paneOf,
+      wantDesktop: init.wantDesktop ?? false,
+      closed: false,
+      writeBuf: [],
+      writing: false,
+      writeDropped: false,
+      pendingSize: null,
+      resizing: false,
+      lastSize: null,
+      connectionGen: 0
+    }
+  }
+
   function openTarget(host: HostUiState, target: TargetDto, withDesktop: boolean): void {
     const existing = tabs.find(
-      (t) => t.targetId === target.id && t.hostId === host.dto.id && !t.closed
+      (t) => t.targetId === target.id && t.hostId === host.dto.id && !t.closed && !t.paneOf
     )
     if (existing) {
       setActive(existing.key)
@@ -111,49 +179,16 @@ export function createAppController(
       return
     }
     uiNotice.value = ''
-    const tab = reactive<TabState>({
+    const tab = reactive<TabState>(newTabState({
       key: `${host.dto.id}::${target.id}`,
       targetId: target.id,
       hostId: host.dto.id,
       hostLabel: host.dto.label,
       label: target.label,
-      status: 'connecting',
-      errorMsg: '',
-      notice: '',
-      sessionId: null,
-      remoteSession: '',
-      runtime: false,
-      // A runtime HostDto carries the profile id — an agent-bound
-      // profile marks this tab for lifecycle-terminal retirement.
-      runtimeAgent: runtimeProfiles.value.some(
-        (p) => p.id === host.dto.id && p.category === 'agent'
-      ),
-      exitCode: null,
       desktopAvailable: target.desktopAvailable || host.dto.desktopAvailable,
-      instanceDesktop: null,
-      instanceToolReady: false,
-      desktopEnabled: false,
-      desktopBusy: false,
-      desktopMsg: '',
-      desktopError: '',
-      previewVisible: true,
-      shot: null,
-      shotError: '',
-      captureGen: 0,
-      term: null,
-      mirrorTerm: null,
-      split: null,
-      inputPaneHidden: false,
-      wantDesktop: withDesktop,
-      closed: false,
-      writeBuf: [],
-      writing: false,
-      writeDropped: false,
-      pendingSize: null,
-      resizing: false,
-      lastSize: null,
-      connectionGen: 0
-    })
+      paneOf: null,
+      wantDesktop: withDesktop
+    }))
     tabs.push(tab)
     activeKey.value = tab.key
     // Session opens in attachTerminal once the pane mounted and fit().
@@ -164,9 +199,18 @@ export function createAppController(
       handle.dispose()
       return
     }
+    // Split/unsplit reshapes remount the pane's TerminalPane while the tab's
+    // connection stays alive. Carry the viewport over and release the stale
+    // handle so repeated reshapes cannot leak xterm instances.
+    const previous = tab.term
     tab.term = markRaw(handle)
     handle.onData((text, terminalReply) => terminalReply ? sendTerminalReply(tab, text) : sendInput(tab, text))
-    handle.setKeyInterceptor((ev) => !isSwitchKey(ev))
+    handle.setKeyInterceptor((ev) => !isSwitchKey(ev) && !(tab.paneRoot && isPaneKey(ev)))
+    if (previous && previous !== handle) {
+      const snapshot = previous.screenSnapshot?.()
+      previous.dispose()
+      if (snapshot) void handle.write(textEncoder.encode(snapshot)).catch(() => undefined)
+    }
     const want = tab.wantDesktop
     tab.wantDesktop = false
     if (tab.status === 'connecting') void openSession(tab, want)
@@ -188,27 +232,117 @@ export function createAppController(
     if (!tab.closed) handle.dispose()
   }
 
-  function splitTab(tab: TabState, direction: SplitDirection): boolean {
-    if (tab.closed || disposed || tab.status !== 'live' || !tab.sessionId || !tab.term) return false
-    tab.split = direction
-    tab.inputPaneHidden = false
+  function primaryLeaf(tab: TabState): PaneLeaf {
+    return { kind: 'conn', id: tab.key, tab }
+  }
+
+  function paneRootOf(tab: TabState): PaneNode {
+    return tab.paneRoot ?? primaryLeaf(tab)
+  }
+
+  /** Collapse a rebuilt tree back to null when only the primary conn leaf remains. */
+  function settlePaneRoot(tab: TabState, root: PaneNode | null): void {
+    tab.paneRoot = root && !(root.kind === 'conn' && root.tab === tab) ? root : null
+  }
+
+  function addPaneLeaf(tab: TabState, leafId: string, direction: SplitDirection, added: PaneLeaf): boolean {
+    if (tab.closed || disposed || (!tab.paneRoot && tab.status !== 'live')) return false
+    if (!findPaneLeaf(paneRootOf(tab), leafId)) return false
+    tab.paneSeq++
+    const leaf: PaneLeaf = added.kind === 'empty' ? { ...added, id: `empty:${tab.paneSeq}` } : added
+    tab.paneRoot = splitPaneLeaf(paneRootOf(tab), leafId, direction, leaf, `split:${tab.paneSeq}`)
+    tab.focusedLeafId = leaf.id
     return true
   }
 
-  function unsplitTab(tab: TabState): void {
-    if (tab.closed) return
-    tab.split = null
-    tab.inputPaneHidden = false
+  function splitPane(tab: TabState, leafId: string, direction: SplitDirection): boolean {
+    return addPaneLeaf(tab, leafId, direction, { kind: 'empty', id: '' })
   }
 
-  function hideInputPane(tab: TabState): void {
-    if (tab.closed || !tab.split) return
-    tab.inputPaneHidden = true
+  function mirrorPane(tab: TabState, leafId: string, direction: SplitDirection): boolean {
+    const root = paneRootOf(tab)
+    const leaf = findPaneLeaf(root, leafId)
+    if (!leaf || leaf.kind !== 'conn' || tab.closed || disposed) return false
+    const mirrorId = `mirror:${leaf.tab.key}`
+    if (findPaneLeaf(root, mirrorId)) return false
+    return addPaneLeaf(tab, leafId, direction, { kind: 'mirror', id: mirrorId, of: leaf.tab })
   }
 
-  function showInputPane(tab: TabState): void {
-    if (tab.closed || !tab.split) return
-    tab.inputPaneHidden = false
+  function openPaneTarget(tab: TabState, leafId: string, host: HostDto, target: TargetDto): void {
+    if (tab.closed || disposed || !tab.paneRoot) return
+    if (findPaneLeaf(tab.paneRoot, leafId)?.kind !== 'empty') return
+    if (hidden || tabs.length >= MAX_TABS) {
+      uiNotice.value = hidden ? '' : `已達 ${MAX_TABS} 分頁上限`
+      return
+    }
+    tab.paneSeq++
+    const child = reactive<TabState>(newTabState({
+      key: `${tab.key}#${tab.paneSeq}`,
+      targetId: target.id,
+      hostId: host.id,
+      hostLabel: host.label,
+      label: target.label,
+      desktopAvailable: target.desktopAvailable || host.desktopAvailable,
+      paneOf: tab.key
+    }))
+    tabs.push(child)
+    tab.paneRoot = replacePaneLeaf(tab.paneRoot, leafId, { kind: 'conn', id: child.key, tab: child })
+    tab.focusedLeafId = child.key
+    uiNotice.value = ''
+    // Session opens in attachTerminal once the pane mounted and fit().
+  }
+
+  function closePaneLeaf(tab: TabState, leafId: string): void {
+    if (tab.closed || disposed || !tab.paneRoot) return
+    const leaf = findPaneLeaf(tab.paneRoot, leafId)
+    if (!leaf) return
+    if (leaf.kind === 'conn') {
+      if (leaf.tab === tab) {
+        uiNotice.value = '原始連線窗格無法單獨關閉；請使用分頁關閉整個視窗。'
+        return
+      }
+      void closeTab(leaf.tab)
+      return
+    }
+    settlePaneRoot(tab, removePaneLeaf(tab.paneRoot, leafId))
+    if (tab.focusedLeafId === leafId) tab.focusedLeafId = tab.key
+  }
+
+  function unsplitPanes(tab: TabState): void {
+    if (tab.closed || !tab.paneRoot) return
+    for (const leaf of paneLeaves(tab.paneRoot)) {
+      if (leaf.id === tab.key) continue
+      if (leaf.kind === 'conn') void closeTab(leaf.tab)
+      else tab.paneRoot = removePaneLeaf(tab.paneRoot!, leaf.id)
+    }
+    settlePaneRoot(tab, tab.paneRoot)
+    tab.focusedLeafId = tab.key
+  }
+
+  function focusPane(tab: TabState, leafId: string | null): void {
+    if (tab.closed || !tab.paneRoot || leafId === null) {
+      if (!tab.closed) tab.focusedLeafId = leafId
+      return
+    }
+    const leaf = findPaneLeaf(tab.paneRoot, leafId)
+    if (leaf) tab.focusedLeafId = leafId
+  }
+
+  function cyclePaneFocus(tab: TabState, delta: number): void {
+    if (tab.closed || !tab.paneRoot) return
+    const order = paneConnTabs(tab.paneRoot)
+    if (order.length < 2) return
+    const idx = order.findIndex((t) => t.key === tab.focusedLeafId)
+    const next = idx < 0
+      ? order[delta > 0 ? 0 : order.length - 1]
+      : order[(idx + delta + order.length) % order.length]
+    tab.focusedLeafId = next.key
+  }
+
+  function focusedConnTab(tab: TabState): TabState {
+    if (!tab.paneRoot || !tab.focusedLeafId) return tab
+    const leaf = findPaneLeaf(tab.paneRoot, tab.focusedLeafId)
+    return leaf?.kind === 'conn' ? leaf.tab : tab
   }
 
   async function writeTerminal(tab: TabState, data: Uint8Array, historical = false): Promise<void> {
@@ -476,19 +610,11 @@ export function createAppController(
     transport, () => disposed, () => hidden
   )
 
-  function setActive(key: string): void {
-    if (key === activeKey.value) return
-    const prev = activeTab.value
-    if (prev) invalidateCapture(prev)
-    activeKey.value = key
-    const next = activeTab.value
-    if (next && canCapture(next)) requestCapture(next)
-  }
-
   function stepTab(delta: number): void {
-    if (!tabs.length) return
-    const idx = tabs.findIndex((t) => t.key === activeKey.value)
-    const next = tabs[(((idx < 0 ? 0 : idx) + delta) % tabs.length + tabs.length) % tabs.length]
+    const top = tabs.filter((t) => !t.paneOf && !t.closed)
+    if (!top.length) return
+    const idx = top.findIndex((t) => t.key === activeKey.value)
+    const next = top[(((idx < 0 ? 0 : idx) + delta) % top.length + top.length) % top.length]
     setActive(next.key)
   }
 
@@ -505,14 +631,56 @@ export function createAppController(
     return false
   }
 
+  /** Pane focus/close shortcuts: Ctrl+Alt+Arrow cycles conn panes, Ctrl+Shift+W closes the focused one. */
+  function isPaneKey(e: KeyboardEvent): boolean {
+    if (e.type !== 'keydown' || e.metaKey) return false
+    if (e.ctrlKey && e.altKey && !e.shiftKey &&
+        (e.code === 'ArrowLeft' || e.code === 'ArrowRight' || e.code === 'ArrowUp' || e.code === 'ArrowDown')) {
+      return true
+    }
+    return e.ctrlKey && e.shiftKey && !e.altKey && e.code === 'KeyW'
+  }
+
+  function closeFocusedPane(tab: TabState): void {
+    const leaf = tab.focusedLeafId ? findPaneLeaf(tab.paneRoot, tab.focusedLeafId) : null
+    if (!leaf) {
+      uiNotice.value = '請先點選要關閉的窗格。'
+      return
+    }
+    closePaneLeaf(tab, leaf.id)
+  }
+
   /** Global capture-phase keydown handler AND xterm key interceptor basis. */
   function handleKey(e: KeyboardEvent): boolean {
-    if (!isSwitchKey(e)) return false
+    if (isSwitchKey(e)) {
+      e.preventDefault()
+      e.stopPropagation()
+      const back = e.code === 'BracketLeft' || e.code === 'PageUp' || e.key === '[' || e.key === 'PageUp'
+      stepTab(back ? -1 : 1)
+      return true
+    }
+    const tab = activeTab.value
+    if (!tab?.paneRoot || !isPaneKey(e)) return false
     e.preventDefault()
     e.stopPropagation()
-    const back = e.code === 'BracketLeft' || e.code === 'PageUp' || e.key === '[' || e.key === 'PageUp'
-    stepTab(back ? -1 : 1)
+    if (e.code === 'KeyW') {
+      closeFocusedPane(tab)
+      return true
+    }
+    const back = e.code === 'ArrowLeft' || e.code === 'ArrowUp'
+    cyclePaneFocus(tab, back ? -1 : 1)
     return true
+  }
+
+  function setActive(key: string): void {
+    if (key === activeKey.value) return
+    const target = tabs.find((t) => t.key === key)
+    if (!target || target.paneOf || target.closed) return
+    const prev = activeTab.value
+    if (prev) invalidateCapture(prev)
+    activeKey.value = key
+    const next = activeTab.value
+    if (next && canCapture(next)) requestCapture(next)
   }
 
   async function closeTab(tab: TabState): Promise<void> {
@@ -536,14 +704,22 @@ export function createAppController(
     tab.term = null
     tab.mirrorTerm?.dispose()
     tab.mirrorTerm = null
-    tab.split = null
-    tab.inputPaneHidden = false
+    // Pane children are independent connections — closing the owning tab
+    // closes each of them; their own paneOf hook then finds a closed parent.
+    for (const child of tabs.filter((t) => t.paneOf === tab.key)) void closeTab(child)
     const idx = tabs.indexOf(tab)
     if (idx >= 0) tabs.splice(idx, 1)
     if (activeKey.value === tab.key) {
-      const next = tabs[Math.min(idx, tabs.length - 1)]
+      const next = tabs.filter((t) => !t.paneOf)[Math.min(idx, tabs.filter((t) => !t.paneOf).length - 1)]
       activeKey.value = next ? next.key : null
       if (next && canCapture(next)) requestCapture(next)
+    }
+    if (tab.paneOf) {
+      const parent = tabs.find((t) => t.key === tab.paneOf && !t.closed)
+      if (parent?.paneRoot) {
+        settlePaneRoot(parent, removePaneLeaf(parent.paneRoot, tab.key))
+        if (parent.focusedLeafId === tab.key) parent.focusedLeafId = parent.key
+      }
     }
     if (sid) await transport.close(sid).catch(() => undefined)
   }
@@ -561,8 +737,6 @@ export function createAppController(
     tab.writeBuf = []
     tab.pendingSize = null
     tab.desktopEnabled = false
-    tab.split = null
-    tab.inputPaneHidden = false
     tab.notice = '本機已中斷；可重新連線續接遠端工作'
     invalidateCapture(tab)
     if (sid) await transport.close(sid).catch(() => undefined)
@@ -724,10 +898,14 @@ export function createAppController(
     attachTerminal,
     attachMirror,
     detachMirror,
-    splitTab,
-    unsplitTab,
-    hideInputPane,
-    showInputPane,
+    splitPane,
+    mirrorPane,
+    openPaneTarget,
+    closePaneLeaf,
+    unsplitPanes,
+    focusPane,
+    cyclePaneFocus,
+    focusedConnTab,
     reopenTab,
     closeTab,
     detachTab,
@@ -735,6 +913,7 @@ export function createAppController(
     setActive,
     stepTab,
     isSwitchKey,
+    isPaneKey,
     handleKey,
     sendInput,
     requestResize,
