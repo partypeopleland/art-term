@@ -191,18 +191,157 @@ describe('Windows independent split panes', () => {
     expect(tab.status).toBe('live')
   })
 
-  it('does not close the primary conn pane as a single pane', async () => {
+  it('closing the primary pane promotes a surviving child connection', async () => {
+    const { controller, transport, terms, tab, other } = await setup()
+    const sid = tab.sessionId!
+    controller.splitPane(tab, tab.key, 'right')
+    controller.splitPane(tab, tab.key, 'down')
+    const empties = paneLeaves(tab.paneRoot!).filter((l) => l.kind === 'empty')
+    for (const leaf of empties) {
+      controller.openPaneTarget(tab, leaf.id, makeHost('host', [other]), other)
+    }
+    await flush()
+    const children = controller.tabs.filter((t) => t.paneOf === tab.key)
+    expect(children).toHaveLength(2)
+    const childSids = children.map((c) => c.sessionId)
+    const primaryTerm = tab.term as unknown as SplitTerm
+
+    await controller.closePaneLeaf(tab, tab.key)
+    await flush()
+
+    // Only the primary connection ended; both child sessions survive.
+    expect(tab.closed).toBe(true)
+    expect(controller.tabs.find((t) => t.key === tab.key)).toBeUndefined()
+    expect(transport.closeCalls).toContain(sid)
+    for (const childSid of childSids) expect(transport.closeCalls).not.toContain(childSid)
+    expect(primaryTerm.disposed).toBe(true)
+
+    // The first surviving conn pane is promoted to own the top-level tab.
+    const survivor = children.find((c) => !c.closed)!
+    const remaining = children.find((c) => c !== survivor)!
+    expect(survivor.paneOf).toBeNull()
+    expect(remaining.paneOf).toBe(survivor.key)
+    expect(controller.activeKey.value).toBe(survivor.key)
+    expect(survivor.status).toBe('live')
+    expect(survivor.paneRoot).toBeTruthy()
+    expect(paneConnTabs(survivor.paneRoot!)).toEqual([survivor, remaining])
+    expect(survivor.focusedLeafId).toBe(remaining.key)
+  })
+
+  it('primary shell exit promotes a survivor instead of cascading the close', async () => {
+    const { controller, transport, tab, other } = await setup()
+    const sid = tab.sessionId!
+    controller.splitPane(tab, tab.key, 'right')
+    const emptyId = paneLeaves(tab.paneRoot!).find((l) => l.kind === 'empty')!.id
+    controller.openPaneTarget(tab, emptyId, makeHost('host', [other]), other)
+    await flush()
+    const child = controller.tabs.find((t) => t.paneOf === tab.key)!
+    const childSid = child.sessionId!
+
+    transport.feed(sid, { bytes: [], exitCode: 0 })
+    await flush()
+
+    expect(tab.closed).toBe(true)
+    expect(transport.closeCalls).toContain(sid)
+    expect(transport.closeCalls).not.toContain(childSid)
+    expect(child.closed).toBe(false)
+    expect(child.paneOf).toBeNull()
+    expect(child.paneRoot).toBeNull()
+    expect(child.status).toBe('live')
+    expect(controller.activeKey.value).toBe(child.key)
+  })
+
+  it('Ctrl+Shift+W on the focused primary pane promotes the survivor', async () => {
     const { controller, transport, tab, other } = await setup()
     controller.splitPane(tab, tab.key, 'right')
     const emptyId = paneLeaves(tab.paneRoot!).find((l) => l.kind === 'empty')!.id
     controller.openPaneTarget(tab, emptyId, makeHost('host', [other]), other)
     await flush()
-    controller.closePaneLeaf(tab, tab.key)
+    const child = controller.tabs.find((t) => t.paneOf === tab.key)!
+    const childSid = child.sessionId!
+    tab.focusedLeafId = tab.key
+
+    const closeEvent = new KeyboardEvent('keydown', { code: 'KeyW', ctrlKey: true, shiftKey: true })
+    expect(controller.handleKey(closeEvent)).toBe(true)
     await flush()
-    expect(tab.closed).toBe(false)
-    expect(tab.status).toBe('live')
-    expect(controller.tabs.filter((t) => t.paneOf === tab.key)).toHaveLength(1)
-    expect(transport.closeCalls).toEqual([])
+
+    expect(tab.closed).toBe(true)
+    expect(transport.closeCalls).not.toContain(childSid)
+    expect(child.paneOf).toBeNull()
+    expect(controller.activeKey.value).toBe(child.key)
+  })
+
+  it('removes the mirror leaf when its watched child pane closes', async () => {
+    const { controller, tab, other } = await setup()
+    controller.splitPane(tab, tab.key, 'right')
+    const emptyId = paneLeaves(tab.paneRoot!).find((l) => l.kind === 'empty')!.id
+    controller.openPaneTarget(tab, emptyId, makeHost('host', [other]), other)
+    await flush()
+    const child = controller.tabs.find((t) => t.paneOf === tab.key)!
+    expect(controller.mirrorPane(tab, child.key, 'down')).toBe(true)
+    await flush()
+    expect(findPaneLeaf(tab.paneRoot!, `mirror:${child.key}`)).toBeTruthy()
+
+    await controller.closeTab(child)
+    await flush()
+    expect(tab.paneRoot).toBeNull()
+  })
+
+  it('child panes keep pane shortcuts out of xterm while the split exists', async () => {
+    const { controller, terms, tab, other } = await setup()
+    controller.splitPane(tab, tab.key, 'right')
+    const emptyId = paneLeaves(tab.paneRoot!).find((l) => l.kind === 'empty')!.id
+    controller.openPaneTarget(tab, emptyId, makeHost('host', [other]), other)
+    await flush()
+    const child = controller.tabs.find((t) => t.paneOf === tab.key)!
+    const childTerm = child.term as unknown as SplitTerm
+    const primaryTerm = tab.term as unknown as SplitTerm
+    const paneKey = new KeyboardEvent('keydown', { code: 'ArrowRight', ctrlKey: true, altKey: true })
+    const plainKey = new KeyboardEvent('keydown', { key: 'a' })
+
+    // false = xterm must not handle it (the global pane handler does).
+    expect(childTerm.keyInterceptor!(paneKey)).toBe(false)
+    expect(primaryTerm.keyInterceptor!(paneKey)).toBe(false)
+    expect(childTerm.keyInterceptor!(plainKey)).toBe(true)
+    expect(terms.filter((t) => !t.disposed)).toHaveLength(2)
+  })
+
+  it('focuses a clicked pane terminal immediately without waiting for props', async () => {
+    const { wrapper, controller, terms, tab, other } = await setup()
+    controller.splitPane(tab, tab.key, 'right')
+    const emptyId = paneLeaves(tab.paneRoot!).find((l) => l.kind === 'empty')!.id
+    controller.openPaneTarget(tab, emptyId, makeHost('host', [other]), other)
+    await flush()
+    const child = controller.tabs.find((t) => t.paneOf === tab.key)!
+    const childTerm = terms.find((t) => t === (child.term as unknown as SplitTerm))!
+    tab.focusedLeafId = tab.key
+    await flush()
+
+    const cells = wrapper.findAll('.pane-cell')
+    expect(cells).toHaveLength(2)
+    const before = childTerm.focusCount
+    cells[1].find('.term-host').element.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }))
+    expect(childTerm.focusCount).toBe(before + 1)
+    expect(tab.focusedLeafId).toBe(child.key)
+  })
+
+  it('shows the pane menu on a single unsplit pane and splits via it', async () => {
+    const { wrapper, controller, tab } = await setup()
+    expect(tab.paneRoot).toBeNull()
+    const cell = wrapper.find('.pane-cell')
+    expect(cell.exists()).toBe(true)
+    await cell.trigger('contextmenu')
+    await nextTick()
+    const menu = document.body.querySelector('.pane-menu')
+    expect(menu).toBeTruthy()
+    const buttons = [...menu!.querySelectorAll('button')]
+    const labels = buttons.map((b) => b.textContent)
+    expect(labels).toContain('向右分割')
+    expect(labels).toContain('加入唯讀鏡像')
+    buttons.find((b) => b.textContent === '向右分割')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
+    expect(tab.paneRoot?.kind).toBe('split')
+    expect(paneLeaves(tab.paneRoot!).some((l) => l.kind === 'empty')).toBe(true)
   })
 
   it('cycles pane focus with keyboard order and closes the focused child pane', async () => {

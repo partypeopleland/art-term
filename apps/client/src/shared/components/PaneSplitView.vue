@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import type { AppController, TabState } from '../state/controller'
 import type { PaneLeaf, PaneNode, PaneSplitNode, SplitDirection } from '../terminal/split'
-import { clampPaneRatio, findPaneLeaf } from '../terminal/split'
+import { clampPaneRatio } from '../terminal/split'
 import TerminalPane from './TerminalPane.vue'
 
 // Recursive split-view renderer. `tab` is the owning tab (its own conn leaf is
@@ -25,15 +25,19 @@ const DIRECTIONS: { dir: SplitDirection; label: string }[] = [
 ]
 
 const splitEl = ref<HTMLElement | null>(null)
-const menu = ref<{ x: number; y: number; leafId: string } | null>(null)
+const menu = ref<{ x: number; y: number; leafId: string; leaf: PaneLeaf } | null>(null)
 
 function leafClosable(leaf: PaneLeaf | null): boolean {
-  return !!leaf && !(leaf.kind === 'conn' && leaf.tab === props.tab)
+  if (!leaf) return false
+  if (leaf.kind !== 'conn') return true
+  // The owning tab's own conn pane closes like any other once a split
+  // view exists (a survivor is promoted); alone it stays tab-owned.
+  return leaf.tab !== props.tab || !!props.tab.paneRoot
 }
 
 function openMenu(event: MouseEvent, leaf: PaneLeaf): void {
   event.preventDefault()
-  menu.value = { x: event.clientX, y: event.clientY, leafId: leaf.id }
+  menu.value = { x: event.clientX, y: event.clientY, leafId: leaf.id, leaf }
 }
 
 function closeMenu(): void {
@@ -41,7 +45,7 @@ function closeMenu(): void {
 }
 
 function menuLeaf(): PaneLeaf | null {
-  return menu.value ? findPaneLeaf(props.tab.paneRoot, menu.value.leafId) : null
+  return menu.value?.leaf ?? null
 }
 
 function splitFromMenu(direction: SplitDirection): void {
@@ -118,12 +122,12 @@ function startDrag(event: PointerEvent, node: PaneSplitNode): void {
     </div>
   </div>
 
-  <div v-else class="pane-cell" :class="{ focused: visible && tab.focusedLeafId === node.id }" @contextmenu="openMenu($event, node)" @pointerdown="node.kind === 'empty' && controller.focusPane(tab, node.id)">
+  <div v-else class="pane-cell" :class="{ focused: visible && !!tab.paneRoot && tab.focusedLeafId === node.id }" @contextmenu="openMenu($event, node)" @pointerdown="node.kind === 'empty' && controller.focusPane(tab, node.id)">
     <TerminalPane
       v-if="node.kind === 'conn'"
       :tab="node.tab"
       :active="visible"
-      :focused="visible && tab.focusedLeafId === node.id"
+      :focused="tab.paneRoot ? visible && tab.focusedLeafId === node.id : undefined"
       :controller="controller"
       :reader-visible="visible"
       native-scroll
@@ -167,7 +171,7 @@ function startDrag(event: PointerEvent, node: PaneSplitNode): void {
           <div class="pane-menu-sep" />
           <button v-for="d in DIRECTIONS" :key="d.dir" role="menuitem" @click="splitFromMenu(d.dir)">{{ d.label }}</button>
           <div class="pane-menu-sep" />
-          <button role="menuitem" :disabled="!leafClosable(menuLeaf()!)" @click="closeFromMenu">關閉窗格</button>
+          <button role="menuitem" @click="closeFromMenu">關閉窗格</button>
         </div>
       </template>
     </Teleport>

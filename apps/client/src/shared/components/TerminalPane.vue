@@ -74,7 +74,9 @@ function fitAndReport(): void {
 function focusOnPointer(event: PointerEvent): void {
   if (event.button !== 0) return
   emit('activate')
-  if (!nativeReader && isFocused() && props.tab.status === 'live') termHandle?.focus()
+  // `focused` only updates next tick; focus directly so the clicked pane
+  // owns keys immediately even when it was not the focused leaf before.
+  if (!nativeReader && !props.mirror && props.active && props.tab.status === 'live') termHandle?.focus()
   if (props.onSelectionFinished && props.active) selecting = true
 }
 

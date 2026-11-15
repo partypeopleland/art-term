@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } f
 import type { HostDto, InstanceDesktop, TargetDto, Transport } from '../shared/transport/types'
 import { createAppController, type AppController, type ControllerOptions, type TabState } from '../shared/state/controller'
 import { TerminalFactoryKey, createDesktopXtermTerminal, type TerminalFactory } from '../shared/terminal/handle'
-import type { SplitDirection } from '../shared/terminal/split'
+import type { PaneLeaf, SplitDirection } from '../shared/terminal/split'
 import { runtimeConnectedIds } from '../shared/state/runtime-entry'
 import ConnectionDashboard from '../shared/components/ConnectionDashboard.vue'
 import ThemeSettings from '../shared/components/ThemeSettings.vue'
@@ -12,7 +12,6 @@ import AppHomepage from '../shared/components/AppHomepage.vue'
 import { selectedTheme, terminalTheme } from '../shared/theme/theme'
 import '../shared/theme/themes.css'
 import TabBar from '../shared/components/TabBar.vue'
-import TerminalPane from '../shared/components/TerminalPane.vue'
 import PaneSplitView from '../shared/components/PaneSplitView.vue'
 import PaneConnectionPicker from '../shared/components/PaneConnectionPicker.vue'
 import PreviewPanel from '../shared/components/PreviewPanel.vue'
@@ -111,7 +110,10 @@ async function clearScreen(): Promise<void> {
 watch(() => [activeTab.value?.key, activeTab.value?.sessionId, activeTab.value?.status], () => {
   screenPickerOpen.value = false
 })
-watch(terminalVisible, visible => { if (visible) void nextTick(() => activeTab.value?.term?.focus()) })
+watch(terminalVisible, visible => {
+  const tab = activeTab.value
+  if (visible && tab) void nextTick(() => controller.focusedConnTab(tab).term?.focus())
+})
 function onGlobalKey(event: KeyboardEvent): void {
   if (page.value !== 'workspace' || covered.value || documentHidden.value) return
   const target = event.target instanceof HTMLElement ? event.target : null
@@ -143,16 +145,28 @@ function paneVisible(tab: TabState): boolean {
 function tabViewClass(tab: TabState): string {
   return tab.paneRoot ? 'tab-view pane-view' : 'tab-view single'
 }
-function primaryActive(tab: TabState): boolean {
-  return paneVisible(tab)
+// Unsplit tabs render through the same pane view so the right-click menu
+// (split / mirror / close) exists before the first split. The synthetic
+// leaf is cached per tab to keep prop identity stable across renders.
+const singleLeaves = new WeakMap<TabState, PaneLeaf>()
+function singleLeaf(tab: TabState): PaneLeaf {
+  let leaf = singleLeaves.get(tab)
+  if (!leaf) {
+    leaf = { kind: 'conn', id: tab.key, tab }
+    singleLeaves.set(tab, leaf)
+  }
+  return leaf
 }
 function onSplitChange(tab: TabState, event: Event): void {
   const select = event.target as HTMLSelectElement
   const value = select.value
-  const ok = !value ? (controller.unsplitPanes(tab), true) : controller.splitPane(tab, tab.key, value as SplitDirection)
+  const leafId = tab.focusedLeafId ?? tab.key
+  const ok = !value ? (controller.unsplitPanes(tab), true) : controller.splitPane(tab, leafId, value as SplitDirection)
   if (!ok) select.value = tab.paneRoot ? 'split' : ''
 }
-const statusText = computed(() => !activeTab.value ? '未連線' : activeTab.value.status === 'live' ? '已連線' : activeTab.value.status === 'connecting' ? '連線中…' : activeTab.value.status === 'exited' ? '已結束' : `錯誤：${activeTab.value.errorMsg}`)
+// Toolbar/statusbar describe the pane that currently owns input focus.
+const paneTab = computed(() => (activeTab.value ? controller.focusedConnTab(activeTab.value) : null))
+const statusText = computed(() => !paneTab.value ? '未連線' : paneTab.value.status === 'live' ? '已連線' : paneTab.value.status === 'connecting' ? '連線中…' : paneTab.value.status === 'exited' ? '已結束' : `錯誤：${paneTab.value.errorMsg}`)
 </script>
 
 <template>
@@ -180,33 +194,21 @@ const statusText = computed(() => !activeTab.value ? '未連線' : activeTab.val
       <section class="desktop-connect-page" aria-label="終端工作區">
         <TabBar :tabs="visibleTabs" :active-key="controller.activeKey.value" @select="tab => controller.setActive(tab.key)" @close="tab => void controller.closeTab(tab)" />
         <div v-if="activeTab" class="toolbar">
-          <span class="t-name">{{ activeTab.hostLabel }} / {{ activeTab.label }}</span><span class="status" :class="activeTab.status">{{ statusText }}</span><span class="spacer" />
+          <span class="t-name">{{ paneTab?.hostLabel }} / {{ paneTab?.label }}</span><span class="status" :class="paneTab?.status">{{ statusText }}</span><span class="spacer" />
           <button v-if="activeTab.status === 'live'" class="btn screen-trigger" data-testid="desktop-toggle" aria-label="選擇 Screen" title="選擇 Screen" :aria-pressed="!!activeTab.instanceDesktop" :disabled="activeTab.desktopBusy" @click="openScreens"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2" /><path d="M8 21h8M12 18v3" /></svg></button>
           <label v-if="activeTab.status === 'live' || activeTab.paneRoot" class="split-control"><span class="muted">分割</span><select data-testid="terminal-split" :value="activeTab.paneRoot ? 'split' : ''" :disabled="activeTab.status !== 'live' && !activeTab.paneRoot" @change="onSplitChange(activeTab, $event)"><option v-if="activeTab.paneRoot" value="split" disabled>已分割</option><option value="">不分割</option><option value="up">向上</option><option value="down">向下</option><option value="left">向左</option><option value="right">向右</option></select></label>
-          <button v-if="activeTab.status === 'error' || activeTab.status === 'exited'" class="btn" @click="controller.reopenTab(activeTab, false)">重新連線</button>
+          <button v-if="paneTab && (paneTab.status === 'error' || paneTab.status === 'exited')" class="btn" @click="controller.reopenTab(paneTab, false)">重新連線</button>
         </div>
         <div class="desktop-session-content">
           <div class="term-area">
             <div v-for="tab in visibleTabs" :key="tab.key" class="tab-view" :class="tabViewClass(tab)" v-show="terminalVisible && tab.key === controller.activeKey.value">
               <PaneSplitView
-                v-if="tab.paneRoot"
-                :node="tab.paneRoot"
+                :node="tab.paneRoot ?? singleLeaf(tab)"
                 :tab="tab"
                 :controller="controller"
                 :visible="paneVisible(tab)"
                 :on-selection-finished="clipboard.selectionFinished"
                 @pick-connection="leafId => openPanePicker(tab, leafId)"
-              />
-              <TerminalPane
-                v-else
-                :tab="tab"
-                :active="primaryActive(tab)"
-                :controller="controller"
-                :reader-visible="primaryActive(tab)"
-                :closable="false"
-                close-label="關閉窗格"
-                :on-selection-finished="clipboard.selectionFinished"
-                native-scroll
               />
             </div>
             <div v-if="!visibleTabs.length" class="empty">從左側選擇連線，開始工作。</div>
@@ -218,7 +220,7 @@ const statusText = computed(() => !activeTab.value ? '未連線' : activeTab.val
       <section v-if="page === 'settings'" class="desktop-settings-page" aria-label="全域設定"><ThemeSettings embedded desktop :initial-section="settingsSection" :transport="transport" :hosts="controller.runtimeProfiles.value" @changed="settingsChanged" @picker="transferPicker = $event" /></section>
       <section v-if="page === 'home'" class="desktop-home-page" aria-label="軟體資訊首頁"><nav class="desktop-section-nav" aria-label="軟體資訊"><span class="desktop-eyebrow">ART-TERM</span><button aria-current="page">軟體資訊與更新</button><button @click="showPage('workspace')">返回工作區</button></nav><div class="desktop-section-content"><AppHomepage platform="windows" /></div></section>
     </div>
-    <footer class="statusbar"><span class="s-item" :class="activeTab?.status">{{ statusText }}</span><span v-if="activeTab?.remoteSession" class="s-item">{{ activeTab.remoteSession }}</span><span v-if="activeTab?.status === 'live' && activeTab.errorMsg" class="s-item warn">{{ activeTab.errorMsg }}</span><span v-if="activeTab?.notice" class="s-item warn">{{ activeTab.notice }}</span><span v-if="controller.uiNotice.value" class="s-item warn">{{ controller.uiNotice.value }}</span><span class="spacer" /><span class="s-item muted">{{ visibleTabs.length }} / 32 分頁</span></footer>
+    <footer class="statusbar"><span class="s-item" :class="paneTab?.status">{{ statusText }}</span><span v-if="paneTab?.remoteSession" class="s-item">{{ paneTab.remoteSession }}</span><span v-if="paneTab?.status === 'live' && paneTab.errorMsg" class="s-item warn">{{ paneTab.errorMsg }}</span><span v-if="paneTab?.notice" class="s-item warn">{{ paneTab.notice }}</span><span v-if="controller.uiNotice.value" class="s-item warn">{{ controller.uiNotice.value }}</span><span class="spacer" /><span class="s-item muted">{{ visibleTabs.length }} / 32 分頁</span></footer>
     <PreviewZoom v-if="zoomOpen && page === 'workspace' && activeTab && activeTab.previewVisible && (activeTab.desktopEnabled || activeTab.shot)" :tab="activeTab" :screen-key="`${activeTab.key}:${activeTab.instanceDesktop?.id || 'legacy'}`" mode="windows" @close="zoomOpen = false" />
     <ScreenPicker v-if="screenPickerOpen && activeTab" :items="controller.instanceDesktops.value" :selected-id="activeTab.instanceDesktop?.id" :busy="activeTab.desktopBusy" :error="activeTab.desktopError || controller.instanceDesktopsError.value" @select="selectScreen" @clear="clearScreen" @close="screenPickerOpen = false" @settings="showSettings('connections')" />
     <PaneConnectionPicker

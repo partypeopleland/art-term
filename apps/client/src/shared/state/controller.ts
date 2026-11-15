@@ -175,7 +175,7 @@ export function createAppController(
     }
     if (hidden || disposed) return
     if (tabs.length >= MAX_TABS) {
-      uiNotice.value = `已達 ${MAX_TABS} 分頁上限`
+      uiNotice.value = `已達 ${MAX_TABS} 連線上限（含分割窗格）`
       return
     }
     uiNotice.value = ''
@@ -205,7 +205,13 @@ export function createAppController(
     const previous = tab.term
     tab.term = markRaw(handle)
     handle.onData((text, terminalReply) => terminalReply ? sendTerminalReply(tab, text) : sendInput(tab, text))
-    handle.setKeyInterceptor((ev) => !isSwitchKey(ev) && !(tab.paneRoot && isPaneKey(ev)))
+    handle.setKeyInterceptor((ev) => {
+      if (isSwitchKey(ev)) return false
+      // Pane shortcuts belong to the owning split view: a child tab's own
+      // paneRoot stays null, so check the parent's tree as well.
+      const owner = tab.paneOf ? tabs.find((t) => t.key === tab.paneOf) : null
+      return !(isPaneKey(ev) && !!(tab.paneRoot || owner?.paneRoot))
+    })
     if (previous && previous !== handle) {
       const snapshot = previous.screenSnapshot?.()
       previous.dispose()
@@ -272,7 +278,7 @@ export function createAppController(
     if (tab.closed || disposed || !tab.paneRoot) return
     if (findPaneLeaf(tab.paneRoot, leafId)?.kind !== 'empty') return
     if (hidden || tabs.length >= MAX_TABS) {
-      uiNotice.value = hidden ? '' : `已達 ${MAX_TABS} 分頁上限`
+      uiNotice.value = hidden ? '' : `已達 ${MAX_TABS} 連線上限（含分割窗格）`
       return
     }
     tab.paneSeq++
@@ -292,16 +298,61 @@ export function createAppController(
     // Session opens in attachTerminal once the pane mounted and fit().
   }
 
+  /**
+   * End the owning tab's own connection while sibling conn panes keep
+   * running. The first surviving conn leaf is promoted to own the
+   * top-level tab slot — its TabState, session and pane tree move over —
+   * remaining children reparent to it, and the departing connection
+   * closes alone. With no conn survivor the whole split view closes.
+   */
+  function promotePaneSurvivor(tab: TabState): void {
+    const root = tab.paneRoot
+    const survivor = root
+      ? paneConnTabs(root).find((t) => t !== tab && !t.closed && t.paneOf === tab.key)
+      : undefined
+    if (!root || !survivor) {
+      void closeTab(tab)
+      return
+    }
+    // The departing conn's mirror leaf dies with it.
+    let next = removePaneLeaf(root, tab.key)
+    if (next) next = removePaneLeaf(next, `mirror:${tab.key}`)
+    if (!next) {
+      void closeTab(tab)
+      return
+    }
+    for (const child of tabs) if (child.paneOf === tab.key) child.paneOf = survivor.key
+    survivor.paneOf = null
+    survivor.paneRoot = next
+    survivor.paneSeq = Math.max(survivor.paneSeq, tab.paneSeq)
+    survivor.focusedLeafId = tab.focusedLeafId && findPaneLeaf(next, tab.focusedLeafId)
+      ? tab.focusedLeafId
+      : survivor.key
+    tab.paneRoot = null
+    tab.focusedLeafId = null
+    settlePaneRoot(survivor, survivor.paneRoot)
+    void closeTab(tab)
+    if (activeKey.value !== survivor.key) setActive(survivor.key)
+  }
+
+  /** Remote-side end of a tab's own connection: promote a pane survivor or close the tab. */
+  function finishTabConnection(tab: TabState): void {
+    if (!tab.paneOf && tab.paneRoot) promotePaneSurvivor(tab)
+    else void closeTab(tab)
+  }
+
   function closePaneLeaf(tab: TabState, leafId: string): void {
-    if (tab.closed || disposed || !tab.paneRoot) return
+    if (tab.closed || disposed) return
+    if (!tab.paneRoot) {
+      // Single-pane view: closing the only pane closes the tab's connection.
+      if (leafId === tab.key) void closeTab(tab)
+      return
+    }
     const leaf = findPaneLeaf(tab.paneRoot, leafId)
     if (!leaf) return
     if (leaf.kind === 'conn') {
-      if (leaf.tab === tab) {
-        uiNotice.value = '原始連線窗格無法單獨關閉；請使用分頁關閉整個視窗。'
-        return
-      }
-      void closeTab(leaf.tab)
+      if (leaf.tab === tab) promotePaneSurvivor(tab)
+      else void closeTab(leaf.tab)
       return
     }
     settlePaneRoot(tab, removePaneLeaf(tab.paneRoot, leafId))
@@ -340,9 +391,11 @@ export function createAppController(
   }
 
   function focusedConnTab(tab: TabState): TabState {
-    if (!tab.paneRoot || !tab.focusedLeafId) return tab
-    const leaf = findPaneLeaf(tab.paneRoot, tab.focusedLeafId)
-    return leaf?.kind === 'conn' ? leaf.tab : tab
+    const root = tab.paneRoot
+    if (!root) return tab
+    const leaf = tab.focusedLeafId ? findPaneLeaf(root, tab.focusedLeafId) : null
+    if (leaf?.kind === 'conn') return leaf.tab
+    return paneConnTabs(root)[0] ?? tab
   }
 
   async function writeTerminal(tab: TabState, data: Uint8Array, historical = false): Promise<void> {
@@ -455,7 +508,7 @@ export function createAppController(
 
   function closeFinishedShell(tab: TabState, kind: string): boolean {
     if (!options.closeFinishedTabs || !['exited', 'missing', 'operatorKilled'].includes(kind)) return false
-    void closeTab(tab)
+    finishTabConnection(tab)
     return true
   }
 
@@ -588,7 +641,7 @@ export function createAppController(
       }
       if (out.exitCode !== null) {
         if (options.closeFinishedTabs) {
-          void closeTab(tab)
+          finishTabConnection(tab)
           return
         }
         tab.exitCode = out.exitCode
@@ -717,8 +770,12 @@ export function createAppController(
     if (tab.paneOf) {
       const parent = tabs.find((t) => t.key === tab.paneOf && !t.closed)
       if (parent?.paneRoot) {
-        settlePaneRoot(parent, removePaneLeaf(parent.paneRoot, tab.key))
-        if (parent.focusedLeafId === tab.key) parent.focusedLeafId = parent.key
+        // Drop the child's conn leaf and any mirror leaf watching it so no
+        // orphan pane keeps pointing at the closed connection.
+        let root = removePaneLeaf(parent.paneRoot, tab.key)
+        if (root) root = removePaneLeaf(root, `mirror:${tab.key}`)
+        settlePaneRoot(parent, root)
+        if (parent.focusedLeafId === tab.key || parent.focusedLeafId === `mirror:${tab.key}`) parent.focusedLeafId = parent.key
       }
     }
     if (sid) await transport.close(sid).catch(() => undefined)

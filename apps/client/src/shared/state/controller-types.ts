@@ -53,7 +53,9 @@ export interface TabState {
    * Split pane tree for the Windows view. Null = single connection. Every
    * `conn` leaf owns a full TabState registered in `tabs` with `paneOf`
    * pointing back at this tab's key; the leaf whose tab IS this tab is the
-   * original connection and cannot be closed as a single pane.
+   * original connection. Any conn leaf — including the original — can be
+   * closed individually while sibling conn panes survive (the first
+   * survivor is promoted to own this tab slot).
    */
   paneRoot: PaneNode | null
   /** Leaf id of the pane that currently owns keyboard focus (`conn:${key}` style ids). */
