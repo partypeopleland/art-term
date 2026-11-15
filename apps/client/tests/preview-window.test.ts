@@ -11,7 +11,7 @@ const tab: TabState = {
   status: 'live', errorMsg: '', notice: '', sessionId: 'test', remoteSession: 'shell', runtime: true,
   runtimeAgent: false, exitCode: null, desktopAvailable: true, desktopEnabled: true, desktopBusy: false,
   desktopMsg: '', desktopError: '', previewVisible: true, shot: null, shotError: '', captureGen: 0,
-  term: null, wantDesktop: true, closed: false, writeBuf: [], writing: false, writeDropped: false,
+  term: null, mirrorTerm: null, split: null, inputPaneHidden: false, wantDesktop: true, closed: false, writeBuf: [], writing: false, writeDropped: false,
   pendingSize: null, resizing: false, lastSize: null, connectionGen: 0
 }
 const area = { width: 1000, height: 700 }, minimum = { width: 400, height: 250 }

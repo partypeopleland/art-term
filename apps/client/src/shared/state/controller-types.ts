@@ -2,6 +2,7 @@ import type { ComputedRef, Ref } from 'vue'
 import type { InstanceDesktop, HostDto, RuntimeHostDto, TargetDto } from '../transport/types'
 import type { TerminalHandle } from '../terminal/handle'
 import type { HostHistoryReply, HostHistoryRequest } from '../terminal/native'
+import type { SplitDirection } from '../terminal/split'
 
 export type TabStatus = 'connecting' | 'live' | 'exited' | 'error'
 
@@ -46,6 +47,10 @@ export interface TabState {
   captureGen: number
   /** Internal, markRaw'd once attached. */
   term: TerminalHandle | null
+  /** Read-only mirror of `term` for the Windows split view; never receives input. */
+  mirrorTerm: TerminalHandle | null
+  split: SplitDirection | null
+  inputPaneHidden: boolean
   wantDesktop: boolean
   closed: boolean
   writeBuf: number[]
@@ -96,6 +101,12 @@ export interface AppController {
   refreshTargets(): Promise<void>
   openTarget(host: HostUiState, target: TargetDto, withDesktop: boolean): void
   attachTerminal(tab: TabState, handle: TerminalHandle): void
+  attachMirror(tab: TabState, handle: TerminalHandle): void
+  detachMirror(tab: TabState, handle: TerminalHandle): void
+  splitTab(tab: TabState, direction: SplitDirection): boolean
+  unsplitTab(tab: TabState): void
+  hideInputPane(tab: TabState): void
+  showInputPane(tab: TabState): void
   reopenTab(tab: TabState, withDesktop: boolean): void
   closeTab(tab: TabState): Promise<void>
   detachTab(tab: TabState): Promise<void>

@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } f
 import type { HostDto, InstanceDesktop, Transport } from '../shared/transport/types'
 import { createAppController, type AppController, type ControllerOptions, type TabState } from '../shared/state/controller'
 import { TerminalFactoryKey, createDesktopXtermTerminal, type TerminalFactory } from '../shared/terminal/handle'
+import { splitLayout, splitPaneOrder, type SplitDirection, type SplitPane } from '../shared/terminal/split'
 import { runtimeConnectedIds } from '../shared/state/runtime-entry'
 import ConnectionDashboard from '../shared/components/ConnectionDashboard.vue'
 import ThemeSettings from '../shared/components/ThemeSettings.vue'
@@ -104,7 +105,7 @@ function onGlobalKey(event: KeyboardEvent): void {
   if (page.value !== 'workspace' || covered.value || documentHidden.value) return
   const target = event.target instanceof HTMLElement ? event.target : null
   if (target?.closest('input,select,[contenteditable=true]') || (target?.closest('textarea') && !target.closest('.xterm'))) return
-  if (target?.closest('.xterm') && clipboard.handleKey(event)) return
+  if (target?.closest('.xterm') && !target.closest('.pane.mirror') && clipboard.handleKey(event)) return
   controller.handleKey(event)
 }
 function visibility(): void {
@@ -114,6 +115,25 @@ function visibility(): void {
 }
 onMounted(() => { window.addEventListener('keydown', onGlobalKey, true); document.addEventListener('visibilitychange', visibility); void controller.loadCatalog(); void controller.loadInstanceDesktops() })
 onBeforeUnmount(() => { window.removeEventListener('keydown', onGlobalKey, true); document.removeEventListener('visibilitychange', visibility); clearTimeout(clipboardNoticeTimer); controller.dispose() })
+function paneOrder(tab: TabState): SplitPane[] {
+  return tab.split ? splitPaneOrder(tab.split) : ['primary']
+}
+function tabViewClass(tab: TabState): string {
+  if (!tab.split) return 'tab-view single'
+  return `tab-view split-view split-${splitLayout(tab.split).axis}`
+}
+function primaryActive(tab: TabState): boolean {
+  return terminalVisible.value && tab.key === controller.activeKey.value && !tab.inputPaneHidden
+}
+function mirrorActive(tab: TabState): boolean {
+  return terminalVisible.value && tab.key === controller.activeKey.value && !!tab.split
+}
+function onSplitChange(tab: TabState, event: Event): void {
+  const select = event.target as HTMLSelectElement
+  const value = select.value
+  if (value && !controller.splitTab(tab, value as SplitDirection)) select.value = tab.split ?? ''
+  else if (!value) controller.unsplitTab(tab)
+}
 const statusText = computed(() => !activeTab.value ? '未連線' : activeTab.value.status === 'live' ? '已連線' : activeTab.value.status === 'connecting' ? '連線中…' : activeTab.value.status === 'exited' ? '已結束' : `錯誤：${activeTab.value.errorMsg}`)
 </script>
 
@@ -144,11 +164,40 @@ const statusText = computed(() => !activeTab.value ? '未連線' : activeTab.val
         <div v-if="activeTab" class="toolbar">
           <span class="t-name">{{ activeTab.hostLabel }} / {{ activeTab.label }}</span><span class="status" :class="activeTab.status">{{ statusText }}</span><span class="spacer" />
           <button v-if="activeTab.status === 'live'" class="btn screen-trigger" data-testid="desktop-toggle" aria-label="選擇 Screen" title="選擇 Screen" :aria-pressed="!!activeTab.instanceDesktop" :disabled="activeTab.desktopBusy" @click="openScreens"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2" /><path d="M8 21h8M12 18v3" /></svg></button>
+          <label v-if="activeTab.status === 'live'" class="split-control"><span class="muted">分割</span><select data-testid="terminal-split" :value="activeTab.split ?? ''" :disabled="activeTab.status !== 'live'" @change="onSplitChange(activeTab, $event)"><option value="">不分割</option><option value="up">向上</option><option value="down">向下</option><option value="left">向左</option><option value="right">向右</option></select></label>
+          <button v-if="activeTab.split && activeTab.inputPaneHidden" class="btn" data-testid="show-input-pane" @click="controller.showInputPane(activeTab)">顯示輸入窗格</button>
           <button v-if="activeTab.status === 'error' || activeTab.status === 'exited'" class="btn" @click="controller.reopenTab(activeTab, false)">重新連線</button>
         </div>
         <div class="desktop-session-content">
           <div class="term-area">
-            <TerminalPane v-for="tab in controller.tabs" :key="tab.key" :tab="tab" :active="terminalVisible && tab.key === controller.activeKey.value" :controller="controller" :reader-visible="terminalVisible && tab.key === controller.activeKey.value" :on-selection-finished="clipboard.selectionFinished" native-scroll />
+            <div v-for="tab in controller.tabs" :key="tab.key" class="tab-view" :class="tabViewClass(tab)" v-show="terminalVisible && tab.key === controller.activeKey.value">
+              <template v-for="pane in paneOrder(tab)" :key="pane">
+                <div v-if="pane === 'divider'" class="split-divider" />
+                <TerminalPane
+                  v-else-if="pane === 'primary'"
+                  :tab="tab"
+                  :active="primaryActive(tab)"
+                  :controller="controller"
+                  :reader-visible="primaryActive(tab)"
+                  :closable="!!tab.split"
+                  close-label="關閉輸入窗格"
+                  :on-selection-finished="clipboard.selectionFinished"
+                  native-scroll
+                  @close="controller.hideInputPane(tab)"
+                />
+                <TerminalPane
+                  v-else
+                  :tab="tab"
+                  mirror
+                  :active="mirrorActive(tab)"
+                  :controller="controller"
+                  :reader-visible="false"
+                  closable
+                  close-label="關閉鏡像窗格"
+                  @close="controller.unsplitTab(tab)"
+                />
+              </template>
+            </div>
             <div v-if="!controller.tabs.length" class="empty">從左側選擇連線，開始工作。</div>
             <div v-if="clipboardNotice" class="clipboard-toast" data-testid="clipboard-toast" role="status">{{ clipboardNotice }}</div>
           </div>
@@ -187,6 +236,8 @@ const statusText = computed(() => !activeTab.value ? '未連線' : activeTab.val
 .workspace-divider.vertical { width: 5px; cursor: col-resize; }
 .workspace-divider.horizontal { height: 5px; cursor: row-resize; }
 .screen-trigger svg { display: block; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.5; }
+.split-control { display: inline-flex; align-items: center; gap: 6px; }
+.split-control select { background: var(--bg-raised); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; font: inherit; }
 .desktop-sidebar :deep(.section-heading) { padding-inline: 8px; }
 .desktop-sidebar :deep(.section-content) { margin-inline: 6px; }
 .desktop-sidebar :deep(.category-toggle) { gap: 5px; }
