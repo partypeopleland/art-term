@@ -97,6 +97,7 @@ function screenSnapshotAnsi(term: Terminal): string {
       out.push(cell?.getChars() || ' ')
     }
     out.push('\x1b[0m')
+    sgr = '0'
   }
   const row = Math.min(Math.max(0, buffer.cursorY) + 1, rows)
   const col = Math.min(Math.max(0, buffer.cursorX) + 1, cols)

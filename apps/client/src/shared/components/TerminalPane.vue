@@ -63,7 +63,7 @@ function fitAndReport(): void {
   const term = termHandle
   if (!term || !props.active) return
   term.fit()
-  if (!props.mirror || props.tab.inputPaneHidden) props.controller.requestResize(props.tab, term.rows, term.cols)
+  if (!props.mirror) props.controller.requestResize(props.tab, term.rows, term.cols)
 }
 
 function focusOnPointer(event: PointerEvent): void {
