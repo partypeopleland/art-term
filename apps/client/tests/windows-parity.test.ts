@@ -61,6 +61,13 @@ it('applies all four themes immediately to existing and future terminals',async(
  for(const theme of ['dark','light','retro','tech'] as const){selectTheme(theme);await flush();expect(wrapper.attributes('data-theme')).toBe(theme);expect(terms[0].colors.at(-1)).toEqual(terminalTheme(theme))}
  selectTheme('retro');await flush();const next=makeTarget('other','host');controller.openTarget({dto:makeHost('host',[next]),expanded:true},next,false);await flush();expect(terms[1].colors[0]).toEqual(terminalTheme('retro'))
 })
+it('syncs the split mirror theme when switching themes',async()=>{
+ const {controller,terms,attach}=await setup();const tab=await attach()
+ expect(controller.splitTab(tab,'down')).toBe(true);await flush();expect(terms).toHaveLength(2)
+ selectTheme('retro');await flush()
+ expect(terms[0].colors.at(-1)).toEqual(terminalTheme('retro'))
+ expect(terms[1].colors.at(-1)).toEqual(terminalTheme('retro'))
+})
 it('selects/clears independent Screens on a host without legacy capability and isolates two tabs',async()=>{
  const {wrapper,controller,transport,attach}=await setup();const first=await attach()
  await wrapper.get('[data-testid="desktop-toggle"]').trigger('click');await flush();await wrapper.get('[data-testid="choose-screen-screen-A"]').trigger('click');await flush()

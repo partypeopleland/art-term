@@ -28,7 +28,13 @@ provide(TerminalFactoryKey, element => {
   terminal.setTheme?.(terminalTheme(selectedTheme.value))
   return terminal
 })
-watch(selectedTheme, theme => { for (const tab of controller.tabs) tab.term?.setTheme?.(terminalTheme(theme)) })
+watch(selectedTheme, theme => {
+  const terminalThemeValue = terminalTheme(theme)
+  for (const tab of controller.tabs) {
+    tab.term?.setTheme?.(terminalThemeValue)
+    tab.mirrorTerm?.setTheme?.(terminalThemeValue)
+  }
+})
 const activeTab = controller.activeTab
 const page = ref<'workspace' | 'settings' | 'home'>('workspace')
 const screenPickerOpen = ref(false), transferPicker = ref(false)
