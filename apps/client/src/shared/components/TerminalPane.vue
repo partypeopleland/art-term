@@ -4,7 +4,7 @@ import NativeTerminalReader from '../../mobile/NativeTerminalReader.vue'
 import { NativeHistoryKey, HostTerminalViewport } from '../terminal/native'
 import type { AppController, TabState } from '../state/controller'
 import type { HostHistoryRequest } from '../terminal/native'
-import { TerminalFactoryKey, createDesktopXtermTerminal } from '../terminal/handle'
+import { TerminalFactoryKey, createDesktopXtermTerminal, type TerminalHandle } from '../terminal/handle'
 
 const props = defineProps<{
   tab: TabState
@@ -12,14 +12,20 @@ const props = defineProps<{
   controller: AppController
   readerVisible?: boolean
   nativeScroll?: boolean
+  mirror?: boolean
+  closable?: boolean
+  closeLabel?: string
   onSelectionFinished?: (tab: TabState) => void
 }>()
+
+const emit = defineEmits<{ close: [] }>()
 
 const el = ref<HTMLElement | null>(null)
 const nativeReader = inject(NativeHistoryKey, null) !== null
 const factory = inject(TerminalFactoryKey, createDesktopXtermTerminal)
 let observer: ResizeObserver | null = null
 let disposed = false
+let termHandle: TerminalHandle | null = null
 const historyRequest = (request: HostHistoryRequest) => props.controller.historyRequest(props.tab, request)
 const historyNotice = (text: string) => { if (!props.tab.closed) props.tab.notice = text }
 let hostViewport: HostTerminalViewport | null = null
@@ -32,6 +38,7 @@ function viewportEnabled(): boolean {
     && props.tab.status === 'live' && props.tab.key === props.controller.activeKey.value && !document.hidden && !disposed
 }
 function syncViewport(): void {
+  if (props.mirror) return
   const ticket = ++viewportTicket
   const previous = hostViewport
   hostViewport = null
@@ -53,14 +60,15 @@ function syncViewport(): void {
 watch(() => [props.active, props.readerVisible, props.nativeScroll, props.tab.term, props.tab.status, props.tab.sessionId, props.controller.activeKey.value], syncViewport)
 
 function fitAndReport(): void {
-  const term = props.tab.term
+  const term = termHandle
   if (!term || !props.active) return
   term.fit()
-  props.controller.requestResize(props.tab, term.rows, term.cols)
+  if (!props.mirror) props.controller.requestResize(props.tab, term.rows, term.cols)
 }
 
 function focusOnPointer(event: PointerEvent): void {
-  if (!nativeReader && props.active && props.tab.status === 'live' && event.button === 0) props.tab.term?.focus()
+  if (props.mirror) return
+  if (!nativeReader && props.active && props.tab.status === 'live' && event.button === 0) termHandle?.focus()
   if (props.onSelectionFinished && props.active && event.button === 0) selecting = true
 }
 
@@ -79,9 +87,11 @@ onMounted(() => {
   // The instance stays mounted for the tab's whole life (v-show hides it);
   // buffers keep draining in the background.
   const handle = factory(el.value)
+  termHandle = handle
   handle.fit()
-  props.controller.attachTerminal(props.tab, handle)
-  if (props.active) handle.focus()
+  if (props.mirror) props.controller.attachMirror(props.tab, handle)
+  else props.controller.attachTerminal(props.tab, handle)
+  if (props.active && !props.mirror) handle.focus()
   document.addEventListener('visibilitychange', syncViewport)
   window.addEventListener('pointerup', finishSelection)
   window.addEventListener('pointercancel', finishSelection)
@@ -97,7 +107,7 @@ watch(
     if (!now || disposed) return
     void nextTick(() => {
       fitAndReport()
-      props.tab.term?.focus()
+      if (!props.mirror) termHandle?.focus()
     })
   }
 )
@@ -111,15 +121,22 @@ onBeforeUnmount(() => {
   clearTimeout(selectionTimer)
   observer?.disconnect()
   observer = null
+  if (props.mirror) {
+    if (termHandle) props.controller.detachMirror(props.tab, termHandle)
+    termHandle = null
+    return
+  }
   // The controller disposes the handle on tab close; guard anyway.
   if (props.tab.closed) props.tab.term?.dispose()
 })
 </script>
 
 <template>
-  <div class="pane" v-show="active">
+  <div class="pane" :class="{ mirror: !!mirror }" :data-pane="mirror ? 'mirror' : 'primary'" v-show="active">
+    <button v-if="closable" class="pane-close" type="button" :aria-label="closeLabel || '關閉窗格'" @click="emit('close')">×</button>
+    <div v-if="mirror" class="mirror-badge">唯讀鏡像</div>
     <div ref="el" class="term-host" @pointerdown="focusOnPointer" />
-    <NativeTerminalReader v-if="nativeReader && active && tab.status === 'live'"
+    <NativeTerminalReader v-if="nativeReader && !mirror && active && tab.status === 'live'"
       :key="tab.sessionId ?? tab.key" :terminal="tab.term"
       :history-request="tab.runtime ? historyRequest : undefined" :history-notice="historyNotice"
       :visible="active && readerVisible !== false" />

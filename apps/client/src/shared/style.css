@@ -376,6 +376,76 @@ body,
   inset: 0;
 }
 
+.tab-view {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+}
+
+.tab-view.split-view.split-row {
+  flex-direction: row;
+}
+
+.tab-view.split-view.split-column {
+  flex-direction: column;
+}
+
+.tab-view .pane {
+  position: relative;
+  inset: auto;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+}
+
+.tab-view .split-divider {
+  flex: none;
+  background: var(--border);
+}
+
+.tab-view.split-view.split-row .split-divider {
+  width: 4px;
+}
+
+.tab-view.split-view.split-column .split-divider {
+  height: 4px;
+}
+
+.pane-close {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  z-index: 30;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.pane-close:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.mirror-badge {
+  position: absolute;
+  top: 4px;
+  left: 8px;
+  z-index: 30;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text-dim);
+  font-size: 11px;
+  pointer-events: none;
+}
+
 .term-host {
   position: absolute;
   inset: 0;

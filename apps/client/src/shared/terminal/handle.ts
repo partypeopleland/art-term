@@ -3,7 +3,7 @@ import { createNativeBufferProjection, type NativeTerminalBuffer, type NativeBuf
 // tests can inject a fake without xterm.js or a real DOM renderer.
 import type { InjectionKey } from 'vue'
 import type { HostTerminalViewport } from './native'
-import { Terminal, type ITheme } from '@xterm/xterm'
+import { Terminal, type IBufferCell, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { attachMobileScroll } from '../../mobile/scroll'
@@ -21,6 +21,8 @@ export interface TerminalHandle {
   /** xterm's logical selection omits line wraps but retains real newlines. */
   getSelection?(): string
   readStyledText?(window?: NativeBufferWindow): NativeTerminalBuffer
+  /** ANSI snapshot of the current viewport for a read-only mirror pane. */
+  screenSnapshot?(): string
   setNativeReaderActive?(active: boolean): void
   /** Resolves when xterm has parsed the chunk (write-callback backpressure). */
   write(data: Uint8Array, historical?: boolean): Promise<void>
@@ -44,6 +46,63 @@ export function createDesktopXtermTerminal(el: HTMLElement, openLink?: LinkOpene
 
 export function createMobileXtermTerminal(el: HTMLElement, openLink?: LinkOpener): TerminalHandle {
   return createXtermTerminal(el, true, true, openLink)
+}
+
+function cellSgr(cell: IBufferCell | undefined): string {
+  if (!cell) return '0'
+  const codes = ['0']
+  if (cell.isBold()) codes.push('1')
+  if (cell.isDim()) codes.push('2')
+  if (cell.isItalic()) codes.push('3')
+  if (cell.isUnderline()) codes.push('4')
+  if (cell.isBlink()) codes.push('5')
+  if (cell.isInverse()) codes.push('7')
+  if (cell.isInvisible()) codes.push('8')
+  if (cell.isStrikethrough()) codes.push('9')
+  if (cell.isOverline()) codes.push('53')
+  if (cell.isFgRGB()) {
+    const color = cell.getFgColor()
+    codes.push(`38;2;${(color >> 16) & 255};${(color >> 8) & 255};${color & 255}`)
+  } else if (cell.isFgPalette()) {
+    codes.push(`38;5;${cell.getFgColor()}`)
+  }
+  if (cell.isBgRGB()) {
+    const color = cell.getBgColor()
+    codes.push(`48;2;${(color >> 16) & 255};${(color >> 8) & 255};${color & 255}`)
+  } else if (cell.isBgPalette()) {
+    codes.push(`48;5;${cell.getBgColor()}`)
+  }
+  return codes.join(';')
+}
+
+function screenSnapshotAnsi(term: Terminal): string {
+  const buffer = term.buffer.active
+  const rows = Math.max(1, term.rows)
+  const cols = Math.max(1, term.cols)
+  const out: string[] = []
+  if (buffer.type === 'alternate') out.push('\x1b[?1049h')
+  out.push('\x1b[2J\x1b[H\x1b[0m')
+  for (let y = 0; y < rows; y++) {
+    out.push(`\x1b[${y + 1};1H`)
+    let sgr = '0'
+    const line = buffer.getLine(buffer.baseY + y)
+    for (let x = 0; x < cols; x++) {
+      const cell = line?.getCell(x)
+      if (cell && cell.getWidth() === 0) continue
+      const next = cellSgr(cell)
+      if (next !== sgr) {
+        out.push(`\x1b[${next}m`)
+        sgr = next
+      }
+      out.push(cell?.getChars() || ' ')
+    }
+    out.push('\x1b[0m')
+    sgr = '0'
+  }
+  const row = Math.min(Math.max(0, buffer.cursorY) + 1, rows)
+  const col = Math.min(Math.max(0, buffer.cursorX) + 1, cols)
+  out.push(`\x1b[${row};${col}H\x1b[?25h`)
+  return out.join('')
 }
 
 export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobileScroll = false,
@@ -188,6 +247,7 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
     bracketedPasteMode: () => term.modes.bracketedPasteMode,
     getSelection: () => term.getSelection(),
     readStyledText: window => projection?.read(window) ?? { records: [], supported: false },
+    screenSnapshot: () => screenSnapshotAnsi(term),
     setNativeReaderActive(active) {
       if (!mobileScroll || terminalDisposed) return
       if (active) { disposeScroll?.dispose(); disposeScroll = null; el.classList.add('mobile-terminal') }

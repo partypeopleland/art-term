@@ -15,11 +15,13 @@ import type {
 } from '../transport/types'
 import type { TerminalHandle } from '../terminal/handle'
 import type { HostHistoryReply, HostHistoryRequest } from '../terminal/native'
+import type { SplitDirection } from '../terminal/split'
 
 export const MAX_TABS = 32
 export const MAX_RUNTIME_PROFILES = 64
 export const AUTO_CAPTURE_MS = 30_000
 const DEFAULT_IDLE_POLL_MS = 20
+const textEncoder = new TextEncoder()
 
 export function createAppController(
   transport: Transport,
@@ -139,6 +141,9 @@ export function createAppController(
       shotError: '',
       captureGen: 0,
       term: null,
+      mirrorTerm: null,
+      split: null,
+      inputPaneHidden: false,
       wantDesktop: withDesktop,
       closed: false,
       writeBuf: [],
@@ -165,6 +170,58 @@ export function createAppController(
     const want = tab.wantDesktop
     tab.wantDesktop = false
     if (tab.status === 'connecting') void openSession(tab, want)
+  }
+
+  function attachMirror(tab: TabState, handle: TerminalHandle): void {
+    if (tab.closed) {
+      handle.dispose()
+      return
+    }
+    if (tab.mirrorTerm && tab.mirrorTerm !== handle) tab.mirrorTerm.dispose()
+    tab.mirrorTerm = markRaw(handle)
+    const snapshot = tab.term?.screenSnapshot?.()
+    if (snapshot) void handle.write(textEncoder.encode(snapshot)).catch(() => undefined)
+  }
+
+  function detachMirror(tab: TabState, handle: TerminalHandle): void {
+    if (tab.mirrorTerm === handle) tab.mirrorTerm = null
+    if (!tab.closed) handle.dispose()
+  }
+
+  function splitTab(tab: TabState, direction: SplitDirection): boolean {
+    if (tab.closed || disposed || tab.status !== 'live' || !tab.sessionId || !tab.term) return false
+    tab.split = direction
+    tab.inputPaneHidden = false
+    return true
+  }
+
+  function unsplitTab(tab: TabState): void {
+    if (tab.closed) return
+    tab.split = null
+    tab.inputPaneHidden = false
+  }
+
+  function hideInputPane(tab: TabState): void {
+    if (tab.closed || !tab.split) return
+    tab.inputPaneHidden = true
+  }
+
+  function showInputPane(tab: TabState): void {
+    if (tab.closed || !tab.split) return
+    tab.inputPaneHidden = false
+  }
+
+  async function writeTerminal(tab: TabState, data: Uint8Array, historical = false): Promise<void> {
+    const term = tab.term
+    if (!term) return
+    await term.write(data, historical)
+    const mirror = tab.mirrorTerm
+    if (mirror && mirror !== term) void mirror.write(data, historical).catch(() => undefined)
+  }
+
+  function resetTerminals(tab: TabState): void {
+    tab.term?.reset()
+    tab.mirrorTerm?.reset()
   }
 
   async function openSession(tab: TabState, withDesktop: boolean): Promise<void> {
@@ -274,7 +331,7 @@ export function createAppController(
     tab.writeDropped = false
     tab.pendingSize = null
     if (runtimeRecovery.has(tab.key)) { void recoverRuntime(tab, true); return }
-    tab.term.reset()
+    resetTerminals(tab)
     tab.desktopEnabled = false
     tab.instanceDesktop = null
     tab.instanceToolReady = false
@@ -318,10 +375,10 @@ export function createAppController(
             if (event.kind === 'gap') {
               tab.writeBuf = []
               tab.pendingSize = null
-              tab.term!.reset()
+              resetTerminals(tab)
               tab.notice = `部分遠端輸出已無法補送（${event.bytesDropped} 位元組）`
             } else if (event.kind === 'bytes') {
-              await tab.term!.write(Uint8Array.from(event.bytes), event.historical)
+              await writeTerminal(tab, Uint8Array.from(event.bytes), event.historical)
             } else if (event.kind === 'ttlWarning') {
               tab.notice = `遠端 Shell 將於 ${event.secondsRemaining} 秒後到期`
             } else if (event.ephemeralWorkspace) {
@@ -389,7 +446,7 @@ export function createAppController(
         try {
           // Await the xterm write callback BEFORE the next poll — this is the
           // pull-based backpressure required by the transport contract.
-          await tab.term!.write(data)
+          await writeTerminal(tab, data)
         } catch {
           return
         }
@@ -477,6 +534,10 @@ export function createAppController(
     // tmux session/desktop lease stay alive on their documented semantics.
     tab.term?.dispose()
     tab.term = null
+    tab.mirrorTerm?.dispose()
+    tab.mirrorTerm = null
+    tab.split = null
+    tab.inputPaneHidden = false
     const idx = tabs.indexOf(tab)
     if (idx >= 0) tabs.splice(idx, 1)
     if (activeKey.value === tab.key) {
@@ -500,6 +561,8 @@ export function createAppController(
     tab.writeBuf = []
     tab.pendingSize = null
     tab.desktopEnabled = false
+    tab.split = null
+    tab.inputPaneHidden = false
     tab.notice = '本機已中斷；可重新連線續接遠端工作'
     invalidateCapture(tab)
     if (sid) await transport.close(sid).catch(() => undefined)
@@ -659,6 +722,12 @@ export function createAppController(
     refreshTargets,
     openTarget,
     attachTerminal,
+    attachMirror,
+    detachMirror,
+    splitTab,
+    unsplitTab,
+    hideInputPane,
+    showInputPane,
     reopenTab,
     closeTab,
     detachTab,
