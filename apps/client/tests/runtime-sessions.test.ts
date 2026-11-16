@@ -14,7 +14,7 @@ function setup(history = true) {
   const transport: Transport = Object.assign(new FakeTransport([]), {
     runtimeSessions: vi.fn().mockResolvedValue(group),
     runtimeCreateSession: vi.fn().mockResolvedValue(target),
-    ...(history ? { runtimeCreateHistorySession: vi.fn().mockResolvedValue(target) } : {})
+    ...(history ? { runtimeCreateHistorySession: vi.fn().mockResolvedValue(target) } : { runtimeCreateHistorySession: undefined })
   })
   const wrapper = mount(RuntimeSessions, { props: { host, transport } }); wrappers.push(wrapper)
   return { wrapper, transport }

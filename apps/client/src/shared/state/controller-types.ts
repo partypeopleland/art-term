@@ -116,16 +116,19 @@ export interface AppController {
   attachTerminal(tab: TabState, handle: TerminalHandle): void
   attachMirror(tab: TabState, handle: TerminalHandle): void
   detachMirror(tab: TabState, handle: TerminalHandle): void
-  /** Split `leafId` toward `direction`, adding an empty pane awaiting a session pick. */
-  splitPane(tab: TabState, leafId: string, direction: SplitDirection): boolean
+  /**
+   * Split `leafId` toward `direction`, adding a new independent connection
+   * pane. A fresh session is created on the same runtime Host profile the
+   * split pane is connected to (the sidebar "+" equivalent); resolves false
+   * and leaves the tree untouched when creation is unavailable or fails.
+   */
+  splitPane(tab: TabState, leafId: string, direction: SplitDirection): Promise<boolean>
   /** Split `leafId` toward `direction`, adding a read-only mirror of that conn leaf's tab. */
   mirrorPane(tab: TabState, leafId: string, direction: SplitDirection): boolean
   isPaneKey(e: KeyboardEvent): boolean
-  /** Replace an empty leaf with a new independent connection pane. */
-  openPaneTarget(tab: TabState, leafId: string, host: HostDto, target: TargetDto): void
   /** Close one pane leaf: child conn tabs detach only their own session. */
   closePaneLeaf(tab: TabState, leafId: string): void
-  /** Remove every non-primary pane leaf (child connections close, mirrors/empties drop). */
+  /** Remove every non-primary pane leaf (child connections close, mirrors drop). */
   unsplitPanes(tab: TabState): void
   /** Point keyboard focus at a conn leaf's tab (null = non-conn leaf focused). */
   focusPane(tab: TabState, leafId: string | null): void

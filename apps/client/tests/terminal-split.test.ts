@@ -2,7 +2,7 @@ import { mount, type VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import App from '../src/desktop/App.vue'
-import type { AppController } from '../src/shared/state/controller'
+import type { AppController, TabState } from '../src/shared/state/controller'
 import {
   clampPaneRatio,
   findPaneLeaf,
@@ -13,7 +13,8 @@ import {
   splitAxis,
   splitPaneLeaf,
   wrapSplit,
-  type PaneNode
+  type PaneNode,
+  type SplitDirection
 } from '../src/shared/terminal/split'
 import { FakeTerm, FakeTransport, makeHost, makeProfile, makeTarget } from './fake'
 
@@ -40,9 +41,8 @@ class SplitTerm extends FakeTerm {
 
 async function setup() {
   const target = makeTarget('shell', 'host', 'host', true, false)
-  const other = makeTarget('other', 'host', 'host', true, false)
   const transport = new FakeTransport([makeProfile('host', 'My computer')])
-  transport.runtimeSessionsData.set('host', makeHost('host', [target, other]))
+  transport.runtimeSessionsData.set('host', makeHost('host', [target]))
   const terms: SplitTerm[] = []
   const wrapper = mount(App, {
     props: {
@@ -61,11 +61,26 @@ async function setup() {
   const controller = (wrapper.vm as unknown as { controller: AppController }).controller
   controller.openTarget({ dto: makeHost('host', [target]), expanded: true }, target, false)
   await flush()
-  return { wrapper, controller, transport, terms, tab: controller.tabs[0], other }
+  return { wrapper, controller, transport, terms, tab: controller.tabs[0] }
+}
+
+/** Split and let the auto-created pane connection finish mounting. */
+async function split(
+  controller: AppController,
+  tab: TabState,
+  direction: SplitDirection = 'right',
+  leafId = tab.key
+): Promise<boolean> {
+  const ok = await controller.splitPane(tab, leafId, direction)
+  await flush()
+  return ok
+}
+
+function paneChild(controller: AppController, tab: TabState): TabState {
+  return controller.tabs.find((t) => t.paneOf === tab.key)!
 }
 
 const conn = (id: string) => ({ kind: 'conn' as const, id, tab: null as never })
-const empty = (id: string) => ({ kind: 'empty' as const, id })
 
 describe('pane tree helpers', () => {
   it('maps directions to axes and placement', () => {
@@ -74,7 +89,7 @@ describe('pane tree helpers', () => {
     expect(splitAxis('up')).toBe('column')
     expect(splitAxis('down')).toBe('column')
     const inner = conn('a')
-    const added = empty('b')
+    const added = conn('b')
     expect(wrapSplit('right', inner, added, 's').a).toBe(inner)
     expect(wrapSplit('left', inner, added, 's').a).toBe(added)
     expect(wrapSplit('down', inner, added, 's').b).toBe(added)
@@ -82,10 +97,10 @@ describe('pane tree helpers', () => {
   })
 
   it('splits, replaces and removes leaves while collapsing single-child splits', () => {
-    const root: PaneNode = wrapSplit('right', conn('a'), empty('b'), 's1')
-    const split = splitPaneLeaf(root, 'b', 'down', empty('c'), 's2') as Extract<PaneNode, { kind: 'split' }>
+    const root: PaneNode = wrapSplit('right', conn('a'), conn('b'), 's1')
+    const split = splitPaneLeaf(root, 'b', 'down', conn('c'), 's2') as Extract<PaneNode, { kind: 'split' }>
     expect(split.b.kind).toBe('split')
-    expect(findPaneLeaf(split, 'c')?.kind).toBe('empty')
+    expect(findPaneLeaf(split, 'c')?.kind).toBe('conn')
 
     const replaced = replacePaneLeaf(split, 'c', conn('d'))
     expect(findPaneLeaf(replaced, 'd')?.kind).toBe('conn')
@@ -103,26 +118,22 @@ describe('pane tree helpers', () => {
 })
 
 describe('Windows independent split panes', () => {
-  it('splits into an empty pane and connects it to its own session', async () => {
-    const { wrapper, controller, transport, terms, tab, other } = await setup()
+  it('splits into a new connection created on the same host, with no picker', async () => {
+    const { wrapper, controller, transport, terms, tab } = await setup()
     const sid = tab.sessionId!
     const liveTerms = () => terms.filter((t) => !t.disposed)
-    expect(controller.splitPane(tab, tab.key, 'right')).toBe(true)
-    await flush()
+    expect(await split(controller, tab, 'right')).toBe(true)
     expect(tab.paneRoot?.kind).toBe('split')
     // The primary pane remounts inside the split tree; the stale handle is released.
-    expect(liveTerms()).toHaveLength(1)
-    expect(wrapper.find('[data-testid="pane-pick-connection"]').exists()).toBe(true)
-
-    const emptyId = paneLeaves(tab.paneRoot!).find((l) => l.kind === 'empty')!.id
-    controller.openPaneTarget(tab, emptyId, makeHost('host', [other]), other)
-    await flush()
-    const child = controller.tabs.find((t) => t.paneOf === tab.key)!
+    // The new pane is already a live conn leaf — no empty pane, no picker.
+    expect(wrapper.find('[data-testid="pane-connection-picker"]').exists()).toBe(false)
+    const child = paneChild(controller, tab)
     expect(child).toBeTruthy()
-    expect(child.targetId).toBe('other')
     expect(child.status).toBe('live')
     expect(child.sessionId).not.toBe(sid)
-    expect(transport.openCalls.map((c) => c.targetId)).toContain('other')
+    expect(child.targetId).toMatch(/^history-/)
+    expect(transport.historyCalls).toEqual([{ id: 'host', expectedRevision: 1 }])
+    expect(transport.openCalls.map((c) => c.targetId)).toContain(child.targetId)
     expect(liveTerms()).toHaveLength(2)
     expect(paneConnTabs(tab.paneRoot!)).toEqual([tab, child])
     const childTerm = terms.find((t) => t === (child.term as unknown as SplitTerm))!
@@ -135,14 +146,29 @@ describe('Windows independent split panes', () => {
     expect(transport.sessions.get(child.sessionId!)!.writes.flat()).toEqual(Array.from(new TextEncoder().encode('pane-input')))
   })
 
+  it('adds no pane and reports a notice when session creation fails', async () => {
+    const { controller, transport, tab } = await setup()
+    transport.historyError = new Error('create failed')
+    expect(await split(controller, tab, 'right')).toBe(false)
+    expect(tab.paneRoot).toBeNull()
+    expect(controller.tabs.filter((t) => t.paneOf === tab.key)).toHaveLength(0)
+    expect(controller.uiNotice.value).toBeTruthy()
+    expect(transport.openCalls).toHaveLength(1)
+  })
+
+  it('refuses to split when the transport cannot create history sessions', async () => {
+    const { controller, transport, tab } = await setup()
+    ;(transport as { runtimeCreateHistorySession?: unknown }).runtimeCreateHistorySession = undefined
+    expect(await split(controller, tab, 'right')).toBe(false)
+    expect(tab.paneRoot).toBeNull()
+    expect(controller.tabs.filter((t) => t.paneOf === tab.key)).toHaveLength(0)
+  })
+
   it('closing one pane ends only that pane connection', async () => {
-    const { controller, transport, terms, tab, other } = await setup()
+    const { controller, transport, terms, tab } = await setup()
     const sid = tab.sessionId!
-    controller.splitPane(tab, tab.key, 'down')
-    const emptyId = paneLeaves(tab.paneRoot!).find((l) => l.kind === 'empty')!.id
-    controller.openPaneTarget(tab, emptyId, makeHost('host', [other]), other)
-    await flush()
-    const child = controller.tabs.find((t) => t.paneOf === tab.key)!
+    await split(controller, tab, 'down')
+    const child = paneChild(controller, tab)
     const childSid = child.sessionId!
     const childTermHandle = child.term as unknown as SplitTerm
 
@@ -192,15 +218,10 @@ describe('Windows independent split panes', () => {
   })
 
   it('closing the primary pane promotes a surviving child connection', async () => {
-    const { controller, transport, terms, tab, other } = await setup()
+    const { controller, transport, terms, tab } = await setup()
     const sid = tab.sessionId!
-    controller.splitPane(tab, tab.key, 'right')
-    controller.splitPane(tab, tab.key, 'down')
-    const empties = paneLeaves(tab.paneRoot!).filter((l) => l.kind === 'empty')
-    for (const leaf of empties) {
-      controller.openPaneTarget(tab, leaf.id, makeHost('host', [other]), other)
-    }
-    await flush()
+    await split(controller, tab, 'right')
+    await split(controller, tab, 'down')
     const children = controller.tabs.filter((t) => t.paneOf === tab.key)
     expect(children).toHaveLength(2)
     const childSids = children.map((c) => c.sessionId)
@@ -217,7 +238,7 @@ describe('Windows independent split panes', () => {
     expect(primaryTerm.disposed).toBe(true)
 
     // The first surviving conn pane is promoted to own the top-level tab.
-    const survivor = children.find((c) => !c.closed)!
+    const survivor = children.find((c) => c.paneOf === null)!
     const remaining = children.find((c) => c !== survivor)!
     expect(survivor.paneOf).toBeNull()
     expect(remaining.paneOf).toBe(survivor.key)
@@ -225,17 +246,29 @@ describe('Windows independent split panes', () => {
     expect(survivor.status).toBe('live')
     expect(survivor.paneRoot).toBeTruthy()
     expect(paneConnTabs(survivor.paneRoot!)).toEqual([survivor, remaining])
-    expect(survivor.focusedLeafId).toBe(remaining.key)
+    expect(survivor.focusedLeafId).toBe(survivor.key)
+  })
+
+  it('splitting a child pane creates another session on the same host', async () => {
+    const { controller, transport, tab } = await setup()
+    await split(controller, tab, 'right')
+    const child = paneChild(controller, tab)
+    expect(await split(controller, tab, 'down', child.key)).toBe(true)
+    await flush()
+    const children = controller.tabs.filter((t) => t.paneOf === tab.key)
+    expect(children).toHaveLength(2)
+    expect(transport.historyCalls).toEqual([
+      { id: 'host', expectedRevision: 1 },
+      { id: 'host', expectedRevision: 1 }
+    ])
+    expect(paneConnTabs(tab.paneRoot!)).toEqual([tab, child, children.find((c) => c !== child)!])
   })
 
   it('primary shell exit promotes a survivor instead of cascading the close', async () => {
-    const { controller, transport, tab, other } = await setup()
+    const { controller, transport, tab } = await setup()
     const sid = tab.sessionId!
-    controller.splitPane(tab, tab.key, 'right')
-    const emptyId = paneLeaves(tab.paneRoot!).find((l) => l.kind === 'empty')!.id
-    controller.openPaneTarget(tab, emptyId, makeHost('host', [other]), other)
-    await flush()
-    const child = controller.tabs.find((t) => t.paneOf === tab.key)!
+    await split(controller, tab, 'right')
+    const child = paneChild(controller, tab)
     const childSid = child.sessionId!
 
     transport.feed(sid, { bytes: [], exitCode: 0 })
@@ -252,12 +285,9 @@ describe('Windows independent split panes', () => {
   })
 
   it('Ctrl+Shift+W on the focused primary pane promotes the survivor', async () => {
-    const { controller, transport, tab, other } = await setup()
-    controller.splitPane(tab, tab.key, 'right')
-    const emptyId = paneLeaves(tab.paneRoot!).find((l) => l.kind === 'empty')!.id
-    controller.openPaneTarget(tab, emptyId, makeHost('host', [other]), other)
-    await flush()
-    const child = controller.tabs.find((t) => t.paneOf === tab.key)!
+    const { controller, transport, tab } = await setup()
+    await split(controller, tab, 'right')
+    const child = paneChild(controller, tab)
     const childSid = child.sessionId!
     tab.focusedLeafId = tab.key
 
@@ -272,12 +302,9 @@ describe('Windows independent split panes', () => {
   })
 
   it('removes the mirror leaf when its watched child pane closes', async () => {
-    const { controller, tab, other } = await setup()
-    controller.splitPane(tab, tab.key, 'right')
-    const emptyId = paneLeaves(tab.paneRoot!).find((l) => l.kind === 'empty')!.id
-    controller.openPaneTarget(tab, emptyId, makeHost('host', [other]), other)
-    await flush()
-    const child = controller.tabs.find((t) => t.paneOf === tab.key)!
+    const { controller, tab } = await setup()
+    await split(controller, tab, 'right')
+    const child = paneChild(controller, tab)
     expect(controller.mirrorPane(tab, child.key, 'down')).toBe(true)
     await flush()
     expect(findPaneLeaf(tab.paneRoot!, `mirror:${child.key}`)).toBeTruthy()
@@ -288,12 +315,9 @@ describe('Windows independent split panes', () => {
   })
 
   it('child panes keep pane shortcuts out of xterm while the split exists', async () => {
-    const { controller, terms, tab, other } = await setup()
-    controller.splitPane(tab, tab.key, 'right')
-    const emptyId = paneLeaves(tab.paneRoot!).find((l) => l.kind === 'empty')!.id
-    controller.openPaneTarget(tab, emptyId, makeHost('host', [other]), other)
-    await flush()
-    const child = controller.tabs.find((t) => t.paneOf === tab.key)!
+    const { controller, terms, tab } = await setup()
+    await split(controller, tab, 'right')
+    const child = paneChild(controller, tab)
     const childTerm = child.term as unknown as SplitTerm
     const primaryTerm = tab.term as unknown as SplitTerm
     const paneKey = new KeyboardEvent('keydown', { code: 'ArrowRight', ctrlKey: true, altKey: true })
@@ -307,12 +331,9 @@ describe('Windows independent split panes', () => {
   })
 
   it('focuses a clicked pane terminal immediately without waiting for props', async () => {
-    const { wrapper, controller, terms, tab, other } = await setup()
-    controller.splitPane(tab, tab.key, 'right')
-    const emptyId = paneLeaves(tab.paneRoot!).find((l) => l.kind === 'empty')!.id
-    controller.openPaneTarget(tab, emptyId, makeHost('host', [other]), other)
-    await flush()
-    const child = controller.tabs.find((t) => t.paneOf === tab.key)!
+    const { wrapper, controller, terms, tab } = await setup()
+    await split(controller, tab, 'right')
+    const child = paneChild(controller, tab)
     const childTerm = terms.find((t) => t === (child.term as unknown as SplitTerm))!
     tab.focusedLeafId = tab.key
     await flush()
@@ -338,19 +359,18 @@ describe('Windows independent split panes', () => {
     const labels = buttons.map((b) => b.textContent)
     expect(labels).toContain('向右分割')
     expect(labels).toContain('加入唯讀鏡像')
+    expect(labels).not.toContain('選擇連線…')
     buttons.find((b) => b.textContent === '向右分割')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await flush()
     expect(tab.paneRoot?.kind).toBe('split')
-    expect(paneLeaves(tab.paneRoot!).some((l) => l.kind === 'empty')).toBe(true)
+    expect(paneConnTabs(tab.paneRoot!)).toHaveLength(2)
+    expect(controller.tabs.filter((t) => t.paneOf === tab.key)).toHaveLength(1)
   })
 
   it('cycles pane focus with keyboard order and closes the focused child pane', async () => {
-    const { controller, transport, tab, other } = await setup()
-    controller.splitPane(tab, tab.key, 'right')
-    const emptyId = paneLeaves(tab.paneRoot!).find((l) => l.kind === 'empty')!.id
-    controller.openPaneTarget(tab, emptyId, makeHost('host', [other]), other)
-    await flush()
-    const child = controller.tabs.find((t) => t.paneOf === tab.key)!
+    const { controller, transport, tab } = await setup()
+    await split(controller, tab, 'right')
+    const child = paneChild(controller, tab)
 
     expect(tab.focusedLeafId).toBe(child.key)
     controller.cyclePaneFocus(tab, -1)
@@ -368,15 +388,10 @@ describe('Windows independent split panes', () => {
   })
 
   it('unsplitPanes closes every extra pane but keeps the primary connection', async () => {
-    const { controller, transport, tab, other } = await setup()
+    const { controller, transport, tab } = await setup()
     const sid = tab.sessionId!
-    controller.splitPane(tab, tab.key, 'right')
-    controller.splitPane(tab, tab.key, 'down')
-    const empties = paneLeaves(tab.paneRoot!).filter((l) => l.kind === 'empty')
-    for (const leaf of empties) {
-      controller.openPaneTarget(tab, leaf.id, makeHost('host', [other]), other)
-    }
-    await flush()
+    await split(controller, tab, 'right')
+    await split(controller, tab, 'down')
     const children = controller.tabs.filter((t) => t.paneOf === tab.key)
     expect(children.length).toBeGreaterThanOrEqual(2)
 

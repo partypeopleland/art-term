@@ -68,7 +68,10 @@ export class FakeTransport implements Transport {
   runtimeHostsData: RuntimeHostDto[] = []
   runtimeHostsError: unknown | null = null
   runtimeSessionsData = new Map<string, HostDto>()
+  historyCalls: { id: string; expectedRevision: number }[] = []
+  historyError: unknown | null = null
   private seq = 0
+  private historySeq = 0
 
   constructor(profiles: RuntimeHostDto[] = []) {
     this.runtimeHostsData = profiles
@@ -82,6 +85,14 @@ export class FakeTransport implements Transport {
     const group = this.runtimeSessionsData.get(id)
     if (!group) throw new Error('無法列出 Shell，請確認連線與 runtime 版本。')
     return group
+  }
+  async runtimeCreateHistorySession(id: string, expectedRevision: number): Promise<TargetDto> {
+    this.historyCalls.push({ id, expectedRevision })
+    if (this.historyError) throw this.historyError
+    const target = makeTarget(`history-${++this.historySeq}`, id)
+    const group = this.runtimeSessionsData.get(id)
+    if (group) group.targets.push(target)
+    return target
   }
   async runtimeCreateSession(id: string, _expectedRevision: number, name: string): Promise<TargetDto> {
     const target = makeTarget(`created-${name}`, id)
