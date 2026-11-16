@@ -7,7 +7,6 @@ import { createTerminalIo } from './controller-terminal-io'
 import type { AppController, ControllerOptions, HostUiState, TabState } from './controller-types'
 export type { AppController, ControllerOptions, HostUiState, ShotState, TabState, TabStatus } from './controller-types'
 import type {
-  HostDto,
   InstanceDesktop,
   OutputDto,
   RuntimeHostDto,
@@ -21,7 +20,6 @@ import {
   paneConnTabs,
   paneLeaves,
   removePaneLeaf,
-  replacePaneLeaf,
   splitPaneLeaf,
   type PaneLeaf,
   type PaneNode,
@@ -255,14 +253,67 @@ export function createAppController(
     if (tab.closed || disposed || (!tab.paneRoot && tab.status !== 'live')) return false
     if (!findPaneLeaf(paneRootOf(tab), leafId)) return false
     tab.paneSeq++
-    const leaf: PaneLeaf = added.kind === 'empty' ? { ...added, id: `empty:${tab.paneSeq}` } : added
-    tab.paneRoot = splitPaneLeaf(paneRootOf(tab), leafId, direction, leaf, `split:${tab.paneSeq}`)
-    tab.focusedLeafId = leaf.id
+    tab.paneRoot = splitPaneLeaf(paneRootOf(tab), leafId, direction, added, `split:${tab.paneSeq}`)
+    tab.focusedLeafId = added.id
     return true
   }
 
-  function splitPane(tab: TabState, leafId: string, direction: SplitDirection): boolean {
-    return addPaneLeaf(tab, leafId, direction, { kind: 'empty', id: '' })
+  /**
+   * Split `leafId` toward `direction`, creating a brand-new session on the
+   * same runtime Host profile the split pane is connected to — the pane
+   * equivalent of the sidebar "+" button (runtimeCreateHistorySession).
+   * The conn leaf only appears once the target exists, so a failed create
+   * leaves the tree untouched and reports through uiNotice.
+   */
+  async function splitPane(tab: TabState, leafId: string, direction: SplitDirection): Promise<boolean> {
+    if (tab.closed || disposed || hidden || (!tab.paneRoot && tab.status !== 'live')) return false
+    const leaf = findPaneLeaf(paneRootOf(tab), leafId)
+    if (!leaf) return false
+    const source = leaf.kind === 'conn' ? leaf.tab : leaf.kind === 'mirror' ? leaf.of : null
+    const profile = source ? runtimeProfiles.value.find((p) => p.id === source.hostId) : undefined
+    if (!source || !profile || typeof transport.runtimeCreateHistorySession !== 'function') {
+      uiNotice.value = '此連線無法建立新分割窗格'
+      return false
+    }
+    if (tabs.length >= MAX_TABS) {
+      uiNotice.value = `已達 ${MAX_TABS} 連線上限（含分割窗格）`
+      return false
+    }
+    let target: TargetDto
+    try {
+      target = await transport.runtimeCreateHistorySession(profile.id, profile.revision)
+    } catch {
+      if (!tab.closed && !disposed) uiNotice.value = '建立新連線失敗，請稍後再試'
+      return false
+    }
+    // The tree may have changed while the session was being created.
+    if (tab.closed || disposed || hidden || !findPaneLeaf(paneRootOf(tab), leafId)) return false
+    if (tabs.length >= MAX_TABS) {
+      uiNotice.value = `已達 ${MAX_TABS} 連線上限（含分割窗格）`
+      return false
+    }
+    tab.paneSeq++
+    const child = reactive<TabState>(newTabState({
+      key: `${tab.key}#${tab.paneSeq}`,
+      targetId: target.id,
+      hostId: profile.id,
+      hostLabel: profile.name,
+      label: target.label,
+      desktopAvailable: target.desktopAvailable,
+      paneOf: tab.key
+    }))
+    tabs.push(child)
+    tab.paneRoot = splitPaneLeaf(
+      paneRootOf(tab),
+      leafId,
+      direction,
+      { kind: 'conn', id: child.key, tab: child },
+      `split:${tab.paneSeq}`
+    )
+    tab.focusedLeafId = child.key
+    uiNotice.value = ''
+    // Session opens in attachTerminal once the pane mounted and fit().
+    return true
   }
 
   function mirrorPane(tab: TabState, leafId: string, direction: SplitDirection): boolean {
@@ -272,30 +323,6 @@ export function createAppController(
     const mirrorId = `mirror:${leaf.tab.key}`
     if (findPaneLeaf(root, mirrorId)) return false
     return addPaneLeaf(tab, leafId, direction, { kind: 'mirror', id: mirrorId, of: leaf.tab })
-  }
-
-  function openPaneTarget(tab: TabState, leafId: string, host: HostDto, target: TargetDto): void {
-    if (tab.closed || disposed || !tab.paneRoot) return
-    if (findPaneLeaf(tab.paneRoot, leafId)?.kind !== 'empty') return
-    if (hidden || tabs.length >= MAX_TABS) {
-      uiNotice.value = hidden ? '' : `已達 ${MAX_TABS} 連線上限（含分割窗格）`
-      return
-    }
-    tab.paneSeq++
-    const child = reactive<TabState>(newTabState({
-      key: `${tab.key}#${tab.paneSeq}`,
-      targetId: target.id,
-      hostId: host.id,
-      hostLabel: host.label,
-      label: target.label,
-      desktopAvailable: target.desktopAvailable || host.desktopAvailable,
-      paneOf: tab.key
-    }))
-    tabs.push(child)
-    tab.paneRoot = replacePaneLeaf(tab.paneRoot, leafId, { kind: 'conn', id: child.key, tab: child })
-    tab.focusedLeafId = child.key
-    uiNotice.value = ''
-    // Session opens in attachTerminal once the pane mounted and fit().
   }
 
   /**
@@ -957,7 +984,6 @@ export function createAppController(
     detachMirror,
     splitPane,
     mirrorPane,
-    openPaneTarget,
     closePaneLeaf,
     unsplitPanes,
     focusPane,

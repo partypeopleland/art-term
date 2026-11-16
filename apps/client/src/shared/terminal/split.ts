@@ -8,12 +8,12 @@ export type SplitAxis = 'row' | 'column'
  * TabState — its own target, session, poll loop and input queue — so panes
  * are independent connections, not mirrors of one screen. `mirror` leaves
  * stay read-only views of an existing connection (issue #34 behaviour).
- * `empty` leaves wait for the user to pick or create a session.
+ * `conn` leaves are always live connections — a split creates its session
+ * up front, so no placeholder leaf kind exists.
  */
 export type PaneLeaf =
   | { kind: 'conn'; id: string; tab: TabState }
   | { kind: 'mirror'; id: string; of: TabState }
-  | { kind: 'empty'; id: string }
 
 export interface PaneSplitNode {
   kind: 'split'

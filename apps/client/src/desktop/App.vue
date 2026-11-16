@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
-import type { HostDto, InstanceDesktop, TargetDto, Transport } from '../shared/transport/types'
+import type { HostDto, InstanceDesktop, Transport } from '../shared/transport/types'
 import { createAppController, type AppController, type ControllerOptions, type TabState } from '../shared/state/controller'
 import { TerminalFactoryKey, createDesktopXtermTerminal, type TerminalFactory } from '../shared/terminal/handle'
 import type { PaneLeaf, SplitDirection } from '../shared/terminal/split'
@@ -13,7 +13,6 @@ import { selectedTheme, terminalTheme } from '../shared/theme/theme'
 import '../shared/theme/themes.css'
 import TabBar from '../shared/components/TabBar.vue'
 import PaneSplitView from '../shared/components/PaneSplitView.vue'
-import PaneConnectionPicker from '../shared/components/PaneConnectionPicker.vue'
 import PreviewPanel from '../shared/components/PreviewPanel.vue'
 import PreviewZoom from '../shared/components/PreviewZoom.vue'
 import { useWorkspaceSize } from '../shared/components/workspace-size'
@@ -128,16 +127,6 @@ function visibility(): void {
 }
 onMounted(() => { window.addEventListener('keydown', onGlobalKey, true); document.addEventListener('visibilitychange', visibility); void controller.loadCatalog(); void controller.loadInstanceDesktops() })
 onBeforeUnmount(() => { window.removeEventListener('keydown', onGlobalKey, true); document.removeEventListener('visibilitychange', visibility); clearTimeout(clipboardNoticeTimer); controller.dispose() })
-const panePicker = ref<{ tab: TabState; leafId: string } | null>(null)
-function openPanePicker(tab: TabState, leafId: string): void {
-  if (transferPicker.value) return
-  panePicker.value = { tab, leafId }
-}
-function pickPaneConnection(host: HostDto, target: TargetDto): void {
-  const pick = panePicker.value
-  panePicker.value = null
-  if (pick && !pick.tab.closed) controller.openPaneTarget(pick.tab, pick.leafId, host, target)
-}
 const visibleTabs = computed(() => controller.tabs.filter(tab => !tab.paneOf && !tab.closed))
 function paneVisible(tab: TabState): boolean {
   return terminalVisible.value && tab.key === controller.activeKey.value
@@ -157,11 +146,11 @@ function singleLeaf(tab: TabState): PaneLeaf {
   }
   return leaf
 }
-function onSplitChange(tab: TabState, event: Event): void {
+async function onSplitChange(tab: TabState, event: Event): Promise<void> {
   const select = event.target as HTMLSelectElement
   const value = select.value
   const leafId = tab.focusedLeafId ?? tab.key
-  const ok = !value ? (controller.unsplitPanes(tab), true) : controller.splitPane(tab, leafId, value as SplitDirection)
+  const ok = !value ? (controller.unsplitPanes(tab), true) : await controller.splitPane(tab, leafId, value as SplitDirection)
   if (!ok) select.value = tab.paneRoot ? 'split' : ''
 }
 // Toolbar/statusbar describe the pane that currently owns input focus.
@@ -208,7 +197,6 @@ const statusText = computed(() => !paneTab.value ? '未連線' : paneTab.value.s
                 :controller="controller"
                 :visible="paneVisible(tab)"
                 :on-selection-finished="clipboard.selectionFinished"
-                @pick-connection="leafId => openPanePicker(tab, leafId)"
               />
             </div>
             <div v-if="!visibleTabs.length" class="empty">從左側選擇連線，開始工作。</div>
@@ -223,17 +211,6 @@ const statusText = computed(() => !paneTab.value ? '未連線' : paneTab.value.s
     <footer class="statusbar"><span class="s-item" :class="paneTab?.status">{{ statusText }}</span><span v-if="paneTab?.remoteSession" class="s-item">{{ paneTab.remoteSession }}</span><span v-if="paneTab?.status === 'live' && paneTab.errorMsg" class="s-item warn">{{ paneTab.errorMsg }}</span><span v-if="paneTab?.notice" class="s-item warn">{{ paneTab.notice }}</span><span v-if="controller.uiNotice.value" class="s-item warn">{{ controller.uiNotice.value }}</span><span class="spacer" /><span class="s-item muted">{{ visibleTabs.length }} / 32 分頁</span></footer>
     <PreviewZoom v-if="zoomOpen && page === 'workspace' && activeTab && activeTab.previewVisible && (activeTab.desktopEnabled || activeTab.shot)" :tab="activeTab" :screen-key="`${activeTab.key}:${activeTab.instanceDesktop?.id || 'legacy'}`" mode="windows" @close="zoomOpen = false" />
     <ScreenPicker v-if="screenPickerOpen && activeTab" :items="controller.instanceDesktops.value" :selected-id="activeTab.instanceDesktop?.id" :busy="activeTab.desktopBusy" :error="activeTab.desktopError || controller.instanceDesktopsError.value" @select="selectScreen" @clear="clearScreen" @close="screenPickerOpen = false" @settings="showSettings('connections')" />
-    <PaneConnectionPicker
-      v-if="panePicker"
-      :transport="transport"
-      :runtime-profiles="controller.runtimeProfiles.value"
-      :runtime-profiles-error="controller.runtimeProfilesError.value"
-      :catalog-loading="controller.catalogLoading.value"
-      :runtime-connected="runtimeConnected"
-      @open="pickPaneConnection"
-      @create="panePicker = null; showSettings('connections')"
-      @close="panePicker = null"
-    />
   </div>
 </template>
 
