@@ -63,10 +63,10 @@ it('applies all four themes immediately to existing and future terminals',async(
 })
 it('syncs the split mirror theme when switching themes',async()=>{
  const {controller,terms,attach}=await setup();const tab=await attach()
- expect(controller.splitTab(tab,'down')).toBe(true);await flush();expect(terms).toHaveLength(2)
+ expect(controller.mirrorPane(tab,tab.key,'down')).toBe(true);await flush()
+ const live=terms.filter(t=>!t.disposed);expect(live).toHaveLength(2)
  selectTheme('retro');await flush()
- expect(terms[0].colors.at(-1)).toEqual(terminalTheme('retro'))
- expect(terms[1].colors.at(-1)).toEqual(terminalTheme('retro'))
+ for(const term of live)expect(term.colors.at(-1)).toEqual(terminalTheme('retro'))
 })
 it('selects/clears independent Screens on a host without legacy capability and isolates two tabs',async()=>{
  const {wrapper,controller,transport,attach}=await setup();const first=await attach()
