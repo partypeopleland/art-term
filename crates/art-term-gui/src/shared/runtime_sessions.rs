@@ -82,7 +82,7 @@ pub trait RuntimePreview: Send + Sync {
 }
 
 struct Target {
-    binding: SessionBinding,
+    binding: Mutex<SessionBinding>,
     grant: Mutex<Option<SessionGrant>>,
     /// Frozen mapped-preview binding captured at issue; `None` means
     /// this target can never offer desktop preview.
@@ -442,6 +442,8 @@ pub async fn gui_runtime_delete_session(
         .get(&target_id)
         .ok_or(ApiError::StateChanged)?
         .binding
+        .lock()
+        .map_err(|_| ApiError::Storage)?
         .clone();
     // A reattached target can have a newer generation than its original
     // issued binding. Prefer the live connection's verified binding, while

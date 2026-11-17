@@ -307,7 +307,7 @@ export function createAppController(
   function promotePaneSurvivor(tab: TabState): void {
     const root = tab.paneRoot
     const survivor = root
-      ? paneConnTabs(root).find((t) => t !== tab && !t.closed && t.paneOf === tab.key)
+      ? paneConnTabs(root).find((t) => t !== tab && !t.closed && !closingPanes.has(t.key) && t.paneOf === tab.key)
       : undefined
     if (!root || !survivor) {
       void closeTab(tab)
@@ -334,6 +334,7 @@ export function createAppController(
 
   /** Remote-side end of a tab's own connection: promote a pane survivor or close the tab. */
   function finishTabConnection(tab: TabState): void {
+    sessionsRevision.value++
     if (!tab.paneOf && tab.paneRoot) promotePaneSurvivor(tab)
     else void closeTab(tab)
   }
@@ -358,7 +359,7 @@ export function createAppController(
     }
     sessionsRevision.value++
     if (disposed || leaf.tab.closed) return
-    if (leaf.tab === tab) promotePaneSurvivor(tab)
+    if (!leaf.tab.paneOf && leaf.tab.paneRoot) promotePaneSurvivor(leaf.tab)
     else await closeTab(leaf.tab)
   }
 
@@ -489,6 +490,7 @@ export function createAppController(
    */
   async function retireRuntimeAgentTab(tab: TabState): Promise<void> {
     if (disposed || tab.closed) return
+    sessionsRevision.value++
     tab.writeBuf = []
     tab.pendingSize = null
     uiNotice.value = `「${tab.label}」的遠端 runtime 或 Shell 已更換；已關閉舊分頁，請重新選擇。`

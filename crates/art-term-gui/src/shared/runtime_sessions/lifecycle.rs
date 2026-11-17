@@ -17,9 +17,15 @@ impl RuntimeSessions {
         let mut targets = self.targets.lock().map_err(|_| ApiError::Storage)?;
         // Officially the session name is the identity — a generation
         // change from an operator renew keeps the same target.
-        if let Some((id, target)) = targets.iter().find(|(_, target)| {
-            target.binding.profile == binding.profile && target.binding.name == binding.name
-        }) {
+        for (id, target) in targets.iter() {
+            let mut current = target.binding.lock().map_err(|_| ApiError::Storage)?;
+            if current.profile != binding.profile || current.name != binding.name {
+                continue;
+            }
+            if binding.generation > current.generation {
+                *target.grant.lock().map_err(|_| ApiError::Storage)? = grant;
+                *current = binding.clone();
+            }
             // Reused bindings keep the mapping frozen at first issue —
             // a later catalog view can never rebind them.
             return Ok(TargetDto {
@@ -36,9 +42,16 @@ impl RuntimeSessions {
         }
         // A changed profile or session incarnation invalidates the old target;
         // open connections retain their own immutable binding.
-        targets.retain(|_, target| {
-            target.binding.profile.id != binding.profile.id || target.binding.name != binding.name
-        });
+        let mut stale = Vec::new();
+        for (id, target) in targets.iter() {
+            let current = target.binding.lock().map_err(|_| ApiError::Storage)?;
+            if current.profile.id == binding.profile.id && current.name == binding.name {
+                stale.push(id.clone());
+            }
+        }
+        for id in stale {
+            targets.remove(&id);
+        }
         if targets.len() >= 512 {
             return Err(ApiError::Capacity);
         }
@@ -57,7 +70,7 @@ impl RuntimeSessions {
         targets.insert(
             id,
             Arc::new(Target {
-                binding,
+                binding: Mutex::new(binding),
                 grant: Mutex::new(grant),
                 desktop,
                 history_bootstrap: AtomicBool::new(false),
@@ -79,11 +92,18 @@ impl RuntimeSessions {
         names: &[&str],
     ) -> Result<(), ApiError> {
         let mut targets = self.targets.lock().map_err(|_| ApiError::Storage)?;
-        targets.retain(|_, target| {
-            target.binding.profile.id != profile.id
-                || (target.binding.profile == *profile
-                    && names.contains(&target.binding.name.as_str()))
-        });
+        let mut stale = Vec::new();
+        for (id, target) in targets.iter() {
+            let binding = target.binding.lock().map_err(|_| ApiError::Storage)?;
+            if binding.profile.id == profile.id
+                && (binding.profile != *profile || !names.contains(&binding.name.as_str()))
+            {
+                stale.push(id.clone());
+            }
+        }
+        for id in stale {
+            targets.remove(&id);
+        }
         Ok(())
     }
     pub fn is_target(id: &str) -> bool {
@@ -106,12 +126,17 @@ impl RuntimeSessions {
             .get(target_id)
             .cloned()
             .ok_or(SessionError::StateChanged)?;
+        let binding = target
+            .binding
+            .lock()
+            .map_err(|_| SessionError::Internal)?
+            .clone();
         let snapshot = hosts
             .store()
             .map_err(SessionError::from)?
-            .snapshot(&target.binding.profile.id)
+            .snapshot(&binding.profile.id)
             .map_err(SessionError::from)?;
-        if snapshot.profile != target.binding.profile {
+        if snapshot.profile != binding.profile {
             return Err(SessionError::StateChanged.into());
         }
         if self
@@ -136,19 +161,18 @@ impl RuntimeSessions {
             None => hosts
                 .admin()
                 .map_err(SessionError::from)?
-                .renew(&snapshot, &target.binding.name)
+                .renew(&snapshot, &binding.name)
                 .await
                 .map_err(SessionError::from)?,
         };
-        target
-            .binding
+        binding
             .verify_grant(&grant, false)
             .map_err(SessionError::from)?;
         let handle = hosts.attach(snapshot, grant, 0, 1).await?;
         if !hosts
             .store()
             .map_err(SessionError::from)?
-            .is_current(&target.binding.profile)
+            .is_current(&binding.profile)
             .map_err(SessionError::from)?
         {
             handle.shutdown().await;
@@ -156,6 +180,7 @@ impl RuntimeSessions {
         }
         handle.resize(rows, cols)?;
         let history_binding = handle.binding().clone();
+        *target.binding.lock().map_err(|_| SessionError::Internal)? = history_binding.clone();
         if target.history_bootstrap.swap(false, Ordering::SeqCst) {
             let key =
                 history::key_from_name(&history_binding.name).ok_or(SessionError::Protocol)?;
@@ -187,7 +212,7 @@ impl RuntimeSessions {
                     owned_shells: self.owned_shells.clone(),
                     closed: AtomicBool::new(false),
                     desktop_operation: tokio::sync::Mutex::new(()),
-                    history_binding: Some(history_binding),
+                    history_binding: Some(history_binding.clone()),
                     history: tokio::sync::Mutex::new(None),
                     history_cancel: watch::channel(0).0,
                     native_interaction: tokio::sync::Mutex::new(()),
@@ -199,8 +224,8 @@ impl RuntimeSessions {
         Ok(SessionDto {
             id,
             target_id: target_id.into(),
-            label: shell_label(&target.binding.name),
-            remote_session: format!("openab:{}", target.binding.name),
+            label: shell_label(&history_binding.name),
+            remote_session: format!("openab:{}", history_binding.name),
         })
     }
     pub fn poll(&self, id: &str) -> Reply<GuiOutput> {

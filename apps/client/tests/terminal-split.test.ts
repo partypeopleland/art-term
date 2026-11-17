@@ -16,7 +16,7 @@ import {
   type PaneNode,
   type SplitDirection
 } from '../src/shared/terminal/split'
-import { FakeTerm, FakeTransport, makeHost, makeProfile, makeTarget } from './fake'
+import { FakeTerm, FakeTransport, deferred, makeHost, makeProfile, makeTarget } from './fake'
 import { paneHotkeys, resetPaneHotkeys, setPaneHotkey } from '../src/shared/state/hotkeys'
 
 vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
@@ -119,6 +119,13 @@ describe('pane tree helpers', () => {
 })
 
 describe('Windows independent split panes', () => {
+  it('refreshes the sidebar when a Shell exits on its own', async () => {
+    const { controller, transport, tab } = await setup()
+    const revision = controller.sessionsRevision.value
+    transport.feed(tab.sessionId!, { bytes: [], exitCode: 0 })
+    await flush()
+    expect(controller.sessionsRevision.value).toBe(revision + 1)
+  })
   it('splits into a new connection created on the same host, with no picker', async () => {
     const { wrapper, controller, transport, terms, tab } = await setup()
     const sid = tab.sessionId!
@@ -219,6 +226,28 @@ describe('Windows independent split panes', () => {
     expect(survivor.paneRoot).toBeTruthy()
     expect(paneConnTabs(survivor.paneRoot!)).toEqual([survivor, remaining])
     expect(survivor.focusedLeafId).toBe(survivor.key)
+  })
+
+  it('keeps a different survivor when the primary exits during a child pane deletion', async () => {
+    const { controller, transport, tab } = await setup()
+    await split(controller, tab, 'right')
+    await split(controller, tab, 'down')
+    const children = controller.tabs.filter(t => t.paneOf === tab.key)
+    const closing = children[0]
+    const staying = children[1]
+    const gate = deferred<void>()
+    const deleteSession = transport.runtimeDeleteSession.bind(transport)
+    transport.runtimeDeleteSession = async (...args) => { await gate.promise; return deleteSession(...args) }
+    const close = controller.closePaneLeaf(tab, closing.key)
+    transport.feed(tab.sessionId!, { bytes: [], exitCode: 0 })
+    await flush()
+    expect(staying.paneOf).toBeNull()
+    gate.resolve()
+    await close
+    await flush()
+    expect(controller.tabs).toContain(staying)
+    expect(staying.status).toBe('live')
+    expect(controller.tabs).not.toContain(closing)
   })
 
   it('keeps the pane open when remote deletion fails', async () => {

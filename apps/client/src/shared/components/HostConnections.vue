@@ -18,10 +18,15 @@ const expanded = ref(false)
 const creating = ref(false)
 let generation = 0
 let alive = true
+let refreshQueued = false
 function current(ticket: number, profile: RuntimeHostDto): boolean {
   return alive && props.active && !document.hidden && ticket === generation && props.profile.id === profile.id && props.profile.revision === profile.revision
 }
 async function load(force = false): Promise<void> {
+  if (creating.value) {
+    if (force) refreshQueued = true
+    return
+  }
   if ((busy.value && !force) || !props.active || document.hidden) return
   const profile = { ...props.profile }
   const ticket = ++generation
@@ -61,12 +66,14 @@ async function create(): Promise<void> {
   } catch {
     if (current(ticket, profile)) error.value = '建立結果未確認，請先重新整理連線。'
   } finally {
+    const shouldRefresh = created || refreshQueued
+    refreshQueued = false
     creating.value = false
     if (current(ticket, profile)) busy.value = false
-    if (created && current(ticket, profile)) void load()
+    if (shouldRefresh && current(ticket, profile)) void load(true)
   }
 }
-function cancelPending(): void { generation++; busy.value = false }
+function cancelPending(): void { generation++; busy.value = false; refreshQueued = false }
 function visibility(): void {
   if (document.hidden) cancelPending()
   else if (props.active) void load()
