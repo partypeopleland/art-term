@@ -8,6 +8,7 @@ const props = defineProps<{
   transport: Transport
   connected: boolean
   active: boolean
+  refreshVersion?: number
 }>()
 const emit = defineEmits<{ open: [host: HostDto, target: TargetDto] }>()
 const group = ref<HostDto | null>(null)
@@ -20,8 +21,8 @@ let alive = true
 function current(ticket: number, profile: RuntimeHostDto): boolean {
   return alive && props.active && !document.hidden && ticket === generation && props.profile.id === profile.id && props.profile.revision === profile.revision
 }
-async function load(): Promise<void> {
-  if (busy.value || !props.active || document.hidden) return
+async function load(force = false): Promise<void> {
+  if ((busy.value && !force) || !props.active || document.hidden) return
   const profile = { ...props.profile }
   const ticket = ++generation
   busy.value = true
@@ -51,15 +52,18 @@ async function create(): Promise<void> {
   const ticket = ++generation
   busy.value = true
   creating.value = true
+  let created = false
   error.value = ''
   try {
     const target = await props.transport.runtimeCreateHistorySession(profile.id, profile.revision)
+    created = true
     if (current(ticket, profile)) emit('open', { id: profile.id, label: profile.name, desktopAvailable: target.desktopAvailable, targets: [target] }, target)
   } catch {
     if (current(ticket, profile)) error.value = '建立結果未確認，請先重新整理連線。'
   } finally {
     creating.value = false
     if (current(ticket, profile)) busy.value = false
+    if (created && current(ticket, profile)) void load()
   }
 }
 function cancelPending(): void { generation++; busy.value = false }
@@ -69,6 +73,7 @@ function visibility(): void {
 }
 watch(() => props.profile, () => { cancelPending(); group.value = null; expanded.value = false; void load() })
 watch(() => props.active, active => { if (active) void load(); else cancelPending() })
+watch(() => props.refreshVersion, () => { void load(true) })
 onMounted(() => { document.addEventListener('visibilitychange', visibility); void load() })
 onBeforeUnmount(() => { alive = false; cancelPending(); document.removeEventListener('visibilitychange', visibility) })
 </script>

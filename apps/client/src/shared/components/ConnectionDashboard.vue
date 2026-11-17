@@ -12,6 +12,7 @@ const props = withDefaults(defineProps<{
   runtimeProfiles: RuntimeHostDto[]
   runtimeProfilesError: string
   runtimePending: string | null
+  sessionsRevision?: number
   /** Only a live local tab lights the connection indicator. */
   runtimeConnected: Set<string>
 }>(), { screens: () => [], screensError: '' })
@@ -44,7 +45,7 @@ const sections = computed(() => [
         </button>
       </header>
       <div v-show="!collapsed[section.key]" :id="`category-content-${section.key}`" class="section-content">
-        <HostConnections v-for="profile in section.profiles" :key="`${profile.id}:${profile.revision}`" :profile="profile" :transport="transport" :active="active" :connected="runtimeConnected.has(profile.id)" @open="(host, target) => emit('open', host, target)" />
+        <HostConnections v-for="profile in section.profiles" :key="`${profile.id}:${profile.revision}`" :profile="profile" :transport="transport" :active="active" :connected="runtimeConnected.has(profile.id)" :refresh-version="sessionsRevision" @open="(host, target) => emit('open', host, target)" />
         <div v-if="!section.profiles.length" class="empty-section">
           <span class="empty-line" aria-hidden="true" />
           <span>{{ catalogLoading ? '正在讀取連線' : runtimeProfilesError ? '設定暫時無法讀取' : section.key === 'computers' ? '尚未新增主機連線' : '尚未新增工作助理' }}</span>

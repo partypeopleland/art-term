@@ -110,6 +110,8 @@ export interface AppController {
    *  Increment-only — works even when other tabs stay open; no payload
    *  is ever attached. */
   selectionRequest: Ref<number>
+  /** Incremented after a Shell is created or explicitly deleted. */
+  sessionsRevision: Ref<number>
   loadCatalog(): Promise<void>
   refreshTargets(): Promise<void>
   openTarget(host: HostUiState, target: TargetDto, withDesktop: boolean): void
@@ -122,8 +124,8 @@ export interface AppController {
    */
   splitPane(tab: TabState, leafId: string, direction: SplitDirection): Promise<boolean>
   isPaneKey(e: KeyboardEvent): boolean
-  /** Close one pane leaf: child conn tabs detach only their own session. */
-  closePaneLeaf(tab: TabState, leafId: string): void
+  /** Explicitly delete the selected remote Shell, then close its pane. */
+  closePaneLeaf(tab: TabState, leafId: string): Promise<void>
   /** Remove every non-primary pane leaf (child connections close). */
   unsplitPanes(tab: TabState): void
   /** Point keyboard focus at a pane leaf (null clears the focused leaf). */

@@ -424,6 +424,37 @@ pub async fn gui_runtime_create_history_session(
         .store(true, Ordering::SeqCst);
     Ok(target)
 }
+
+/// Explicit pane close only. The opaque target is checked against the saved
+/// Host revision and the current runtime generation before a single DELETE.
+/// Ordinary local tab close still only detaches through gui_close.
+#[tauri::command]
+pub async fn gui_runtime_delete_session(
+    hosts: State<'_, Arc<RuntimeHosts>>,
+    sessions: State<'_, Arc<RuntimeSessions>>,
+    target_id: String,
+) -> Result<(), HostError> {
+    let binding = sessions
+        .targets
+        .lock()
+        .map_err(|_| ApiError::Storage)?
+        .get(&target_id)
+        .ok_or(ApiError::StateChanged)?
+        .binding
+        .clone();
+    let snapshot = hosts.store()?.snapshot(&binding.profile.id)?;
+    if snapshot.profile != binding.profile {
+        return Err(ApiError::StateChanged.into());
+    }
+    let list = hosts.admin()?.list(&snapshot).await?;
+    binding.verify_list(&list)?;
+    if !hosts.store()?.is_current(&binding.profile)? {
+        return Err(ApiError::StateChanged.into());
+    }
+    hosts.admin()?.delete(&snapshot, &binding.name).await?;
+    sessions.targets.lock().map_err(|_| ApiError::Storage)?.remove(&target_id);
+    Ok(())
+}
 #[tauri::command]
 pub async fn gui_runtime_history(
     hosts: State<'_, Arc<RuntimeHosts>>,

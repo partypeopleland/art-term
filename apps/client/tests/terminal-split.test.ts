@@ -173,10 +173,11 @@ describe('Windows independent split panes', () => {
     const childSid = child.sessionId!
     const childTermHandle = child.term as unknown as SplitTerm
 
-    await controller.closeTab(child)
+    await controller.closePaneLeaf(tab, child.key)
     await flush()
     expect(controller.tabs.find((t) => t.key === child.key)).toBeUndefined()
     expect(transport.closeCalls).toContain(childSid)
+    expect(transport.deleteCalls).toEqual([child.targetId])
     expect(transport.closeCalls).not.toContain(sid)
     expect(tab.status).toBe('live')
     expect(tab.paneRoot).toBeNull()
@@ -204,6 +205,7 @@ describe('Windows independent split panes', () => {
     expect(tab.closed).toBe(true)
     expect(controller.tabs.find((t) => t.key === tab.key)).toBeUndefined()
     expect(transport.closeCalls).toContain(sid)
+    expect(transport.deleteCalls).toEqual([tab.targetId])
     for (const childSid of childSids) expect(transport.closeCalls).not.toContain(childSid)
     expect(primaryTerm.disposed).toBe(true)
 
@@ -217,6 +219,19 @@ describe('Windows independent split panes', () => {
     expect(survivor.paneRoot).toBeTruthy()
     expect(paneConnTabs(survivor.paneRoot!)).toEqual([survivor, remaining])
     expect(survivor.focusedLeafId).toBe(survivor.key)
+  })
+
+  it('keeps the pane open when remote deletion fails', async () => {
+    const { controller, transport, tab } = await setup()
+    await split(controller, tab)
+    const child = paneChild(controller, tab)
+    transport.deleteError = new Error('network unavailable')
+    await controller.closePaneLeaf(tab, child.key)
+    await flush()
+    expect(controller.tabs).toContain(child)
+    expect(child.status).toBe('live')
+    expect(transport.closeCalls).not.toContain(child.sessionId)
+    expect(controller.uiNotice.value).toContain('關閉')
   })
 
   it('splitting a child pane creates another session on the same host', async () => {

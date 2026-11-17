@@ -52,6 +52,8 @@ export function createAppController(
   const activeKey = ref<string | null>(null)
   const uiNotice = ref('')
   const selectionRequest = ref(0)
+  const sessionsRevision = ref(0)
+  const closingPanes = new Set<string>()
   let disposed = false
   let hidden = false
   const activeTab = computed(() => tabs.find((t) => t.key === activeKey.value) ?? null)
@@ -290,6 +292,7 @@ export function createAppController(
     )
     tab.focusedLeafId = child.key
     uiNotice.value = ''
+    sessionsRevision.value++
     // Session opens in attachTerminal once the pane mounted and fit().
     return true
   }
@@ -335,17 +338,28 @@ export function createAppController(
     else void closeTab(tab)
   }
 
-  function closePaneLeaf(tab: TabState, leafId: string): void {
+  async function closePaneLeaf(tab: TabState, leafId: string): Promise<void> {
     if (tab.closed || disposed) return
-    if (!tab.paneRoot) {
-      // Single-pane view: closing the only pane closes the tab's connection.
-      if (leafId === tab.key) void closeTab(tab)
+    const leaf = findPaneLeaf(paneRootOf(tab), leafId)
+    if (!leaf) return
+    if (closingPanes.has(leaf.tab.key)) return
+    if (!transport.runtimeDeleteSession) {
+      uiNotice.value = '此版本無法關閉遠端連線'
       return
     }
-    const leaf = findPaneLeaf(tab.paneRoot, leafId)
-    if (!leaf) return
+    closingPanes.add(leaf.tab.key)
+    try {
+      await transport.runtimeDeleteSession(leaf.tab.targetId)
+    } catch {
+      if (!disposed && !leaf.tab.closed) uiNotice.value = '關閉遠端連線失敗，窗格已保留；請稍後重試'
+      return
+    } finally {
+      closingPanes.delete(leaf.tab.key)
+    }
+    sessionsRevision.value++
+    if (disposed || leaf.tab.closed) return
     if (leaf.tab === tab) promotePaneSurvivor(tab)
-    else void closeTab(leaf.tab)
+    else await closeTab(leaf.tab)
   }
 
   function unsplitPanes(tab: TabState): void {
@@ -952,6 +966,7 @@ export function createAppController(
     activeTab,
     uiNotice,
     selectionRequest,
+    sessionsRevision,
     loadCatalog,
     refreshTargets,
     openTarget,

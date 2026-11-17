@@ -17,6 +17,15 @@ function setup(names: string[] = ['nuc-1', 'nuc-2', 'nuc-3']) {
   return { profile, targets, transport, wrapper }
 }
 describe('inline existing connections', () => {
+  it('updates the visible Shell list when a pane action changes the session revision', async () => {
+    const { transport, wrapper } = setup(['work-a'])
+    await flushPromises()
+    transport.runtimeSessionsData.set('nuc', makeGroup('nuc', [makeCatalogTarget('work-b', 'nuc', 'work-b', '')]))
+    await wrapper.setProps({ refreshVersion: 1 })
+    await flushPromises()
+    expect(wrapper.text()).toContain('work-b')
+    expect(wrapper.text()).not.toContain('work-a')
+  })
   it('shows the structured gateway error on list failure and can refresh successfully', async () => {
     const { transport, wrapper } = setup(['work-a'])
     await flushPromises()

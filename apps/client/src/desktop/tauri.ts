@@ -62,6 +62,7 @@ export function createTauriTransport(): Transport {
     runtimeRecover: (sessionId) => call<void>('gui_runtime_recover', { sessionId }),
     runtimeSessions: (id, expectedRevision) => call<HostDto>('gui_runtime_sessions', { id, expectedRevision }),
     runtimeCreateHistorySession: (id, expectedRevision) => call('gui_runtime_create_history_session', { id, expectedRevision }),
+    runtimeDeleteSession: targetId => call<void>('gui_runtime_delete_session', { targetId }),
     runtimeHistory: (sessionId, request) => call('gui_runtime_history', { sessionId, request }),
     runtimeCreateSession: (id, expectedRevision, name) => call<TargetDto>('gui_runtime_create_session', { id, expectedRevision, name }),
     runtimeHosts: () => call<RuntimeHostDto[]>('gui_runtime_hosts'),
