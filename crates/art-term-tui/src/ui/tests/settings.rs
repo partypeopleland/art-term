@@ -146,6 +146,19 @@ async fn settings_edit_cancel_restores_settings_and_leader_esc_cancels() {
     backend.shutdown().await;
 }
 #[tokio::test]
+async fn settings_update_action_opens_update_modal_and_back_restores() {
+    let (_directory, backend, mut app) = test_app().await;
+    app.open_settings();
+    app.settings_action(SettingsAction::Update, None, 0);
+    assert!(matches!(app.modal, Some(Modal::Update(_))));
+    app.modal_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    app.modal_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+    app.modal_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(matches!(app.modal, Some(Modal::Settings(_))));
+    app.stop().await;
+    backend.shutdown().await;
+}
+#[tokio::test]
 async fn settings_modal_draws_target_rows_actions_and_back() {
     let (_directory, backend, mut app) = test_app().await;
     seed_profiles(&mut app);

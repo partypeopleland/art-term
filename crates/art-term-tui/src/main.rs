@@ -21,6 +21,8 @@ mod tty;
 #[cfg(unix)]
 mod ui;
 #[cfg(unix)]
+mod update;
+#[cfg(unix)]
 mod vault;
 
 #[cfg(unix)]

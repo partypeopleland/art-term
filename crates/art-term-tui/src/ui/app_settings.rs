@@ -169,6 +169,9 @@ impl App {
     ) {
         let resolved = self.resolve_settings_target(&target);
         match action {
+            SettingsAction::Update => {
+                self.open_settings_child(Modal::Update(UpdateModal::new()), target, row)
+            }
             SettingsAction::Back => (),
             SettingsAction::NewHost => {
                 self.open_settings_child(Modal::Host(HostForm::new(None)), target, row)

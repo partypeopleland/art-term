@@ -12,6 +12,7 @@ use crate::{
     preview::{CapturedFrame, PreviewStatus, PreviewTarget, PreviewWorker},
     tab::{HistoryStatus, TabAction, TabClient, TabId, TabStatus, TerminalSize},
     tty::Tty,
+    update::{UpdateCheck, UpdateInstall},
 };
 use art_term_core::instance_mcp::DesktopProfile;
 use art_term_core::openab::profiles::HostProfile;
@@ -153,6 +154,7 @@ enum SettingsAction {
     Delete,
     Import,
     Export,
+    Update,
     Back,
 }
 const SETTINGS_ACTIONS: &[(SettingsAction, &str)] = &[
@@ -164,6 +166,7 @@ const SETTINGS_ACTIONS: &[(SettingsAction, &str)] = &[
     (SettingsAction::Delete, "Delete target / 刪除所選連線"),
     (SettingsAction::Import, "Import / 匯入連線"),
     (SettingsAction::Export, "Export / 匯出全部連線"),
+    (SettingsAction::Update, "Software update / 軟體更新"),
     (SettingsAction::Back, "Back / 返回"),
 ];
 #[derive(Clone)]
@@ -174,6 +177,28 @@ enum SettingsRow {
 struct SettingsModal {
     row: usize,
     target: Option<SettingsTarget>,
+}
+#[derive(Clone)]
+enum UpdatePhase {
+    Idle,
+    Checking,
+    Available { current: String, latest: String },
+    Current { current: String, latest: String },
+    Installing,
+    Installed { version: String, backup: String },
+    Failed(String),
+}
+struct UpdateModal {
+    row: usize,
+    phase: UpdatePhase,
+}
+impl UpdateModal {
+    fn new() -> Self {
+        Self {
+            row: 0,
+            phase: UpdatePhase::Idle,
+        }
+    }
 }
 enum ModalOrigin {
     Settings {
@@ -198,6 +223,7 @@ enum Modal {
         replace: bool,
         scroll: u16,
     },
+    Update(UpdateModal),
 }
 
 struct Field {
@@ -372,6 +398,8 @@ enum JobResult {
     Preview(crate::backend::Result<ImportView>),
     Imported(crate::backend::Result<crate::backend::ImportSummary>),
     Exported(crate::backend::Result<()>),
+    UpdateChecked(Result<UpdateCheck, String>),
+    UpdateInstalled(Result<UpdateInstall, String>),
 }
 struct Pending {
     epoch: u64,

@@ -784,6 +784,99 @@ pub(super) fn draw_modal(app: &App, modal: &Modal, frame: &mut Frame) -> HitMap 
                 }
             }
         }
+        Modal::Update(modal) => {
+            let block = panel("軟體更新 / Software update");
+            let inner = block.inner(rect);
+            frame.render_widget(block, rect);
+            let (current, latest, detail) = match &modal.phase {
+                UpdatePhase::Idle => (
+                    env!("CARGO_PKG_VERSION").to_string(),
+                    "未檢查".to_string(),
+                    "按 Enter 檢查 GitHub 最新 Release；不會自動檢查。".to_string(),
+                ),
+                UpdatePhase::Checking => (
+                    env!("CARGO_PKG_VERSION").to_string(),
+                    "檢查中…".to_string(),
+                    "正在查詢 GitHub…".to_string(),
+                ),
+                UpdatePhase::Available { current, latest } => (
+                    current.clone(),
+                    latest.clone(),
+                    "有可用更新；「下載並安裝」會驗證 SHA-256 與 manifest 後原子替換執行檔。"
+                        .to_string(),
+                ),
+                UpdatePhase::Current { current, latest } => (
+                    current.clone(),
+                    latest.clone(),
+                    "目前已是最新版本。".to_string(),
+                ),
+                UpdatePhase::Installing => (
+                    env!("CARGO_PKG_VERSION").to_string(),
+                    "安裝中…".to_string(),
+                    "正在下載、驗證並安裝；失敗時保留現有安裝。".to_string(),
+                ),
+                UpdatePhase::Installed { version, backup } => (
+                    env!("CARGO_PKG_VERSION").to_string(),
+                    version.clone(),
+                    format!("已安裝 {version}；舊版備份：{backup}。請重新啟動 art-term。"),
+                ),
+                UpdatePhase::Failed(error) => (
+                    env!("CARGO_PKG_VERSION").to_string(),
+                    "未知".to_string(),
+                    format!("錯誤：{error}"),
+                ),
+            };
+            let actions = [
+                ("檢查 GitHub 更新 / Check", true),
+                (
+                    "下載並安裝 / Download & install",
+                    matches!(modal.phase, UpdatePhase::Available { .. }),
+                ),
+                ("返回 / Back", true),
+            ];
+            let rows_height = if inner.height >= 6 { 3u16 } else { 0 };
+            let detail_height = inner
+                .height
+                .saturating_sub(rows_height + 1)
+                .max(1);
+            frame.render_widget(
+                Paragraph::new(vec![
+                    Line::from(format!("目前版本 / Current: {current}")),
+                    Line::from(format!("最新版本 / Latest: {latest}")),
+                    Line::from(""),
+                    Line::from(detail),
+                ])
+                .wrap(Wrap { trim: false }),
+                Rect::new(inner.x, inner.y, inner.width, detail_height),
+            );
+            if rows_height > 0 {
+                let rows_y = inner.bottom() - rows_height - 1;
+                for (i, (label, enabled)) in actions.iter().enumerate() {
+                    let region = Rect::new(inner.x, rows_y + i as u16, inner.width, 1);
+                    let text = if *enabled {
+                        (*label).to_string()
+                    } else {
+                        format!("{label}（需先檢查更新）")
+                    };
+                    frame.render_widget(
+                        Paragraph::new(elide(&text, inner.width)).style(if i == modal.row {
+                            Style::default().bg(Color::DarkGray)
+                        } else if !enabled {
+                            Style::default().fg(Color::DarkGray)
+                        } else {
+                            Style::default()
+                        }),
+                        region,
+                    );
+                    hits.add(region, HitAction::ModalRow(i));
+                }
+                frame.render_widget(
+                    Paragraph::new("Enter 執行 · Esc 返回")
+                        .style(Style::default().fg(Color::DarkGray)),
+                    Rect::new(inner.x, inner.bottom() - 1, inner.width, 1),
+                );
+            }
+        }
         Modal::Import {
             preview,
             replace,

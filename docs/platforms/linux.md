@@ -82,6 +82,10 @@ Stop 只停止本機預覽，既有 Shell 工具選擇保留；Resume preview �
 
 Sixel 編碼已內建，不需安裝外部轉圖程式。能力與尺寸回覆、鍵盤、滑鼠及貼上共用同一個 EventStream；偵測結束後的晚到回覆仍會被辨識，不會送入遠端 Shell。程式不修改終端或 multiplexer 設定；multiplexer 若沒有提供足夠回覆，會停用預覽。Kitty／iTerm2 協定未啟用。圖片操作只控制本機檢視，不操作遠端桌面。可在 `keybindings.toml` 的 `[bindings]` 自行配置 `viewer_toggle`、`viewer_fit`，預設未綁定。詳見[桌面流程](../refarch/desktop.md)。
 
+## 軟體更新
+
+連線設定（F10 → Settings）內的「Software update / 軟體更新」只在按下檢查時查詢 GitHub 最新 Release，不做啟動或背景自動檢查。畫面顯示目前與最新版本；確認後才下載 `art-term-<version>-linux-x86_64.tar.gz`，並以 `SHA256SUMS.txt` 驗證封裝、以 `art-term-<version>-linux-x86_64.manifest.json` 驗證內部 `art-term` 執行檔的 SHA-256。驗證通過後才以同目錄暫存檔原子替換 `current_exe`，並保留 `art-term.bak-<舊版>` 備份；任何下載、驗證或寫入失敗都不會動到現有安裝，請重新啟動 art-term 生效。
+
 ## 建置與驗證
 
 在 Ubuntu 24.04 x86_64 準備 Rust、C 編譯／連結工具、Python 3 與 Git。從 repository 根目錄執行：
