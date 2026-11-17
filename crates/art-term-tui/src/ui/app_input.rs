@@ -345,6 +345,19 @@ impl App {
         }
     }
     pub(super) fn modal_key(&mut self, mut key: KeyEvent) {
+        if let Some(Modal::Update(update)) = &self.modal {
+            let dismiss = key.code == KeyCode::Esc
+                || (key.code == KeyCode::Enter && update.row >= 2);
+            if dismiss
+                && matches!(
+                    update.phase,
+                    UpdatePhase::Checking | UpdatePhase::Installing
+                )
+            {
+                self.status = "請等待更新操作完成。".into();
+                return;
+            }
+        }
         let Some(mut modal) = self.modal.take() else {
             return;
         };

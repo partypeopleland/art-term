@@ -13,6 +13,12 @@ pub(crate) struct UpdateInstall {
     pub backup: PathBuf,
 }
 
+static INSTALLED_VERSION: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+fn installed_version() -> Option<String> {
+    INSTALLED_VERSION.lock().ok().and_then(|guard| guard.clone())
+}
+
 #[derive(Deserialize)]
 struct LinuxManifest {
     version: String,
@@ -22,6 +28,13 @@ struct LinuxManifest {
 
 pub(crate) async fn check() -> Result<UpdateCheck, String> {
     let current = env!("CARGO_PKG_VERSION");
+    if let Some(installed) = installed_version() {
+        return Ok(UpdateCheck {
+            current: current.to_string(),
+            latest: Some(installed),
+            available: false,
+        });
+    }
     let client = ReleaseClient::new().map_err(|error| error.to_string())?;
     match client
         .check_for_update(Platform::Linux, current)
@@ -43,6 +56,11 @@ pub(crate) async fn check() -> Result<UpdateCheck, String> {
 
 pub(crate) async fn install() -> Result<UpdateInstall, String> {
     let current = env!("CARGO_PKG_VERSION");
+    if let Some(installed) = installed_version() {
+        return Err(format!(
+            "已在本次執行中安裝 art-term {installed}，請重新啟動後再檢查更新。"
+        ));
+    }
     let client = ReleaseClient::new().map_err(|error| error.to_string())?;
     let status = client
         .check_for_update(Platform::Linux, current)
@@ -112,7 +130,11 @@ pub(crate) async fn install() -> Result<UpdateInstall, String> {
     if !actual.eq_ignore_ascii_case(manifest.binary_sha256.trim()) {
         return Err("更新後的執行檔 SHA-256 與 manifest 不符，已取消安裝。".to_string());
     }
-    replace_binary(&new_binary, current, &version).await
+    let install = replace_binary(&new_binary, current, &version).await?;
+    if let Ok(mut guard) = INSTALLED_VERSION.lock() {
+        *guard = Some(version);
+    }
+    Ok(install)
 }
 
 async fn replace_binary(
