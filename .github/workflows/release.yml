@@ -87,6 +87,33 @@ jobs:
           Compress-Archive -Path "$package/*" -DestinationPath "dist/release/art-term-$env:ART_TERM_VERSION-windows-x64.zip"
           Copy-Item "$package/art-term-gui.exe" "dist/release/art-term-$env:ART_TERM_VERSION-windows-x64.exe"
 
+      - name: Build signed Windows updater installer
+        if: matrix.platform == 'windows'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          . "$env:GITHUB_WORKSPACE/scripts/build-paths.ps1"
+          $env:CARGO_ENCODED_RUSTFLAGS = Get-ArtTermBuildRustFlags -ProjectRoot $env:GITHUB_WORKSPACE
+          $cli = Join-Path $PWD 'apps/client/node_modules/@tauri-apps/cli/tauri.js'
+          Push-Location crates/art-term-gui
+          try {
+            $configArgs = @()
+            if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
+              if ($env:GITHUB_REF_TYPE -eq 'tag') { throw 'Missing repository secret: TAURI_SIGNING_PRIVATE_KEY for updater signing.' }
+              $configArgs += @('--config', '{"bundle":{"createUpdaterArtifacts":false}}')
+            }
+            & node $cli build --bundles nsis @configArgs
+            if ($LASTEXITCODE -ne 0) { throw 'Tauri NSIS bundle failed' }
+          } finally { Pop-Location }
+          $nsis = @(Get-ChildItem target/release/bundle/nsis -Filter '*-setup.exe' | Where-Object { $_.Name -notlike '*.sig' })
+          if ($nsis.Count -ne 1) { throw "Expected exactly one NSIS setup executable, found $($nsis.Count)" }
+          $setup = $nsis[0]
+          Copy-Item $setup.FullName "dist/release/art-term-$env:ART_TERM_VERSION-windows-x64-setup.exe"
+          if (Test-Path "$($setup.FullName).sig") {
+            Copy-Item "$($setup.FullName).sig" "dist/release/art-term-$env:ART_TERM_VERSION-windows-x64-setup.exe.sig"
+          } elseif ($env:GITHUB_REF_TYPE -eq 'tag') { throw 'Tauri updater signature was not produced.' }
+
       - uses: actions/upload-artifact@v4
         if: matrix.platform == 'windows'
         with:
@@ -227,16 +254,46 @@ jobs:
         working-directory: release
         run: |
           version="${RELEASE_TAG#v}"
+          notes="$GITHUB_WORKSPACE/docs/report/${RELEASE_TAG#v}.md"
+          test -s "$notes"
+          setup="art-term-$version-windows-x64-setup.exe"
+          test -s "$setup"
+          test -s "$setup.sig"
+          ART_TERM_VERSION="$version" NOTES_FILE="$notes" python3 - <<'PY'
+          import json, os
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          version = os.environ["ART_TERM_VERSION"]
+          tag = os.environ["RELEASE_TAG"]
+          repo = os.environ["GH_REPO"]
+          setup = f"art-term-{version}-windows-x64-setup.exe"
+          signature = Path(setup + ".sig").read_text(encoding="utf-8").strip()
+          notes = Path(os.environ["NOTES_FILE"]).read_text(encoding="utf-8")
+          manifest = {
+              "version": version,
+              "notes": notes,
+              "pub_date": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+              "platforms": {
+                  "windows-x86_64": {
+                      "signature": signature,
+                      "url": f"https://github.com/{repo}/releases/download/{tag}/{setup}",
+                  }
+              },
+          }
+          Path("latest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+          PY
           assets=(
             "art-term-$version-windows-x64.exe"
             "art-term-$version-windows-x64.zip"
+            "$setup"
+            "$setup.sig"
+            "latest.json"
             "art-term-$version-android-arm64.apk"
             "art-term-$version-linux-x86_64.tar.gz"
             "art-term-$version-linux-x86_64.manifest.json"
           )
           for asset in "${assets[@]}"; do test -s "$asset"; done
           sha256sum "${assets[@]}" > SHA256SUMS.txt
-          notes="$GITHUB_WORKSPACE/docs/report/${RELEASE_TAG#v}.md"
-          test -s "$notes"
           gh release create "$RELEASE_TAG" "${assets[@]}" SHA256SUMS.txt \
             --verify-tag --title "art-term $RELEASE_TAG" --notes-file "$notes"

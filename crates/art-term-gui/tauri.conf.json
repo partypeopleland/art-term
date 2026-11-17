@@ -23,8 +23,9 @@
     }
   },
   "bundle": {
-    "active": false,
-    "resources": {"../../config/connections.example.toml": "connections.toml"},
+    "active": true,
+    "createUpdaterArtifacts": true,
+    "resources": {"../../config/connections.example.toml": "connections.example.toml"},
     "targets": ["nsis"],
     "icon": ["icons/icon.ico"]
   }
