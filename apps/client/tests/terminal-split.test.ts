@@ -1,6 +1,6 @@
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from '../src/desktop/App.vue'
 import type { AppController, TabState } from '../src/shared/state/controller'
 import {
@@ -17,6 +17,7 @@ import {
   type SplitDirection
 } from '../src/shared/terminal/split'
 import { FakeTerm, FakeTransport, makeHost, makeProfile, makeTarget } from './fake'
+import { paneHotkeys, resetPaneHotkeys, setPaneHotkey } from '../src/shared/state/hotkeys'
 
 vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
 
@@ -186,37 +187,6 @@ describe('Windows independent split panes', () => {
     expect((tab.term as unknown as SplitTerm).disposed).toBe(false)
   })
 
-  it('keeps the read-only mirror leaf working next to independent panes', async () => {
-    const { controller, transport, terms, tab } = await setup()
-    const sid = tab.sessionId!
-    terms[0].snapshotText = 'SNAPSHOT'
-    transport.feed(sid, { bytes: [72, 105], exitCode: null })
-    await flush()
-
-    expect(controller.mirrorPane(tab, tab.key, 'down')).toBe(true)
-    await flush()
-    const liveTerms = () => terms.filter((t) => !t.disposed)
-    expect(liveTerms()).toHaveLength(2)
-    const mirrorTerm = tab.mirrorTerm as unknown as SplitTerm
-    const primaryTerm = tab.term as unknown as SplitTerm
-    transport.feed(sid, { bytes: [89, 111], exitCode: null })
-    await flush()
-    expect(primaryTerm.text()).toContain('Yo')
-    expect(mirrorTerm.text()).toContain('Yo')
-
-    mirrorTerm.emitData('mirror-input')
-    await flush()
-    expect(transport.sessions.get(sid)!.writes.flat()).toEqual([])
-
-    const mirrorId = `mirror:${tab.key}`
-    controller.closePaneLeaf(tab, mirrorId)
-    await flush()
-    expect(tab.paneRoot).toBeNull()
-    expect(transport.closeCalls).toEqual([])
-    expect(mirrorTerm.disposed).toBe(true)
-    expect(tab.status).toBe('live')
-  })
-
   it('closing the primary pane promotes a surviving child connection', async () => {
     const { controller, transport, terms, tab } = await setup()
     const sid = tab.sessionId!
@@ -301,19 +271,6 @@ describe('Windows independent split panes', () => {
     expect(controller.activeKey.value).toBe(child.key)
   })
 
-  it('removes the mirror leaf when its watched child pane closes', async () => {
-    const { controller, tab } = await setup()
-    await split(controller, tab, 'right')
-    const child = paneChild(controller, tab)
-    expect(controller.mirrorPane(tab, child.key, 'down')).toBe(true)
-    await flush()
-    expect(findPaneLeaf(tab.paneRoot!, `mirror:${child.key}`)).toBeTruthy()
-
-    await controller.closeTab(child)
-    await flush()
-    expect(tab.paneRoot).toBeNull()
-  })
-
   it('child panes keep pane shortcuts out of xterm while the split exists', async () => {
     const { controller, terms, tab } = await setup()
     await split(controller, tab, 'right')
@@ -356,11 +313,18 @@ describe('Windows independent split panes', () => {
     const menu = document.body.querySelector('.pane-menu')
     expect(menu).toBeTruthy()
     const buttons = [...menu!.querySelectorAll('button')]
-    const labels = buttons.map((b) => b.textContent)
+    const labels = buttons.map((b) => b.querySelector('span')?.textContent)
     expect(labels).toContain('向右分割')
-    expect(labels).toContain('加入唯讀鏡像')
+    expect(labels).toContain('向下分割')
+    expect(labels).toContain('關閉窗格')
+    expect(labels).not.toContain('向左分割')
+    expect(labels).not.toContain('向上分割')
+    expect(labels).not.toContain('加入唯讀鏡像')
     expect(labels).not.toContain('選擇連線…')
-    buttons.find((b) => b.textContent === '向右分割')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    // Every item shows its configured shortcut.
+    const hints = [...menu!.querySelectorAll('.pane-menu-key')].map((k) => k.textContent)
+    expect(hints).toEqual(['Alt+Shift++', 'Alt+Shift+-', 'Alt+Shift+X'])
+    buttons.find((b) => b.textContent?.includes('向右分割'))!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await flush()
     expect(tab.paneRoot?.kind).toBe('split')
     expect(paneConnTabs(tab.paneRoot!)).toHaveLength(2)
@@ -402,5 +366,103 @@ describe('Windows independent split panes', () => {
     expect(tab.status).toBe('live')
     expect(transport.closeCalls).not.toContain(sid)
     for (const child of children) expect(child.closed).toBe(true)
+  })
+})
+
+describe('pane hotkeys', () => {
+  beforeEach(() => resetPaneHotkeys())
+  afterEach(() => resetPaneHotkeys())
+
+  const splitRightKey = () => new KeyboardEvent('keydown', { code: 'Equal', key: '+', altKey: true, shiftKey: true })
+  const splitDownKey = () => new KeyboardEvent('keydown', { code: 'Minus', key: '_', altKey: true, shiftKey: true })
+  const closeKey = () => new KeyboardEvent('keydown', { code: 'KeyX', key: 'X', altKey: true, shiftKey: true })
+
+  it('Shift+Alt+= splits right and Shift+Alt+- splits down on a single live pane', async () => {
+    const { controller, tab } = await setup()
+    expect(tab.status).toBe('live')
+    expect(controller.handleKey(splitRightKey())).toBe(true)
+    await flush()
+    expect(tab.paneRoot?.kind).toBe('split')
+    expect((tab.paneRoot as Extract<PaneNode, { kind: 'split' }>).axis).toBe('row')
+    expect(paneConnTabs(tab.paneRoot!)).toHaveLength(2)
+
+    expect(controller.handleKey(splitDownKey())).toBe(true)
+    await flush()
+    expect(paneConnTabs(tab.paneRoot!)).toHaveLength(3)
+  })
+
+  it('Shift+Alt+X closes the focused pane and the whole tab when unsplit', async () => {
+    const { controller, transport, tab } = await setup()
+    const sid = tab.sessionId!
+    expect(controller.handleKey(closeKey())).toBe(true)
+    await flush()
+    expect(controller.tabs.find((t) => t.key === tab.key)).toBeUndefined()
+    expect(transport.closeCalls).toContain(sid)
+  })
+
+  it('Shift+Alt+X closes only the focused child pane inside a split', async () => {
+    const { controller, transport, tab } = await setup()
+    await split(controller, tab, 'right')
+    const child = paneChild(controller, tab)
+    const childSid = child.sessionId!
+    tab.focusedLeafId = child.key
+    expect(controller.handleKey(closeKey())).toBe(true)
+    await flush()
+    expect(controller.tabs.find((t) => t.key === child.key)).toBeUndefined()
+    expect(transport.closeCalls).toContain(childSid)
+    expect(tab.status).toBe('live')
+    expect(tab.paneRoot).toBeNull()
+  })
+
+  it('matches bindings by key position, not the shifted character', async () => {
+    const { controller, tab } = await setup()
+    // Alt+= without Shift is a different binding and must pass through to xterm.
+    const unshifted = new KeyboardEvent('keydown', { code: 'Equal', key: '=', altKey: true })
+    expect(controller.handleKey(unshifted)).toBe(false)
+    expect(tab.paneRoot).toBeNull()
+    // Key-repeat must not spawn panes.
+    const repeat = new KeyboardEvent('keydown', { code: 'Equal', key: '+', altKey: true, shiftKey: true, repeat: true })
+    expect(controller.handleKey(repeat)).toBe(false)
+    expect(tab.paneRoot).toBeNull()
+  })
+
+  it('honours remapped hotkeys from the settings map', async () => {
+    const { controller, tab } = await setup()
+    setPaneHotkey('splitRight', { ctrl: true, alt: false, shift: false, meta: false, code: 'KeyR' })
+    const remapped = new KeyboardEvent('keydown', { code: 'KeyR', key: 'r', ctrlKey: true })
+    expect(controller.handleKey(remapped)).toBe(true)
+    await flush()
+    expect(tab.paneRoot?.kind).toBe('split')
+    // The default binding no longer triggers the action.
+    expect(controller.handleKey(splitRightKey())).toBe(false)
+  })
+
+  it('keeps pane hotkeys out of xterm even before the first split', async () => {
+    const { terms } = await setup()
+    const term = terms[0] as unknown as SplitTerm
+    expect(term.keyInterceptor!(splitRightKey())).toBe(false)
+    expect(term.keyInterceptor!(splitDownKey())).toBe(false)
+    expect(term.keyInterceptor!(closeKey())).toBe(false)
+    expect(term.keyInterceptor!(new KeyboardEvent('keydown', { code: 'KeyA', key: 'a' }))).toBe(true)
+  })
+
+  it('remaps a hotkey through the desktop settings page', async () => {
+    const { wrapper, controller, tab } = await setup()
+    await wrapper.get('[data-testid="desktop-settings"]').trigger('click')
+    await flush()
+    await wrapper.get('[data-testid="settings-hotkeys"]').trigger('click')
+    await flush()
+    expect(wrapper.find('[data-testid="hotkey-splitRight"]').exists()).toBe(true)
+    await wrapper.get('[data-testid="hotkey-record-splitRight"]').trigger('click')
+    await flush()
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyR', key: 'r', ctrlKey: true, bubbles: true }))
+    await flush()
+    expect(paneHotkeys.splitRight).toEqual({ ctrl: true, alt: false, shift: false, meta: false, code: 'KeyR' })
+    await wrapper.get('[data-testid="desktop-workspace"]').trigger('click')
+    await flush()
+    expect(controller.handleKey(new KeyboardEvent('keydown', { code: 'KeyR', key: 'r', ctrlKey: true }))).toBe(true)
+    await flush()
+    expect(tab.paneRoot?.kind).toBe('split')
+    resetPaneHotkeys()
   })
 })

@@ -15,7 +15,6 @@ const props = withDefaults(defineProps<{
   controller: AppController
   readerVisible?: boolean
   nativeScroll?: boolean
-  mirror?: boolean
   closable?: boolean
   closeLabel?: string
   onSelectionFinished?: (tab: TabState) => void
@@ -43,7 +42,6 @@ function viewportEnabled(): boolean {
     && props.tab.status === 'live' && !document.hidden && !disposed
 }
 function syncViewport(): void {
-  if (props.mirror) return
   const ticket = ++viewportTicket
   const previous = hostViewport
   hostViewport = null
@@ -68,7 +66,7 @@ function fitAndReport(): void {
   const term = termHandle
   if (!term || !props.active) return
   term.fit()
-  if (!props.mirror) props.controller.requestResize(props.tab, term.rows, term.cols)
+  props.controller.requestResize(props.tab, term.rows, term.cols)
 }
 
 function focusOnPointer(event: PointerEvent): void {
@@ -76,7 +74,7 @@ function focusOnPointer(event: PointerEvent): void {
   emit('activate')
   // `focused` only updates next tick; focus directly so the clicked pane
   // owns keys immediately even when it was not the focused leaf before.
-  if (!nativeReader && !props.mirror && props.active && props.tab.status === 'live') termHandle?.focus()
+  if (!nativeReader && props.active && props.tab.status === 'live') termHandle?.focus()
   if (props.onSelectionFinished && props.active) selecting = true
 }
 
@@ -97,9 +95,8 @@ onMounted(() => {
   const handle = factory(el.value)
   termHandle = handle
   handle.fit()
-  if (props.mirror) props.controller.attachMirror(props.tab, handle)
-  else props.controller.attachTerminal(props.tab, handle)
-  if (props.active && isFocused() && !props.mirror) handle.focus()
+  props.controller.attachTerminal(props.tab, handle)
+  if (props.active && isFocused()) handle.focus()
   document.addEventListener('visibilitychange', syncViewport)
   window.addEventListener('pointerup', finishSelection)
   window.addEventListener('pointercancel', finishSelection)
@@ -129,22 +126,16 @@ onBeforeUnmount(() => {
   clearTimeout(selectionTimer)
   observer?.disconnect()
   observer = null
-  if (props.mirror) {
-    if (termHandle) props.controller.detachMirror(props.tab, termHandle)
-    termHandle = null
-    return
-  }
   // The controller disposes the handle on tab close; guard anyway.
   if (props.tab.closed) props.tab.term?.dispose()
 })
 </script>
 
 <template>
-  <div class="pane" :class="{ mirror: !!mirror }" :data-pane="mirror ? 'mirror' : 'primary'" v-show="active">
+  <div class="pane" data-pane="primary" v-show="active">
     <button v-if="closable" class="pane-close" type="button" :aria-label="closeLabel || '關閉窗格'" @click="emit('close')">×</button>
-    <div v-if="mirror" class="mirror-badge">唯讀鏡像</div>
     <div ref="el" class="term-host" @pointerdown="focusOnPointer" />
-    <NativeTerminalReader v-if="nativeReader && !mirror && active && tab.status === 'live'"
+    <NativeTerminalReader v-if="nativeReader && active && tab.status === 'live'"
       :key="tab.sessionId ?? tab.key" :terminal="tab.term"
       :history-request="tab.runtime ? historyRequest : undefined" :history-notice="historyNotice"
       :visible="active && readerVisible !== false" />

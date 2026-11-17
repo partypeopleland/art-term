@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import type { AppController, TabState } from '../state/controller'
-import type { PaneLeaf, PaneNode, PaneSplitNode, SplitDirection } from '../terminal/split'
-import { clampPaneRatio } from '../terminal/split'
+import { clampPaneRatio, type PaneLeaf, type PaneNode, type PaneSplitNode, type SplitDirection } from '../terminal/split'
+import { hotkeyLabel, paneHotkeys, type PaneHotkeyAction } from '../state/hotkeys'
 import TerminalPane from './TerminalPane.vue'
 
 // Recursive split-view renderer. `tab` is the owning tab (its own conn leaf is
@@ -15,47 +15,35 @@ const props = defineProps<{
   onSelectionFinished?: (tab: TabState) => void
 }>()
 
-const DIRECTIONS: { dir: SplitDirection; label: string }[] = [
-  { dir: 'right', label: '向右分割' },
-  { dir: 'down', label: '向下分割' },
-  { dir: 'left', label: '向左分割' },
-  { dir: 'up', label: '向上分割' }
+const SPLIT_ITEMS: { dir: SplitDirection; action: PaneHotkeyAction; label: string }[] = [
+  { dir: 'right', action: 'splitRight', label: '向右分割' },
+  { dir: 'down', action: 'splitDown', label: '向下分割' }
 ]
+const shortcut = (action: PaneHotkeyAction) => hotkeyLabel(paneHotkeys[action])
 
 const splitEl = ref<HTMLElement | null>(null)
-const menu = ref<{ x: number; y: number; leafId: string; leaf: PaneLeaf } | null>(null)
+const menu = ref<{ x: number; y: number; leafId: string } | null>(null)
 
 function leafClosable(leaf: PaneLeaf | null): boolean {
   if (!leaf) return false
-  if (leaf.kind !== 'conn') return true
-  // The owning tab's own conn pane closes like any other once a split
+  // The owning tab's own pane closes like any other once a split
   // view exists (a survivor is promoted); alone it stays tab-owned.
   return leaf.tab !== props.tab || !!props.tab.paneRoot
 }
 
 function openMenu(event: MouseEvent, leaf: PaneLeaf): void {
   event.preventDefault()
-  menu.value = { x: event.clientX, y: event.clientY, leafId: leaf.id, leaf }
+  menu.value = { x: event.clientX, y: event.clientY, leafId: leaf.id }
 }
 
 function closeMenu(): void {
   menu.value = null
 }
 
-function menuLeaf(): PaneLeaf | null {
-  return menu.value?.leaf ?? null
-}
-
 function splitFromMenu(direction: SplitDirection): void {
   const leafId = menu.value?.leafId
   closeMenu()
   if (leafId) void props.controller.splitPane(props.tab, leafId, direction)
-}
-
-function mirrorFromMenu(): void {
-  const leafId = menu.value?.leafId
-  closeMenu()
-  if (leafId) props.controller.mirrorPane(props.tab, leafId, 'down')
 }
 
 function closeFromMenu(): void {
@@ -116,7 +104,6 @@ function startDrag(event: PointerEvent, node: PaneSplitNode): void {
 
   <div v-else class="pane-cell" :class="{ focused: visible && !!tab.paneRoot && tab.focusedLeafId === node.id }" @contextmenu="openMenu($event, node)">
     <TerminalPane
-      v-if="node.kind === 'conn'"
       :tab="node.tab"
       :active="visible"
       :focused="tab.paneRoot ? visible && tab.focusedLeafId === node.id : undefined"
@@ -129,30 +116,15 @@ function startDrag(event: PointerEvent, node: PaneSplitNode): void {
       @close="controller.closePaneLeaf(tab, node.id)"
       @activate="controller.focusPane(tab, node.id)"
     />
-    <TerminalPane
-      v-else-if="node.kind === 'mirror'"
-      :tab="node.of"
-      mirror
-      :active="visible"
-      :focused="false"
-      :controller="controller"
-      :reader-visible="false"
-      closable
-      close-label="關閉鏡像窗格"
-      @close="controller.closePaneLeaf(tab, node.id)"
-      @activate="controller.focusPane(tab, node.id)"
-    />
     <Teleport to="body">
       <template v-if="menu">
         <div class="pane-menu-backdrop" @click="closeMenu" @contextmenu.prevent="closeMenu" />
         <div class="pane-menu" role="menu" :style="{ left: `${menu.x}px`, top: `${menu.y}px` }">
-          <template v-if="menuLeaf()?.kind === 'conn'">
-            <button role="menuitem" @click="mirrorFromMenu">加入唯讀鏡像</button>
-          </template>
+          <button v-for="item in SPLIT_ITEMS" :key="item.dir" role="menuitem" @click="splitFromMenu(item.dir)">
+            <span>{{ item.label }}</span><kbd class="pane-menu-key">{{ shortcut(item.action) }}</kbd>
+          </button>
           <div class="pane-menu-sep" />
-          <button v-for="d in DIRECTIONS" :key="d.dir" role="menuitem" @click="splitFromMenu(d.dir)">{{ d.label }}</button>
-          <div class="pane-menu-sep" />
-          <button role="menuitem" @click="closeFromMenu">關閉窗格</button>
+          <button role="menuitem" @click="closeFromMenu"><span>關閉窗格</span><kbd class="pane-menu-key">{{ shortcut('closePane') }}</kbd></button>
         </div>
       </template>
     </Teleport>
@@ -174,7 +146,8 @@ function startDrag(event: PointerEvent, node: PaneSplitNode): void {
 .pane-cell :deep(.pane) { position: relative; inset: auto; flex: 1 1 0; min-width: 0; min-height: 0; }
 .pane-menu-backdrop { position: fixed; inset: 0; z-index: 200; }
 .pane-menu { position: fixed; z-index: 201; min-width: 160px; padding: 4px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-panel); box-shadow: 0 6px 20px #0007; }
-.pane-menu button { display: block; width: 100%; text-align: left; padding: 7px 12px; border: 0; border-radius: 5px; background: transparent; color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
+.pane-menu button { display: flex; align-items: center; justify-content: space-between; gap: 16px; width: 100%; text-align: left; padding: 7px 12px; border: 0; border-radius: 5px; background: transparent; color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
+.pane-menu-key { font-family: inherit; font-size: 11px; color: var(--text-dim); }
 .pane-menu button:hover:not(:disabled) { background: var(--bg-raised); }
 .pane-menu button:disabled { opacity: .45; cursor: default; }
 .pane-menu-sep { height: 1px; margin: 4px 6px; background: var(--border); }

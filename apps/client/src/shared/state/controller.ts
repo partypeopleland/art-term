@@ -25,6 +25,7 @@ import {
   type PaneNode,
   type SplitDirection
 } from '../terminal/split'
+import { paneHotkeyAction, type PaneHotkeyAction } from './hotkeys'
 
 export const MAX_TABS = 32
 export const MAX_RUNTIME_PROFILES = 64
@@ -38,6 +39,7 @@ export function createAppController(
 ): AppController {
   const idlePollMs = options.idlePollMs ?? DEFAULT_IDLE_POLL_MS
   const autoCaptureMs = options.autoCaptureMs ?? AUTO_CAPTURE_MS
+  const paneHotkeysEnabled = options.paneHotkeys === true
 
   const catalogLoading = ref(true)
   const runtimeProfiles = ref<RuntimeHostDto[]>([])
@@ -141,7 +143,6 @@ export function createAppController(
       shotError: '',
       captureGen: 0,
       term: null,
-      mirrorTerm: null,
       paneRoot: null,
       focusedLeafId: null,
       paneSeq: 0,
@@ -205,6 +206,8 @@ export function createAppController(
     handle.onData((text, terminalReply) => terminalReply ? sendTerminalReply(tab, text) : sendInput(tab, text))
     handle.setKeyInterceptor((ev) => {
       if (isSwitchKey(ev)) return false
+      // Configured pane hotkeys are app-level actions, never terminal input.
+      if (paneHotkeysEnabled && paneHotkeyAction(ev)) return false
       // Pane shortcuts belong to the owning split view: a child tab's own
       // paneRoot stays null, so check the parent's tree as well.
       const owner = tab.paneOf ? tabs.find((t) => t.key === tab.paneOf) : null
@@ -220,22 +223,6 @@ export function createAppController(
     if (tab.status === 'connecting') void openSession(tab, want)
   }
 
-  function attachMirror(tab: TabState, handle: TerminalHandle): void {
-    if (tab.closed) {
-      handle.dispose()
-      return
-    }
-    if (tab.mirrorTerm && tab.mirrorTerm !== handle) tab.mirrorTerm.dispose()
-    tab.mirrorTerm = markRaw(handle)
-    const snapshot = tab.term?.screenSnapshot?.()
-    if (snapshot) void handle.write(textEncoder.encode(snapshot)).catch(() => undefined)
-  }
-
-  function detachMirror(tab: TabState, handle: TerminalHandle): void {
-    if (tab.mirrorTerm === handle) tab.mirrorTerm = null
-    if (!tab.closed) handle.dispose()
-  }
-
   function primaryLeaf(tab: TabState): PaneLeaf {
     return { kind: 'conn', id: tab.key, tab }
   }
@@ -249,15 +236,6 @@ export function createAppController(
     tab.paneRoot = root && !(root.kind === 'conn' && root.tab === tab) ? root : null
   }
 
-  function addPaneLeaf(tab: TabState, leafId: string, direction: SplitDirection, added: PaneLeaf): boolean {
-    if (tab.closed || disposed || (!tab.paneRoot && tab.status !== 'live')) return false
-    if (!findPaneLeaf(paneRootOf(tab), leafId)) return false
-    tab.paneSeq++
-    tab.paneRoot = splitPaneLeaf(paneRootOf(tab), leafId, direction, added, `split:${tab.paneSeq}`)
-    tab.focusedLeafId = added.id
-    return true
-  }
-
   /**
    * Split `leafId` toward `direction`, creating a brand-new session on the
    * same runtime Host profile the split pane is connected to — the pane
@@ -269,9 +247,9 @@ export function createAppController(
     if (tab.closed || disposed || hidden || (!tab.paneRoot && tab.status !== 'live')) return false
     const leaf = findPaneLeaf(paneRootOf(tab), leafId)
     if (!leaf) return false
-    const source = leaf.kind === 'conn' ? leaf.tab : leaf.kind === 'mirror' ? leaf.of : null
-    const profile = source ? runtimeProfiles.value.find((p) => p.id === source.hostId) : undefined
-    if (!source || !profile || typeof transport.runtimeCreateHistorySession !== 'function') {
+    const source = leaf.tab
+    const profile = runtimeProfiles.value.find((p) => p.id === source.hostId)
+    if (!profile || typeof transport.runtimeCreateHistorySession !== 'function') {
       uiNotice.value = '此連線無法建立新分割窗格'
       return false
     }
@@ -316,15 +294,6 @@ export function createAppController(
     return true
   }
 
-  function mirrorPane(tab: TabState, leafId: string, direction: SplitDirection): boolean {
-    const root = paneRootOf(tab)
-    const leaf = findPaneLeaf(root, leafId)
-    if (!leaf || leaf.kind !== 'conn' || tab.closed || disposed) return false
-    const mirrorId = `mirror:${leaf.tab.key}`
-    if (findPaneLeaf(root, mirrorId)) return false
-    return addPaneLeaf(tab, leafId, direction, { kind: 'mirror', id: mirrorId, of: leaf.tab })
-  }
-
   /**
    * End the owning tab's own connection while sibling conn panes keep
    * running. The first surviving conn leaf is promoted to own the
@@ -341,9 +310,7 @@ export function createAppController(
       void closeTab(tab)
       return
     }
-    // The departing conn's mirror leaf dies with it.
     let next = removePaneLeaf(root, tab.key)
-    if (next) next = removePaneLeaf(next, `mirror:${tab.key}`)
     if (!next) {
       void closeTab(tab)
       return
@@ -377,21 +344,15 @@ export function createAppController(
     }
     const leaf = findPaneLeaf(tab.paneRoot, leafId)
     if (!leaf) return
-    if (leaf.kind === 'conn') {
-      if (leaf.tab === tab) promotePaneSurvivor(tab)
-      else void closeTab(leaf.tab)
-      return
-    }
-    settlePaneRoot(tab, removePaneLeaf(tab.paneRoot, leafId))
-    if (tab.focusedLeafId === leafId) tab.focusedLeafId = tab.key
+    if (leaf.tab === tab) promotePaneSurvivor(tab)
+    else void closeTab(leaf.tab)
   }
 
   function unsplitPanes(tab: TabState): void {
     if (tab.closed || !tab.paneRoot) return
     for (const leaf of paneLeaves(tab.paneRoot)) {
       if (leaf.id === tab.key) continue
-      if (leaf.kind === 'conn') void closeTab(leaf.tab)
-      else tab.paneRoot = removePaneLeaf(tab.paneRoot!, leaf.id)
+      void closeTab(leaf.tab)
     }
     settlePaneRoot(tab, tab.paneRoot)
     tab.focusedLeafId = tab.key
@@ -429,13 +390,10 @@ export function createAppController(
     const term = tab.term
     if (!term) return
     await term.write(data, historical)
-    const mirror = tab.mirrorTerm
-    if (mirror && mirror !== term) void mirror.write(data, historical).catch(() => undefined)
   }
 
   function resetTerminals(tab: TabState): void {
     tab.term?.reset()
-    tab.mirrorTerm?.reset()
   }
 
   async function openSession(tab: TabState, withDesktop: boolean): Promise<void> {
@@ -730,6 +688,22 @@ export function createAppController(
     closePaneLeaf(tab, leaf.id)
   }
 
+  /** Leaf the pane hotkeys act on: the focused leaf, else the primary pane. */
+  function hotkeyLeafId(tab: TabState): string {
+    if (tab.paneRoot && tab.focusedLeafId) {
+      const leaf = findPaneLeaf(tab.paneRoot, tab.focusedLeafId)
+      if (leaf) return leaf.id
+    }
+    return tab.key
+  }
+
+  function runPaneHotkey(tab: TabState, action: PaneHotkeyAction): void {
+    const leafId = hotkeyLeafId(tab)
+    if (action === 'splitRight') void splitPane(tab, leafId, 'right')
+    else if (action === 'splitDown') void splitPane(tab, leafId, 'down')
+    else closePaneLeaf(tab, leafId)
+  }
+
   /** Global capture-phase keydown handler AND xterm key interceptor basis. */
   function handleKey(e: KeyboardEvent): boolean {
     if (isSwitchKey(e)) {
@@ -740,6 +714,13 @@ export function createAppController(
       return true
     }
     const tab = activeTab.value
+    const hotkey = paneHotkeysEnabled && tab ? paneHotkeyAction(e) : null
+    if (hotkey && tab) {
+      e.preventDefault()
+      e.stopPropagation()
+      runPaneHotkey(tab, hotkey)
+      return true
+    }
     if (!tab?.paneRoot || !isPaneKey(e)) return false
     e.preventDefault()
     e.stopPropagation()
@@ -782,8 +763,6 @@ export function createAppController(
     // tmux session/desktop lease stay alive on their documented semantics.
     tab.term?.dispose()
     tab.term = null
-    tab.mirrorTerm?.dispose()
-    tab.mirrorTerm = null
     // Pane children are independent connections — closing the owning tab
     // closes each of them; their own paneOf hook then finds a closed parent.
     for (const child of tabs.filter((t) => t.paneOf === tab.key)) void closeTab(child)
@@ -797,12 +776,9 @@ export function createAppController(
     if (tab.paneOf) {
       const parent = tabs.find((t) => t.key === tab.paneOf && !t.closed)
       if (parent?.paneRoot) {
-        // Drop the child's conn leaf and any mirror leaf watching it so no
-        // orphan pane keeps pointing at the closed connection.
-        let root = removePaneLeaf(parent.paneRoot, tab.key)
-        if (root) root = removePaneLeaf(root, `mirror:${tab.key}`)
+        const root = removePaneLeaf(parent.paneRoot, tab.key)
         settlePaneRoot(parent, root)
-        if (parent.focusedLeafId === tab.key || parent.focusedLeafId === `mirror:${tab.key}`) parent.focusedLeafId = parent.key
+        if (parent.focusedLeafId === tab.key) parent.focusedLeafId = parent.key
       }
     }
     if (sid) await transport.close(sid).catch(() => undefined)
@@ -980,10 +956,7 @@ export function createAppController(
     refreshTargets,
     openTarget,
     attachTerminal,
-    attachMirror,
-    detachMirror,
     splitPane,
-    mirrorPane,
     closePaneLeaf,
     unsplitPanes,
     focusPane,

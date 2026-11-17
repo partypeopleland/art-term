@@ -47,8 +47,6 @@ export interface TabState {
   captureGen: number
   /** Internal, markRaw'd once attached. */
   term: TerminalHandle | null
-  /** Read-only mirrors of this tab's own connection for mirror pane leaves; never receives input. */
-  mirrorTerm: TerminalHandle | null
   /**
    * Split pane tree for the Windows view. Null = single connection. Every
    * `conn` leaf owns a full TabState registered in `tabs` with `paneOf`
@@ -86,6 +84,8 @@ export interface ControllerOptions {
   backgroundConnection?: 'detach' | 'keep'
   /** Mobile returns to target selection when the remote Shell exits. */
   closeFinishedTabs?: boolean
+  /** Enable the configurable pane hotkeys (split right/down, close pane) in handleKey. */
+  paneHotkeys?: boolean
 }
 
 export interface AppController {
@@ -114,8 +114,6 @@ export interface AppController {
   refreshTargets(): Promise<void>
   openTarget(host: HostUiState, target: TargetDto, withDesktop: boolean): void
   attachTerminal(tab: TabState, handle: TerminalHandle): void
-  attachMirror(tab: TabState, handle: TerminalHandle): void
-  detachMirror(tab: TabState, handle: TerminalHandle): void
   /**
    * Split `leafId` toward `direction`, adding a new independent connection
    * pane. A fresh session is created on the same runtime Host profile the
@@ -123,14 +121,12 @@ export interface AppController {
    * and leaves the tree untouched when creation is unavailable or fails.
    */
   splitPane(tab: TabState, leafId: string, direction: SplitDirection): Promise<boolean>
-  /** Split `leafId` toward `direction`, adding a read-only mirror of that conn leaf's tab. */
-  mirrorPane(tab: TabState, leafId: string, direction: SplitDirection): boolean
   isPaneKey(e: KeyboardEvent): boolean
   /** Close one pane leaf: child conn tabs detach only their own session. */
   closePaneLeaf(tab: TabState, leafId: string): void
-  /** Remove every non-primary pane leaf (child connections close, mirrors drop). */
+  /** Remove every non-primary pane leaf (child connections close). */
   unsplitPanes(tab: TabState): void
-  /** Point keyboard focus at a conn leaf's tab (null = non-conn leaf focused). */
+  /** Point keyboard focus at a pane leaf (null clears the focused leaf). */
   focusPane(tab: TabState, leafId: string | null): void
   /** Cycle conn-pane focus; delta +1/-1 in display order. */
   cyclePaneFocus(tab: TabState, delta: number): void

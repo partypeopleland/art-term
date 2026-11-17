@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useModalFocus } from './modal-focus'
 import { themes, selectedTheme, selectTheme } from '../theme/theme'
 import RuntimeTransfer from './RuntimeTransfer.vue'
 import RuntimeHosts from './RuntimeHosts.vue'
+import HotkeySettings from './HotkeySettings.vue'
 import type { RuntimeHostDto, Transport } from '../transport/types'
-type SettingsSection = 'appearance' | 'connections' | 'screens'
+type SettingsSection = 'appearance' | 'connections' | 'screens' | 'hotkeys'
 const props = withDefaults(defineProps<{ embedded?: boolean; desktop?: boolean; initialSection?: SettingsSection; transport?: Transport; hosts?: RuntimeHostDto[] }>(), { hosts: () => [], initialSection: 'appearance' })
 const emit = defineEmits<{ close: []; changed: []; picker: [active: boolean] }>()
 const transferMode = ref<'import' | 'export' | null>(null)
@@ -31,7 +32,11 @@ async function setDevelopmentMode(event: Event): Promise<void> {
   } catch { input.checked = developmentMode.value; developmentError.value = '無法儲存開發模式設定。' }
   finally { developmentBusy.value = false }
 }
-const sections = [{ id: 'appearance', title: '外觀設定', hint: '主題與配色' }, { id: 'connections', title: '連線設定', hint: '主機、助理、桌面與搬移' }] as const
+const sections = computed(() => [
+  { id: 'appearance', title: '外觀設定', hint: '主題與配色' },
+  { id: 'connections', title: '連線設定', hint: '主機、助理、桌面與搬移' },
+  ...(props.desktop ? [{ id: 'hotkeys' as const, title: '快捷鍵', hint: '窗格分割與關閉' }] : [])
+] as const)
 watch(() => props.initialSection, value => { if (!pickerActive.value) section.value = value === 'screens' ? 'connections' : value })
 function picker(active: boolean) { pickerActive.value = active; emit('picker', active) }
 function choose(value: SettingsSection) { if (!pickerActive.value) { transferMode.value = null; section.value = value } }
@@ -75,6 +80,7 @@ if (!props.embedded) useModalFocus(dialog, () => emit('close'))
           <RuntimeHosts embedded :transport="transport" @changed="emit('changed')" />
         </div>
       </section>
+      <HotkeySettings v-if="desktop && section === 'hotkeys'" />
     </section>
     </div>
   </div>
