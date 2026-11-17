@@ -17,7 +17,11 @@ Windows App
 
 `connections.toml` 是唯一設定來源。Host 與 Screens 是獨立集合；Windows DPAPI 保護管理憑證及 Screen token。明確選 Screen 後原生層直接向 MCP 取圖，不走舊截圖 Shell；後端保留的舊 Runtime 截圖相容路徑不代表新版 UI 已經驗收。Host 與 Screens 可分別或混合[匯出／匯入](../refarch/connection-transfer.md)，Screen token 僅隨密碼加密檔搬移；不能把另一 Windows 帳號的 DPAPI 密文直接當成可用憑證。
 
-執行環境需要 Windows x64、Windows 10 1809 以上、WebView2 Runtime 與可達 Runtime／MCP 的網路；不需要 OpenSSH。EXE 尚無產品 Authenticode 簽章或自動更新，交付需保留整包並核對 manifest／hash。
+執行環境需要 Windows x64、Windows 10 1809 以上、WebView2 Runtime 與可達 Runtime／MCP 的網路；不需要 OpenSSH。EXE 尚無產品 Authenticode 簽章；應用程式內更新使用 Tauri updater 簽章（minisign），不是 Authenticode。交付需保留整包並核對 manifest／hash。
+
+## 軟體更新
+
+全站設定的「軟體更新」只在按下檢查時查詢 GitHub 最新 Release，不做啟動或背景自動檢查。畫面顯示目前與最新版本；確認後由 Rust 端重新檢查 `latest.json`，下載 `art-term-<version>-windows-x64-setup.exe` 並以 Tauri updater 驗證 minisign signature，通過後才啟動 NSIS 安裝程式並由其重啟 App。檢查失敗、斷線或簽章驗證失敗都不會動到現有安裝；簽章公鑰寫在 `tauri.conf.json` 的 `plugins.updater.pubkey`，私鑰只存 repository secret，見[發佈流程](releases.md)。
 
 ## 畫面與平台操作
 

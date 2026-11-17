@@ -161,6 +161,17 @@ export interface InstanceDesktop { id: string; revision: number; name: string; m
 export interface InstanceDesktopInput { id?: string; expectedRevision?: number; name: string; mcpUrl: string; token: string }
 export interface InstanceSelection { desktop: InstanceDesktop; toolReady: boolean }
 
+export interface UpdateCheckDto {
+  current: string
+  latest: string
+  available: boolean
+  message: string
+}
+export interface UpdateInstallDto {
+  status: 'installing' | 'installed'
+  version?: string
+}
+
 export interface Transport {
   instanceDesktops?(): Promise<InstanceDesktop[]>
   instanceSave?(input: InstanceDesktopInput): Promise<InstanceDesktop>
@@ -200,6 +211,10 @@ export interface Transport {
   close(sessionId: string): Promise<void>
   desktop(sessionId: string, enabled: boolean): Promise<DesktopStateDto>
   screenshot(sessionId: string): Promise<ScreenshotDto>
+  /** Manual GitHub Release check; only invoked from the settings update entry. */
+  updateCheck?(): Promise<UpdateCheckDto>
+  /** Confirmed install flow; downloads, verifies, then hands off to the platform installer. */
+  updateInstall?(): Promise<UpdateInstallDto>
 }
 
 /** Safe native runtime metadata. Credentials have no readback API. */
