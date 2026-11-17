@@ -21,7 +21,9 @@ Windows App
 
 ## 軟體更新
 
-全站設定的「軟體更新」只在按下檢查時查詢 GitHub 最新 Release，不做啟動或背景自動檢查。畫面顯示目前與最新版本；確認後由 Rust 端重新檢查 `latest.json`，下載 `art-term-<version>-windows-x64-setup.exe` 並以 Tauri updater 驗證 minisign signature，通過後才啟動 NSIS 安裝程式並由其重啟 App。檢查失敗、斷線或簽章驗證失敗都不會動到現有安裝；簽章公鑰寫在 `tauri.conf.json` 的 `plugins.updater.pubkey`，私鑰只存 repository secret，見[發佈流程](releases.md)。
+全站設定的「軟體更新」只在按下檢查時查詢 GitHub 最新 Release，不做啟動或背景自動檢查。畫面顯示目前與最新版本；確認後由 Rust 端重新檢查 `latest.json`，確認版本仍是使用者看到的那一版，下載 `art-term-<version>-windows-x64-setup.exe` 並以 Tauri updater 驗證 minisign signature，通過後才啟動 NSIS 安裝程式並由其重啟 App。檢查失敗、斷線或簽章驗證失敗都不會動到現有安裝；簽章公鑰寫在 `tauri.conf.json` 的 `plugins.updater.pubkey`，私鑰只存 repository secret，見[發佈流程](releases.md)。
+
+NSIS 安裝會固定在執行中 EXE 的同目錄（portable ZIP 與已安裝版本皆同），因此 `connections.toml`、DPAPI 憑證與其他同目錄檔案留在原處，不會被搬到 `%LOCALAPPDATA%\Programs` 另建安裝目錄；發佈包內只附 `connections.example.toml` 範本，不會覆寫使用者的 `connections.toml`。
 
 ## 畫面與平台操作
 

@@ -310,20 +310,40 @@ async fn gui_update_check(app: tauri::AppHandle) -> Reply<UpdateCheckDto> {
     }
 }
 
-/// Confirmed install: re-checks the signed updater manifest, downloads the
-/// NSIS setup, verifies the minisign signature, then hands off to the
-/// installer which restarts the app on Windows.
+/// Confirmed install: re-checks the signed updater manifest, verifies the
+/// release matches the version the user confirmed, downloads the NSIS
+/// setup, verifies the minisign signature, then hands off to the
+/// installer which restarts the app on Windows. The installer is pointed
+/// at the running executable's directory so portable layouts keep their
+/// connections.toml and credentials in place instead of being moved to a
+/// separate install directory.
 #[tauri::command]
-async fn gui_update_install(app: tauri::AppHandle) -> Reply<UpdateInstallDto> {
+async fn gui_update_install(
+    app: tauri::AppHandle,
+    expected_version: String,
+) -> Reply<UpdateInstallDto> {
+    let mut installer_dir = std::ffi::OsString::from("/D=");
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            installer_dir.push(dir.as_os_str());
+        }
+    }
     let updater = app
-        .updater()
+        .updater_builder()
+        .installer_arg(installer_dir)
+        .build()
         .map_err(|error| GuiError::Plain(format!("無法初始化更新器：{error}")))?;
     let update = updater
         .check()
         .await
         .map_err(|error| GuiError::Plain(format!("檢查更新失敗：{error}")))?
         .ok_or_else(|| GuiError::Plain("沒有可用更新。".to_string()))?;
-    let version = update.version.clone();
+    if update.version.to_string() != expected_version {
+        return Err(GuiError::Plain(
+            "最新版本已變更，請重新檢查後再安裝。".to_string(),
+        ));
+    }
+    let version = update.version.to_string();
     update
         .download_and_install(|_, _| {}, || {})
         .await

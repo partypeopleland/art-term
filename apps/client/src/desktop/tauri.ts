@@ -82,6 +82,6 @@ export function createTauriTransport(): Transport {
     desktop: (sessionId, enabled) => call<DesktopStateDto>('gui_desktop', { sessionId, enabled }),
     screenshot: (sessionId) => call<ScreenshotDto>('gui_screenshot', { sessionId }),
     updateCheck: () => call<UpdateCheckDto>('gui_update_check'),
-    updateInstall: () => call<UpdateInstallDto>('gui_update_install')
+    updateInstall: (expectedVersion: string) => call<UpdateInstallDto>('gui_update_install', { expectedVersion })
   }
 }

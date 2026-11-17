@@ -213,8 +213,8 @@ export interface Transport {
   screenshot(sessionId: string): Promise<ScreenshotDto>
   /** Manual GitHub Release check; only invoked from the settings update entry. */
   updateCheck?(): Promise<UpdateCheckDto>
-  /** Confirmed install flow; downloads, verifies, then hands off to the platform installer. */
-  updateInstall?(): Promise<UpdateInstallDto>
+  /** Confirmed install flow; downloads, verifies, then hands off to the platform installer. `expectedVersion` pins the release the user confirmed. */
+  updateInstall?(expectedVersion: string): Promise<UpdateInstallDto>
 }
 
 /** Safe native runtime metadata. Credentials have no readback API. */
