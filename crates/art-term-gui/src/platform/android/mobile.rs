@@ -240,7 +240,7 @@ async fn mobile_update_install(
         .ok_or_else(|| format!("SHA256SUMS 缺少 {apk_name}"))?;
     let cache = app
         .path()
-        .app_cache_dir()
+        .cache_dir()
         .map_err(|error| error.to_string())?;
     let dir = cache.join("updates");
     tokio::fs::create_dir_all(&dir)
