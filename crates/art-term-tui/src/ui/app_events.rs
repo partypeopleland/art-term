@@ -171,28 +171,28 @@ impl App {
                             }
                         };
                     }
-                    self.status = if check.available {
-                        format!(
-                            "發現新版本 {}（目前 {}）；可在更新視窗確認安裝。",
-                            check.latest.unwrap_or_default(),
-                            check.current
-                        )
-                    } else {
-                        format!(
-                            "已是最新版本（目前 {}，最新 {}）。",
-                            check.current,
-                            check.latest.unwrap_or_default()
-                        )
-                    };
                 }
+                self.status = if check.available {
+                    format!(
+                        "發現新版本 {}（目前 {}）；可在更新視窗確認安裝。",
+                        check.latest.unwrap_or_default(),
+                        check.current
+                    )
+                } else {
+                    format!(
+                        "已是最新版本（目前 {}，最新 {}）。",
+                        check.current,
+                        check.latest.unwrap_or_default()
+                    )
+                };
             }
             JobResult::UpdateChecked(Err(error)) => {
                 if current {
                     if let Some(Modal::Update(modal)) = self.modal.as_mut() {
                         modal.phase = UpdatePhase::Failed(error.clone());
                     }
-                    self.status = format!("檢查更新失敗：{error}");
                 }
+                self.status = format!("檢查更新失敗：{error}");
             }
             JobResult::UpdateInstalled(Ok(install)) => {
                 if current {
@@ -202,20 +202,20 @@ impl App {
                             backup: install.backup.display().to_string(),
                         };
                     }
-                    self.status = format!(
-                        "已安裝 art-term {}；請重新啟動。舊版備份：{}",
-                        install.version,
-                        install.backup.display()
-                    );
                 }
+                self.status = format!(
+                    "已安裝 art-term {}；請重新啟動。舊版備份：{}",
+                    install.version,
+                    install.backup.display()
+                );
             }
             JobResult::UpdateInstalled(Err(error)) => {
                 if current {
                     if let Some(Modal::Update(modal)) = self.modal.as_mut() {
                         modal.phase = UpdatePhase::Failed(error.clone());
                     }
-                    self.status = format!("更新失敗：{error}");
                 }
+                self.status = format!("更新失敗：{error}");
             }
             JobResult::Profiles(Err(error))
             | JobResult::ScreenSaved(Err(error))
