@@ -34,7 +34,7 @@ async function install(): Promise<void> {
   error.value = ''
   notice.value = ''
   try {
-    const outcome = await props.transport.updateInstall()
+    const outcome = await props.transport.updateInstall(result.value.latest)
     notice.value = outcome.status === 'installed'
       ? `已安裝 ${outcome.version ?? result.value.latest}`
       : '已驗證下載內容，正在啟動系統安裝程式；請在系統提示完成安裝。'

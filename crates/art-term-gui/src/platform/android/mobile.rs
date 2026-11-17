@@ -213,7 +213,10 @@ async fn mobile_update_check(app: AppHandle) -> Result<UpdateCheckDto, String> {
 }
 
 #[tauri::command]
-async fn mobile_update_install(app: AppHandle) -> Result<UpdateInstallDto, String> {
+async fn mobile_update_install(
+    app: AppHandle,
+    expected_version: String,
+) -> Result<UpdateInstallDto, String> {
     let current = app.package_info().version.to_string();
     let client = art_term_core::release::ReleaseClient::new()
         .map_err(update_error)?;
@@ -224,6 +227,9 @@ async fn mobile_update_install(app: AppHandle) -> Result<UpdateInstallDto, Strin
     let art_term_core::release::UpdateStatus::Available { release, .. } = status else {
         return Err("沒有可用的 Android 更新".into());
     };
+    if release.version.to_string() != expected_version {
+        return Err("最新版本已變更，請重新檢查後再安裝".into());
+    }
     let apk_name = format!("art-term-{}-android-arm64.apk", release.version);
     let apk = release
         .asset(&apk_name)

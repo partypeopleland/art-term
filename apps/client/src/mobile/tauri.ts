@@ -84,8 +84,8 @@ export function createMobileTauriTransport(): Transport {
       call<DesktopStateDto>('mobile_desktop', { sessionId, enabled }),
     screenshot: (sessionId) => call<ScreenshotDto>('mobile_screenshot', { sessionId }),
     updateCheck: () => call<UpdateCheckDto>('mobile_update_check'),
-    updateInstall: async (): Promise<UpdateInstallDto> => {
-      const staged = await call<{ path: string; version: string }>('mobile_update_install')
+    updateInstall: async (expectedVersion: string): Promise<UpdateInstallDto> => {
+      const staged = await call<{ path: string; version: string }>('mobile_update_install', { expectedVersion })
       await invoke('plugin:mobile-history|installApk', { path: staged.path })
       return { status: 'installing', version: staged.version }
     }
