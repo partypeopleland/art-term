@@ -345,6 +345,19 @@ impl App {
         }
     }
     pub(super) fn modal_key(&mut self, mut key: KeyEvent) {
+        if let Some(Modal::Update(update)) = &self.modal {
+            let dismiss = key.code == KeyCode::Esc
+                || (key.code == KeyCode::Enter && update.row >= 2);
+            if dismiss
+                && matches!(
+                    update.phase,
+                    UpdatePhase::Checking | UpdatePhase::Installing
+                )
+            {
+                self.status = "請等待更新操作完成。".into();
+                return;
+            }
+        }
         let Some(mut modal) = self.modal.take() else {
             return;
         };
@@ -535,6 +548,39 @@ impl App {
                 }
                 return;
             }
+            Modal::Update(modal) => match key.code {
+                KeyCode::Down => modal.row = (modal.row + 1).min(2),
+                KeyCode::Up => modal.row = modal.row.saturating_sub(1),
+                KeyCode::Enter => match modal.row {
+                    0 => {
+                        if self.pending.is_some() {
+                            self.status = "請等待目前操作完成。".into();
+                        } else {
+                            modal.phase = UpdatePhase::Checking;
+                            self.job(async move {
+                                JobResult::UpdateChecked(crate::update::check().await)
+                            });
+                        }
+                    }
+                    1 => {
+                        if !matches!(modal.phase, UpdatePhase::Available { .. }) {
+                            self.status = "請先檢查並確認有可用更新。".into();
+                        } else if self.pending.is_some() {
+                            self.status = "請等待目前操作完成。".into();
+                        } else {
+                            modal.phase = UpdatePhase::Installing;
+                            self.job(async move {
+                                JobResult::UpdateInstalled(crate::update::install().await)
+                            });
+                        }
+                    }
+                    _ => {
+                        self.restore_origin();
+                        return;
+                    }
+                },
+                _ => (),
+            },
             Modal::Import { replace, .. } if key.code == KeyCode::Char(' ') => *replace = !*replace,
             Modal::Import {
                 preview, scroll, ..
@@ -736,6 +782,7 @@ impl App {
                 match self.modal.as_mut() {
                     Some(Modal::Actions { row } | Modal::Screens { row }) => *row = index,
                     Some(Modal::Settings(settings)) => settings.row = index,
+                    Some(Modal::Update(modal)) => modal.row = index.min(2),
                     _ => return,
                 }
                 self.modal_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));

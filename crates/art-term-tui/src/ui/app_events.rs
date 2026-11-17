@@ -155,6 +155,68 @@ impl App {
                 self.profiles();
             }
             JobResult::Exported(Ok(())) => self.status = "已加密匯出；原有檔案不會被覆寫。".into(),
+            JobResult::UpdateChecked(Ok(check)) => {
+                if current {
+                    let latest = check.latest.clone().unwrap_or_else(|| "?".into());
+                    if let Some(Modal::Update(modal)) = self.modal.as_mut() {
+                        modal.phase = if check.available {
+                            UpdatePhase::Available {
+                                current: check.current.clone(),
+                                latest: latest.clone(),
+                            }
+                        } else {
+                            UpdatePhase::Current {
+                                current: check.current.clone(),
+                                latest,
+                            }
+                        };
+                    }
+                }
+                self.status = if check.available {
+                    format!(
+                        "發現新版本 {}（目前 {}）；可在更新視窗確認安裝。",
+                        check.latest.unwrap_or_default(),
+                        check.current
+                    )
+                } else {
+                    format!(
+                        "已是最新版本（目前 {}，最新 {}）。",
+                        check.current,
+                        check.latest.unwrap_or_default()
+                    )
+                };
+            }
+            JobResult::UpdateChecked(Err(error)) => {
+                if current {
+                    if let Some(Modal::Update(modal)) = self.modal.as_mut() {
+                        modal.phase = UpdatePhase::Failed(error.clone());
+                    }
+                }
+                self.status = format!("檢查更新失敗：{error}");
+            }
+            JobResult::UpdateInstalled(Ok(install)) => {
+                if current {
+                    if let Some(Modal::Update(modal)) = self.modal.as_mut() {
+                        modal.phase = UpdatePhase::Installed {
+                            version: install.version.clone(),
+                            backup: install.backup.display().to_string(),
+                        };
+                    }
+                }
+                self.status = format!(
+                    "已安裝 art-term {}；請重新啟動。舊版備份：{}",
+                    install.version,
+                    install.backup.display()
+                );
+            }
+            JobResult::UpdateInstalled(Err(error)) => {
+                if current {
+                    if let Some(Modal::Update(modal)) = self.modal.as_mut() {
+                        modal.phase = UpdatePhase::Failed(error.clone());
+                    }
+                }
+                self.status = format!("更新失敗：{error}");
+            }
             JobResult::Profiles(Err(error))
             | JobResult::ScreenSaved(Err(error))
             | JobResult::Saved(Err(error))
