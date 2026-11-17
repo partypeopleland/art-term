@@ -322,15 +322,18 @@ async fn gui_update_install(
     app: tauri::AppHandle,
     expected_version: String,
 ) -> Reply<UpdateInstallDto> {
-    let mut installer_dir = std::ffi::OsString::from("/D=");
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            installer_dir.push(dir.as_os_str());
-        }
+    let installer_dir = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| {
+            let mut arg = std::ffi::OsString::from("/D=");
+            arg.push(dir.as_os_str());
+            arg
+        }));
+    let mut builder = app.updater_builder();
+    if let Some(arg) = installer_dir {
+        builder = builder.installer_arg(arg);
     }
-    let updater = app
-        .updater_builder()
-        .installer_arg(installer_dir)
+    let updater = builder
         .build()
         .map_err(|error| GuiError::Plain(format!("無法初始化更新器：{error}")))?;
     let update = updater
