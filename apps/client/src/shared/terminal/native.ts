@@ -15,6 +15,7 @@ export interface NativeHistoryEvent {
   kind: 'tap' | 'visibility' | 'viewport' | 'position' | 'reading' | 'swipe'
   phase?: NativeSwipeEvent['phase']
   dx?: number
+  elapsed?: number
   sourceEpoch?: string
   visible?: boolean
   anchorId?: number
@@ -33,7 +34,7 @@ export interface NativeHistoryReader {
   close(readerId: string): Promise<void>
 }
 export const NativeHistoryKey: InjectionKey<() => NativeHistoryReader> = Symbol('NativeTerminalReader')
-export interface NativeSwipeEvent { phase: 'start' | 'move' | 'end' | 'cancel'; dx: number }
+export interface NativeSwipeEvent { phase: 'start' | 'move' | 'end' | 'cancel'; dx: number; elapsed?: number }
 export const NativeSwipeKey: InjectionKey<(event: NativeSwipeEvent) => void> = Symbol('NativeWorkspaceSwipe')
 export type NativeKeyboardListener = (receive: (visible: boolean) => void) => Promise<() => Promise<void>>
 export const NativeKeyboardKey: InjectionKey<NativeKeyboardListener> = Symbol('NativeKeyboardVisibility')

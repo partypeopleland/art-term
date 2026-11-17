@@ -73,40 +73,56 @@ watch(selectedTheme, theme => {
 })
 
 const rootEl = ref<HTMLElement | null>(null)
-const settingsOpen = ref(false)
 const screenPickerOpen = ref(false)
 const zoomOpen = ref(false)
 const phase = ref<Workspace>('list')
+const settingsOpen = computed(() => phase.value === 'settings')
 const aboutOpen = computed(() => phase.value === 'home')
 function showHomepage(): void {
   runtimeEntry.cancel()
   voice.cancel('target')
-  settingsOpen.value = false
   composerOpen.value = false
   pager.slideTo('home')
 }
 const voiceLightboxOpen = ref(false)
 const composerOpen = ref(false)
 const composerText = ref('')
+const transferPicker = ref(false)
 const zoomVisible = computed(() => {
   const tab = controller.activeTab.value
   return zoomOpen.value && phase.value === 'session' && !!tab && tab.previewVisible && (tab.desktopEnabled || !!tab.shot)
 })
-const pager = useWorkspacePager(rootEl, phase, activateWorkspace, () => !zoomVisible.value && !screenPickerOpen.value && !settingsOpen.value && !runtimeHostsOpen.value && !runtimeDialogProfile.value && !composerOpen.value)
-const { dragging: swipeDragging, animating: swipeAnimating, nativeDragging: nativeSwipeActive, visible: swipeVisible, indicatorStyle: workspaceIndicatorStyle, transform: pageTransform, begin: beginSwipe, move: moveSwipe, end: finishSwipe, guardClick: guardSwipeClick } = pager
+const pager = useWorkspacePager(rootEl, phase, activateWorkspace, () => !zoomVisible.value && !screenPickerOpen.value && !runtimeHostsOpen.value && !runtimeDialogProfile.value && !composerOpen.value && !transferPicker.value)
+const { dragging: swipeDragging, animating: swipeAnimating, nativeDragging: nativeSwipeActive, visible: swipeVisible, progress: pagerProgress, indicatorStyle: workspaceIndicatorStyle, transform: pageTransform, begin: beginSwipe, move: moveSwipe, end: finishSwipe, guardClick: guardSwipeClick } = pager
 provide(NativeSwipeKey, pager.native)
+const settingsMounted = ref(false)
+const settingsReturn = ref<Workspace>('session')
+const settingsPageActive = computed(() => settingsOpen.value || settingsMounted.value || (swipeVisible.value && pagerProgress.value > 2))
+watch(settingsPageActive, active => { if (active) settingsMounted.value = true })
+watch([swipeVisible, settingsOpen, transferPicker], ([visible, open, picker]) => { if (!visible && !open && !picker) settingsMounted.value = false })
+const terminalReaderVisible = computed(() => phase.value === 'session' &&
+  (!swipeVisible.value || nativeSwipeActive.value || pagerProgress.value === 2) &&
+  !screenPickerOpen.value && !zoomVisible.value && !voiceLightboxOpen.value && !composerOpen.value &&
+  !runtimeHostsOpen.value && !runtimeDialogProfile.value)
 function activateWorkspace(page: Workspace): void {
+  if (page === 'settings' && phase.value !== page) settingsReturn.value = phase.value
   if (page === 'home') { runtimeEntry.cancel(); voice.cancel('target'); composerOpen.value = false; phase.value = 'home' }
   else if (page === 'list') backToList()
   else switchWorkspace(page)
 }
 function slideTo(workspace: Workspace): void {
-  settingsOpen.value = false
+  if (workspace === 'settings') {
+    settingsMounted.value = true
+    if (phase.value !== workspace) settingsReturn.value = phase.value
+  }
   pager.slideTo(workspace)
+}
+function openSettings(): void {
+  voice.cancel('target')
+  slideTo('settings')
 }
 
 const runtimeHostsOpen = ref(false)
-const transferPicker = ref(false)
 const hostsView = ref<'list' | 'create'>('create')
 const hostsCategory = ref<'host' | 'agent' | undefined>()
 // Every transport in the runtime-only product implements the full
@@ -334,7 +350,6 @@ function onViewport(): void {
 
 function onVisibility(): void {
   if (document.hidden) {
-    if (!transferPicker.value) settingsOpen.value = false
     pager.cancel()
     // Password and queued input never survive backgrounding.
     composerOpen.value = false
@@ -342,6 +357,9 @@ function onVisibility(): void {
     if (!transferPicker.value) runtimeHostsOpen.value = false
     runtimeDialogProfile.value = null
     runtimeDialogSeed.value = null
+    if (transferPicker.value) {
+      if ((settingsOpen.value || settingsMounted.value) && !runtimeHostsOpen.value) phase.value = 'settings'
+    } else if (settingsOpen.value) phase.value = settingsReturn.value
     input.setSuspended(true)
     screenPickerOpen.value = false
     voice.cancel('background')
@@ -410,9 +428,10 @@ onBeforeUnmount(() => {
         <span class="m-brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m5 6 6 6-6 6M13 18h6" /></svg></span>
         <div class="m-brand"><span class="m-title">art-term<span class="m-title-dot">.</span></span><span class="m-sub">CONNECTION HUB</span></div>
         </button>
-          <span v-show="!settingsOpen" class="workspace-progress-indicator" :style="workspaceIndicatorStyle" aria-hidden="true" />
-          <button class="page-text-link" :class="{ current: !settingsOpen && !aboutOpen && phase === 'list' }" :aria-current="!settingsOpen && !aboutOpen && phase === 'list' ? 'page' : undefined" data-testid="terminal-to-list" @click="slideTo('list')">Main</button>
-          <button class="page-text-link" :class="{ current: !settingsOpen && !aboutOpen && phase === 'session' }" :aria-current="!settingsOpen && !aboutOpen && phase === 'session' ? 'page' : undefined" @click="slideTo('session')">Connect</button>
+          <span class="workspace-progress-indicator" :style="workspaceIndicatorStyle" aria-hidden="true" />
+          <button class="page-text-link" :class="{ current: phase === 'list' }" :aria-current="phase === 'list' ? 'page' : undefined" data-testid="terminal-to-list" @click="slideTo('list')">Main</button>
+          <button class="page-text-link" :class="{ current: phase === 'session' }" :aria-current="phase === 'session' ? 'page' : undefined" @click="slideTo('session')">Connect</button>
+          <button class="page-text-link settings-page-tab" :class="{ current: phase === 'settings' }" :aria-current="phase === 'settings' ? 'page' : undefined" data-testid="workspace-settings" @click="openSettings">設定</button>
 
         </nav>
 
@@ -423,15 +442,14 @@ onBeforeUnmount(() => {
 
 
 
-        <button class="settings-trigger" :class="{ active: settingsOpen }" :aria-pressed="settingsOpen" aria-label="全域設定" title="全域設定" @click="voice.cancel('target'); settingsOpen = true">
+        <button class="settings-trigger" :class="{ active: settingsOpen }" :aria-pressed="settingsOpen" aria-label="全域設定" title="全域設定" @click="openSettings">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.5 3-.6 2.3-2 .9-2.1-.7-2.3 4 1.6 1.7v2.3l-1.6 1.7 2.3 4 2.1-.7 2 .9.6 2.6h5l.6-2.6 2-.9 2.1.7 2.3-4-1.6-1.7v-2.3l1.6-1.7-2.3-4-2.1.7-2-.9L14.5 3Z" /><circle cx="12" cy="12" r="3" /></svg>
         </button>
       </header>
     <div class="workspace-viewport">
-      <ScreenPicker v-if="screenPickerOpen && activeTab" :items="controller.instanceDesktops.value" :selected-id="activeTab.instanceDesktop?.id" :busy="activeTab.desktopBusy" :error="activeTab.desktopError || controller.instanceDesktopsError.value" @select="selectScreen" @clear="clearScreen" @close="screenPickerOpen = false" @settings="screenPickerOpen = false; settingsOpen = true" />
-      <div v-show="!settingsOpen && (aboutOpen || swipeVisible)" class="software-home-page" :style="{ transform: pageTransform('home') }" role="region" aria-label="軟體資訊首頁"><AppHomepage /></div>
-      <div v-if="settingsOpen" class="global-settings-page" role="region" aria-label="全域設定"><ThemeSettings embedded :transport="transport" :hosts="controller.runtimeProfiles.value" @changed="screensChanged" @picker="transferPicker = $event" /></div>
-    <div v-show="!settingsOpen && (phase === 'list' || swipeVisible)" class="home-surface" :style="{ transform: pageTransform('list') }">
+      <ScreenPicker v-if="screenPickerOpen && activeTab" :items="controller.instanceDesktops.value" :selected-id="activeTab.instanceDesktop?.id" :busy="activeTab.desktopBusy" :error="activeTab.desktopError || controller.instanceDesktopsError.value" @select="selectScreen" @clear="clearScreen" @close="screenPickerOpen = false" @settings="screenPickerOpen = false; openSettings()" />
+      <div v-show="aboutOpen || swipeVisible" class="software-home-page" :style="{ transform: pageTransform('home') }" role="region" aria-label="軟體資訊首頁"><AppHomepage /></div>
+    <div v-show="phase === 'list' || swipeVisible" class="home-surface" :style="{ transform: pageTransform('list') }">
 
 
     <div id="connections-panel" class="page list-page" role="region" aria-label="連線">
@@ -443,7 +461,7 @@ onBeforeUnmount(() => {
           :screens="controller.instanceDesktops.value"
           :screens-error="controller.instanceDesktopsError.value"
           :transport="transport"
-          :active="!settingsOpen && !aboutOpen && phase === 'list'"
+          :active="phase === 'list' && !swipeVisible"
           :catalog-loading="controller.catalogLoading.value"
           :runtime-profiles="controller.runtimeProfiles.value"
           :runtime-profiles-error="controller.runtimeProfilesError.value"
@@ -461,7 +479,7 @@ onBeforeUnmount(() => {
     <!-- v-show, not v-if: TerminalPane instances must live for the whole tab
          lifetime so hidden-tab buffers keep draining and scrollback survives
          list↔session navigation. -->
-    <div id="terminal-panel" v-show="!settingsOpen && (phase === 'session' || swipeVisible)" class="page term-page" :style="{ transform: pageTransform('session') }" role="region" aria-label="終端">
+    <div id="terminal-panel" v-show="phase === 'session' || swipeVisible" class="page term-page" :style="{ transform: pageTransform('session') }" role="region" aria-label="終端">
 
 
 
@@ -479,7 +497,7 @@ onBeforeUnmount(() => {
           :tab="tab"
           :active="tab.key === controller.activeKey.value"
           :controller="controller"
-          :reader-visible="phase === 'session' && (!swipeVisible || nativeSwipeActive) && !screenPickerOpen && !zoomVisible && !voiceLightboxOpen && !composerOpen && !runtimeHostsOpen && !runtimeDialogProfile && !settingsOpen && !aboutOpen"
+          :reader-visible="terminalReaderVisible"
         />
         <div v-if="!controller.tabs.length" class="cover" data-testid="no-tabs">
           <div class="done">
@@ -550,7 +568,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </div>
-
+      <div v-if="settingsPageActive" v-show="phase === 'settings' || swipeVisible" class="global-settings-page" :style="{ transform: pageTransform('settings') }" role="region" aria-label="全域設定"><ThemeSettings embedded :transport="transport" :hosts="controller.runtimeProfiles.value" @changed="screensChanged" @picker="transferPicker = $event" /></div>
     </div>
     <PreviewZoom v-if="zoomVisible && activeTab" :tab="activeTab" :screen-key="`${activeTab.key}:${activeTab.instanceDesktop?.id || 'legacy'}`" mode="android" @close="zoomOpen = false" />
   </div>
@@ -1089,10 +1107,10 @@ onBeforeUnmount(() => {
 .home-surface { position: absolute; inset: 0; display: flex; flex-direction: column; min-height: 0; background: radial-gradient(ellipse at 90% 0%, var(--page-glow), transparent 48%), var(--bg); touch-action: pan-y; }
 .term-page { position: absolute; inset: 0; background: var(--bg); touch-action: pan-y; }
 .t-head { touch-action: pan-y; }
-.swipe-animating .software-home-page, .swipe-animating .home-surface, .swipe-animating .term-page { transition: transform 200ms cubic-bezier(.2,.7,.3,1); }
-.swipe-dragging .home-surface, .swipe-dragging .term-page { user-select: none; }
-.swipe-dragging .home-surface { will-change: transform; }
-@media (prefers-reduced-motion: reduce) { .swipe-animating .software-home-page, .swipe-animating .home-surface, .swipe-animating .term-page { transition: none; } }
+.swipe-animating .software-home-page, .swipe-animating .home-surface, .swipe-animating .term-page, .swipe-animating .global-settings-page { transition: transform 200ms cubic-bezier(.2,.7,.3,1); }
+.swipe-dragging .software-home-page, .swipe-dragging .home-surface, .swipe-dragging .term-page, .swipe-dragging .global-settings-page { user-select: none; will-change: transform; }
+.swipe-animating .software-home-page, .swipe-animating .home-surface, .swipe-animating .term-page, .swipe-animating .global-settings-page { will-change: transform; }
+@media (prefers-reduced-motion: reduce) { .swipe-animating .software-home-page, .swipe-animating .home-surface, .swipe-animating .term-page, .swipe-animating .global-settings-page { transition: none; } }
 
 .page-text-navigation { display: inline-flex; align-items: center; gap: 7px; flex: none; color: var(--text-dim); font-size: 11px; }
 .page-text-link { border: 0; border-radius: 0; background: transparent; padding: 5px 0; color: var(--text-dim); font: inherit; cursor: pointer; }
@@ -1154,7 +1172,7 @@ onBeforeUnmount(() => {
 .workspace-header .page-text-link { min-width: 48px; width: auto; height: 30px; padding: 5px; font-size: 10px; }
 .workspace-header .workspace-progress-indicator { width: 50%; }
 
-.global-settings-page { position: absolute; inset: 0; overflow-y: auto; background: var(--bg); }
+.global-settings-page { position: absolute; inset: 0; overflow-y: auto; background: var(--bg); touch-action: pan-y; }
 .workspace-header .settings-trigger { position: relative; }
 .workspace-header .settings-trigger.active { color: var(--accent); }
 .workspace-header .settings-trigger.active::after { content: ''; position: absolute; left: 5px; right: 5px; bottom: 0; height: 2px; border-radius: 2px; background: var(--accent); }
@@ -1172,8 +1190,9 @@ onBeforeUnmount(() => {
 .screen-trigger:focus-visible { outline: 2px solid var(--accent); }
 @media (max-width: 360px) { .workspace-header:has(.screen-trigger) .m-brand { display: none; } }
 
-.workspace-header .page-text-navigation { grid-template-columns: repeat(3, minmax(0, 1fr)); flex: 1; width: 100%; }
-.workspace-header .workspace-progress-indicator { width: calc(100% / 3); }
+.workspace-header .page-text-navigation { grid-template-columns: repeat(4, minmax(0, 1fr)); flex: 1; width: 100%; }
+.workspace-header .page-text-link { min-width: 0; width: 100%; }
+.workspace-header .workspace-progress-indicator { width: 25%; }
 .workspace-header .fixed-brand { justify-content: center; min-width: 0; }
 .workspace-header > .flex { display: none; }
 @media (max-width: 440px) { .workspace-header .fixed-brand .m-brand-mark { display: none; } .workspace-header .fixed-brand .m-brand { display: block; } }
