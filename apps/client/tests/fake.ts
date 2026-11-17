@@ -96,7 +96,7 @@ export class FakeTransport implements Transport {
     if (group) group.targets.push(target)
     return target
   }
-  async runtimeDeleteSession(targetId: string): Promise<void> {
+  async runtimeDeleteSession(targetId: string, _sessionId: string | null): Promise<void> {
     this.deleteCalls.push(targetId)
     if (this.deleteError) throw this.deleteError
     for (const group of this.runtimeSessionsData.values()) {

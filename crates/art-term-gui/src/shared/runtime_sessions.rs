@@ -433,8 +433,9 @@ pub async fn gui_runtime_delete_session(
     hosts: State<'_, Arc<RuntimeHosts>>,
     sessions: State<'_, Arc<RuntimeSessions>>,
     target_id: String,
+    session_id: Option<String>,
 ) -> Result<(), HostError> {
-    let binding = sessions
+    let target_binding = sessions
         .targets
         .lock()
         .map_err(|_| ApiError::Storage)?
@@ -442,6 +443,25 @@ pub async fn gui_runtime_delete_session(
         .ok_or(ApiError::StateChanged)?
         .binding
         .clone();
+    // A reattached target can have a newer generation than its original
+    // issued binding. Prefer the live connection's verified binding, while
+    // keeping the opaque target as the authority for profile and name.
+    let binding = if let Some(session_id) = session_id {
+        let conn = sessions
+            .sessions
+            .lock()
+            .map_err(|_| ApiError::Storage)?
+            .get(&session_id)
+            .cloned()
+            .ok_or(ApiError::StateChanged)?;
+        let binding = conn.history_binding.clone().ok_or(ApiError::StateChanged)?;
+        if binding.profile != target_binding.profile || binding.name != target_binding.name {
+            return Err(ApiError::StateChanged.into());
+        }
+        binding
+    } else {
+        target_binding
+    };
     let snapshot = hosts.store()?.snapshot(&binding.profile.id)?;
     if snapshot.profile != binding.profile {
         return Err(ApiError::StateChanged.into());

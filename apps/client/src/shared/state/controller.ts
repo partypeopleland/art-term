@@ -349,7 +349,7 @@ export function createAppController(
     }
     closingPanes.add(leaf.tab.key)
     try {
-      await transport.runtimeDeleteSession(leaf.tab.targetId)
+      await transport.runtimeDeleteSession(leaf.tab.targetId, leaf.tab.sessionId)
     } catch {
       if (!disposed && !leaf.tab.closed) uiNotice.value = '關閉遠端連線失敗，窗格已保留；請稍後重試'
       return
