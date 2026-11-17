@@ -15,4 +15,5 @@ android {
 dependencies {
     implementation(project(":tauri-android"))
     implementation("androidx.appcompat:appcompat:1.6.0")
+    implementation("androidx.core:core:1.13.1")
 }

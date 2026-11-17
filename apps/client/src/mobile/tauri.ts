@@ -12,7 +12,9 @@ import type {
   TargetDto,
   SessionDto,
   ScreenshotDto,
-  Transport
+  Transport,
+  UpdateCheckDto,
+  UpdateInstallDto
 } from '../shared/transport/types'
 
 function sanitizeError(e: unknown): string {
@@ -80,6 +82,12 @@ export function createMobileTauriTransport(): Transport {
     close: (sessionId) => call<void>('mobile_close', { sessionId }),
     desktop: (sessionId, enabled) =>
       call<DesktopStateDto>('mobile_desktop', { sessionId, enabled }),
-    screenshot: (sessionId) => call<ScreenshotDto>('mobile_screenshot', { sessionId })
+    screenshot: (sessionId) => call<ScreenshotDto>('mobile_screenshot', { sessionId }),
+    updateCheck: () => call<UpdateCheckDto>('mobile_update_check'),
+    updateInstall: async (expectedVersion: string): Promise<UpdateInstallDto> => {
+      const staged = await call<{ path: string; version: string }>('mobile_update_install', { expectedVersion })
+      await invoke('plugin:mobile-history|installApk', { path: staged.path })
+      return { status: 'installing', version: staged.version }
+    }
   }
 }

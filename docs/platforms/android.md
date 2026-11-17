@@ -17,6 +17,8 @@ Android APK -- HTTPS / WSS --> Runtime --> Shell / Desktop
 
 目前 package 為 `net.missart.artterm`，minSdk 24／targetSdk 36，release 為 ARM64、16KB page alignment；版本與 versionCode 以 `tauri.conf.json` 與 `tauri.android.conf.json` 為準。更新必須使用原簽章，才能維持既有 App 與 Keystore 的連續性。
 
+設定頁的「軟體更新」只在按下檢查時查詢 GitHub 最新 Release，顯示目前與最新版本；確認後由 Rust 下載 `art-term-<version>-android-arm64.apk`，以 `SHA256SUMS.txt` 驗證完整性，再透過 FileProvider 交給 Android 系統安裝。安裝仍要求與現有 App 相同簽章；下載或驗證失敗只保留暫存檔，不更動已安裝版本與本機資料。
+
 ## 操作與背景
 
 頂端固定顯示可點擊的 `>_ art-term`、Main／Connect／設定滑動條與全站齒輪。左右滑動依序切換 art-term 資訊首頁、Main、Connect 與設定；點品牌或頁面文字也能切換。頁面拖曳時，底下的指示色條跟著可視範圍移動，頂列保持固定。點品牌圖示或名稱進入軟體資訊首頁，顯示目前版本、近期更新重點與可展開的完整更新文件。

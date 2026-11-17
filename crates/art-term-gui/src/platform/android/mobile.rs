@@ -169,6 +169,95 @@ async fn mobile_close(
     sessions.close(&session_id).await.map_err(Into::into)
 }
 
+#[derive(serde::Serialize)]
+struct UpdateCheckDto {
+    current: String,
+    latest: String,
+    available: bool,
+    message: String,
+}
+
+#[derive(serde::Serialize)]
+struct UpdateInstallDto {
+    path: String,
+    version: String,
+}
+
+fn update_error(error: art_term_core::release::ReleaseError) -> String {
+    error.to_string()
+}
+
+#[tauri::command]
+async fn mobile_update_check(app: AppHandle) -> Result<UpdateCheckDto, String> {
+    let current = app.package_info().version.to_string();
+    let client = art_term_core::release::ReleaseClient::new()
+        .map_err(update_error)?;
+    match client
+        .check_for_update(art_term_core::release::Platform::Android, &current)
+        .await
+        .map_err(update_error)?
+    {
+        art_term_core::release::UpdateStatus::UpToDate { latest, .. } => Ok(UpdateCheckDto {
+            current,
+            latest: latest.to_string(),
+            available: false,
+            message: "已是最新版本".into(),
+        }),
+        art_term_core::release::UpdateStatus::Available { latest, release, .. } => Ok(UpdateCheckDto {
+            current,
+            latest: latest.to_string(),
+            available: true,
+            message: release.name,
+        }),
+    }
+}
+
+#[tauri::command]
+async fn mobile_update_install(
+    app: AppHandle,
+    expected_version: String,
+) -> Result<UpdateInstallDto, String> {
+    let current = app.package_info().version.to_string();
+    let client = art_term_core::release::ReleaseClient::new()
+        .map_err(update_error)?;
+    let status = client
+        .check_for_update(art_term_core::release::Platform::Android, &current)
+        .await
+        .map_err(update_error)?;
+    let art_term_core::release::UpdateStatus::Available { release, .. } = status else {
+        return Err("沒有可用的 Android 更新".into());
+    };
+    if release.version.to_string() != expected_version {
+        return Err("最新版本已變更，請重新檢查後再安裝".into());
+    }
+    let apk_name = format!("art-term-{}-android-arm64.apk", release.version);
+    let apk = release
+        .asset(&apk_name)
+        .ok_or_else(|| format!("缺少更新套件 {apk_name}"))?;
+    let sums = client.sha256_sums(&release).await.map_err(update_error)?;
+    let expected = sums
+        .get(&apk_name)
+        .ok_or_else(|| format!("SHA256SUMS 缺少 {apk_name}"))?;
+    let cache = app
+        .path()
+        .cache_dir()
+        .map_err(|error| error.to_string())?;
+    let dir = cache.join("updates");
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|error| error.to_string())?;
+    let path = dir.join(&apk_name);
+    let _ = tokio::fs::remove_file(&path).await;
+    client
+        .download_verified_asset(apk, &path, expected)
+        .await
+        .map_err(update_error)?;
+    Ok(UpdateInstallDto {
+        path: path.to_string_lossy().into_owned(),
+        version: release.version.to_string(),
+    })
+}
+
 pub fn run() {
     let shutting_down = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let shutdown_complete = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -214,6 +303,8 @@ pub fn run() {
             mobile_write,
             mobile_resize,
             mobile_close,
+            mobile_update_check,
+            mobile_update_install,
             crate::runtime_transfer::gui_transfer_export,
             crate::runtime_transfer::gui_transfer_pick_import,
             crate::runtime_transfer::gui_transfer_unlock,

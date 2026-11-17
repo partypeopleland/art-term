@@ -10,6 +10,7 @@ fn main() {
         "registerListener",
         "remove_listener",
         "removeListener",
+        "installApk",
     ])
     .android_path("android")
     .build();
