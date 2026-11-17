@@ -93,6 +93,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
+          . "$env:GITHUB_WORKSPACE/scripts/build-paths.ps1"
+          $env:CARGO_ENCODED_RUSTFLAGS = Get-ArtTermBuildRustFlags -ProjectRoot $env:GITHUB_WORKSPACE
           $cli = Join-Path $PWD 'apps/client/node_modules/@tauri-apps/cli/tauri.js'
           Push-Location crates/art-term-gui
           try {
@@ -104,7 +106,7 @@ jobs:
             & node $cli build --bundles nsis @configArgs
             if ($LASTEXITCODE -ne 0) { throw 'Tauri NSIS bundle failed' }
           } finally { Pop-Location }
-          $nsis = @(Get-ChildItem crates/art-term-gui/target/release/bundle/nsis -Filter '*-setup.exe' | Where-Object { $_.Name -notlike '*.sig' })
+          $nsis = @(Get-ChildItem target/release/bundle/nsis -Filter '*-setup.exe' | Where-Object { $_.Name -notlike '*.sig' })
           if ($nsis.Count -ne 1) { throw "Expected exactly one NSIS setup executable, found $($nsis.Count)" }
           $setup = $nsis[0]
           Copy-Item $setup.FullName "dist/release/art-term-$env:ART_TERM_VERSION-windows-x64-setup.exe"

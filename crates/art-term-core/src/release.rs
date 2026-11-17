@@ -428,7 +428,10 @@ fn valid_download_url(raw: &str) -> bool {
     };
     url.scheme() == "https"
         && url.host_str() == Some("github.com")
-        && url.path().contains("/releases/download/")
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.port().is_none()
+        && url.path().starts_with("/partypeopleland/art-term/releases/download/")
 }
 
 pub fn parse_sha256_sums(text: &str) -> Result<HashMap<String, String>, ReleaseError> {
