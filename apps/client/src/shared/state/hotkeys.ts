@@ -102,14 +102,23 @@ function sameBinding(a: HotkeyBinding, b: HotkeyBinding): boolean {
   return a.code === b.code && a.ctrl === b.ctrl && a.alt === b.alt && a.shift === b.shift && a.meta === b.meta
 }
 
-/** Combos already owned by tab switching, pane focus cycling, pane close or clipboard. */
+/**
+ * Combos that can never reach the pane-hotkey branch of the real event path:
+ * `isSwitchKey` runs first in handleKey and ignores Shift; the desktop
+ * clipboard handler runs before controller.handleKey for xterm targets and
+ * owns Ctrl+C / Alt+C / Alt+V; `isPaneKey` owns Ctrl+Alt+Arrow and
+ * Ctrl+Shift+W inside split views.
+ */
 function isReservedBinding(binding: HotkeyBinding): boolean {
-  const bare = !binding.shift && !binding.meta
-  if (bare && binding.alt && !binding.ctrl && (binding.code === 'BracketLeft' || binding.code === 'BracketRight')) return true
-  if (bare && binding.ctrl && !binding.alt && (binding.code === 'PageUp' || binding.code === 'PageDown')) return true
+  if (binding.meta) return false
+  if (!binding.ctrl && binding.alt && (binding.code === 'BracketLeft' || binding.code === 'BracketRight')) return true
+  if (binding.ctrl && !binding.alt && (binding.code === 'PageUp' || binding.code === 'PageDown')) return true
   if (binding.ctrl && binding.alt && !binding.shift && binding.code.startsWith('Arrow')) return true
   if (binding.ctrl && binding.shift && !binding.alt && binding.code === 'KeyW') return true
-  if (bare && binding.alt && !binding.ctrl && (binding.code === 'KeyC' || binding.code === 'KeyV')) return true
+  if (!binding.shift) {
+    if (binding.ctrl && !binding.alt && binding.code === 'KeyC') return true
+    if (binding.alt && !binding.ctrl && (binding.code === 'KeyC' || binding.code === 'KeyV')) return true
+  }
   return false
 }
 

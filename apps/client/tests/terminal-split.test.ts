@@ -465,4 +465,30 @@ describe('pane hotkeys', () => {
     expect(tab.paneRoot?.kind).toBe('split')
     resetPaneHotkeys()
   })
+
+  it('single-item reset refuses to silently create a duplicate binding', async () => {
+    const { wrapper } = await setup()
+    await wrapper.get('[data-testid="desktop-settings"]').trigger('click')
+    await flush()
+    await wrapper.get('[data-testid="settings-hotkeys"]').trigger('click')
+    await flush()
+    const press = async (init: KeyboardEventInit) => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, ...init }))
+      await flush()
+    }
+    // A 改走：splitRight → Ctrl+R
+    await wrapper.get('[data-testid="hotkey-record-splitRight"]').trigger('click')
+    await press({ code: 'KeyR', key: 'r', ctrlKey: true })
+    expect(paneHotkeys.splitRight.code).toBe('KeyR')
+    // B 佔 A 的原預設：splitDown → Alt+Shift+=
+    await wrapper.get('[data-testid="hotkey-record-splitDown"]').trigger('click')
+    await press({ code: 'Equal', key: '+', altKey: true, shiftKey: true })
+    expect(paneHotkeys.splitDown).toEqual({ ctrl: false, alt: true, shift: true, meta: false, code: 'Equal' })
+    // A 點「預設」：無法還原，必須明確提示且不產生撞鍵
+    await wrapper.get('[data-testid="hotkey-reset-splitRight"]').trigger('click')
+    await flush()
+    expect(wrapper.find('.hotkey-error').exists()).toBe(true)
+    expect(paneHotkeys.splitRight.code).toBe('KeyR')
+    expect(paneHotkeys.splitDown.code).toBe('Equal')
+  })
 })

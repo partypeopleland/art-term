@@ -47,7 +47,13 @@ function onCaptureKey(event: KeyboardEvent): void {
 }
 
 function resetOne(action: PaneHotkeyAction): void {
-  setPaneHotkey(action, { ...DEFAULT_PANE_HOTKEYS[action] })
+  const binding = { ...DEFAULT_PANE_HOTKEYS[action] }
+  const problem = validatePaneHotkey(action, binding)
+  if (problem) {
+    error.value = problem
+    return
+  }
+  setPaneHotkey(action, binding)
   error.value = ''
 }
 
