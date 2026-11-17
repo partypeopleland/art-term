@@ -5,8 +5,9 @@ import { themes, selectedTheme, selectTheme } from '../theme/theme'
 import RuntimeTransfer from './RuntimeTransfer.vue'
 import RuntimeHosts from './RuntimeHosts.vue'
 import HotkeySettings from './HotkeySettings.vue'
+import UpdateSettings from './UpdateSettings.vue'
 import type { RuntimeHostDto, Transport } from '../transport/types'
-type SettingsSection = 'appearance' | 'connections' | 'screens' | 'hotkeys'
+type SettingsSection = 'appearance' | 'connections' | 'screens' | 'hotkeys' | 'update'
 const props = withDefaults(defineProps<{ embedded?: boolean; desktop?: boolean; initialSection?: SettingsSection; transport?: Transport; hosts?: RuntimeHostDto[] }>(), { hosts: () => [], initialSection: 'appearance' })
 const emit = defineEmits<{ close: []; changed: []; picker: [active: boolean] }>()
 const transferMode = ref<'import' | 'export' | null>(null)
@@ -35,6 +36,7 @@ async function setDevelopmentMode(event: Event): Promise<void> {
 const sections = computed(() => [
   { id: 'appearance', title: '外觀設定', hint: '主題與配色' },
   { id: 'connections', title: '連線設定', hint: '主機、助理、桌面與搬移' },
+  ...(props.transport?.updateCheck ? [{ id: 'update' as const, title: '軟體更新', hint: '檢查 GitHub Release' }] : []),
   ...(props.desktop ? [{ id: 'hotkeys' as const, title: '快捷鍵', hint: '窗格分割與關閉' }] : [])
 ] as const)
 watch(() => props.initialSection, value => { if (!pickerActive.value) section.value = value === 'screens' ? 'connections' : value })
@@ -81,6 +83,7 @@ if (!props.embedded) useModalFocus(dialog, () => emit('close'))
         </div>
       </section>
       <HotkeySettings v-if="desktop && section === 'hotkeys'" />
+      <UpdateSettings v-if="transport && transport.updateCheck && (!desktop || section === 'update')" :transport="transport" />
     </section>
     </div>
   </div>

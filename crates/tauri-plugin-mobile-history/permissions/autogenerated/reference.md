@@ -14,6 +14,7 @@ Local terminal text projection, native touch events, and opening HTTP/S links in
 - `allow-registerListener`
 - `allow-remove-listener`
 - `allow-removeListener`
+- `allow-installApk`
 
 ## Permission Table
 
@@ -280,6 +281,32 @@ Enables the update command without any pre-configured scope.
 <td>
 
 Denies the update command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`mobile-history:allow-installApk`
+
+</td>
+<td>
+
+Enables the installApk command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`mobile-history:deny-installApk`
+
+</td>
+<td>
+
+Denies the installApk command without any pre-configured scope.
 
 </td>
 </tr>

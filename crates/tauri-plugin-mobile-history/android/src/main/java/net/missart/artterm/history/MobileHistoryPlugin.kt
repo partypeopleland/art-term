@@ -27,6 +27,7 @@ import android.widget.FrameLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import app.tauri.annotation.Command
@@ -35,10 +36,16 @@ import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
+import java.io.File
 
 @InvokeArg
 class WebUrlArgs {
     var url: String = ""
+}
+
+@InvokeArg
+class ApkArgs {
+    var path: String = ""
 }
 
 @InvokeArg
@@ -122,6 +129,30 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
             catch (_: Exception) { invoke.reject("無法開啟連結，請確認已安裝瀏覽器。") }
         }
     }
+
+    @Command
+    fun installApk(invoke: Invoke) {
+        val args = invoke.parseArgs(ApkArgs::class.java)
+        main.post {
+            try {
+                val updates = File(activity.cacheDir, "updates").canonicalFile
+                val file = File(args.path)
+                require(file.name.endsWith(".apk"))
+                require(file.canonicalFile.parentFile == updates && file.isFile)
+                val uri = FileProvider.getUriForFile(
+                    activity,
+                    "net.missart.artterm.history.fileprovider",
+                    file
+                )
+                val intent = Intent(Intent.ACTION_VIEW, uri)
+                    .setDataAndType(uri, "application/vnd.android.package-archive")
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                activity.startActivity(intent)
+                invoke.resolve()
+            } catch (_: Exception) { invoke.reject("無法開啟 Android 安裝程式。") }
+        }
+    }
+
     private fun findLinks(value: String): List<Link> {
         return Regex("""https?://[^\s<>"'`]+""", RegexOption.IGNORE_CASE).findAll(value).mapNotNull { match ->
             var url = match.value.trimEnd('.', ',', ';', ':', '!', '?', '，', '。', '；', '！', '？', '、', '”', '》')
