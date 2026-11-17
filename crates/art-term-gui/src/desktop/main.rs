@@ -35,6 +35,7 @@ use std::sync::{
     Arc,
 };
 use tauri::{Manager, State};
+use tauri_plugin_updater::UpdaterExt;
 
 #[derive(serde::Serialize)]
 #[serde(untagged)]
@@ -264,6 +265,98 @@ fn gui_open_web_url(url: String) -> Result<(), String> {
     browser::open_web_url(&url).map_err(str::to_owned)
 }
 
+#[derive(serde::Serialize)]
+struct UpdateCheckDto {
+    current: String,
+    latest: String,
+    available: bool,
+    message: String,
+}
+#[derive(serde::Serialize)]
+struct UpdateInstallDto {
+    status: &'static str,
+    version: Option<String>,
+}
+
+/// Manual settings-page check only; never runs at startup. Version data comes
+/// from the shared GitHub Release client; install still goes through the
+/// signed Tauri updater path.
+#[tauri::command]
+async fn gui_update_check(app: tauri::AppHandle) -> Reply<UpdateCheckDto> {
+    let current = app.package_info().version.to_string();
+    let client = art_term_core::release::ReleaseClient::new()
+        .map_err(|error| GuiError::Plain(error.to_string()))?;
+    match client
+        .check_for_update(art_term_core::release::Platform::Windows, &current)
+        .await
+    {
+        Ok(art_term_core::release::UpdateStatus::Available { latest, .. }) => {
+            Ok(UpdateCheckDto {
+                current,
+                latest: latest.to_string(),
+                available: true,
+                message: String::new(),
+            })
+        }
+        Ok(art_term_core::release::UpdateStatus::UpToDate { latest, .. }) => {
+            Ok(UpdateCheckDto {
+                current: current.clone(),
+                latest: latest.to_string(),
+                available: false,
+                message: "已是最新版本".into(),
+            })
+        }
+        Err(error) => Err(GuiError::Plain(format!("檢查更新失敗：{error}"))),
+    }
+}
+
+/// Confirmed install: re-checks the signed updater manifest, verifies the
+/// release matches the version the user confirmed, downloads the NSIS
+/// setup, verifies the minisign signature, then hands off to the
+/// installer which restarts the app on Windows. The installer is pointed
+/// at the running executable's directory so portable layouts keep their
+/// connections.toml and credentials in place instead of being moved to a
+/// separate install directory.
+#[tauri::command]
+async fn gui_update_install(
+    app: tauri::AppHandle,
+    expected_version: String,
+) -> Reply<UpdateInstallDto> {
+    let installer_dir = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| {
+            let mut arg = std::ffi::OsString::from("/D=");
+            arg.push(dir.as_os_str());
+            arg
+        }));
+    let mut builder = app.updater_builder();
+    if let Some(arg) = installer_dir {
+        builder = builder.installer_arg(arg);
+    }
+    let updater = builder
+        .build()
+        .map_err(|error| GuiError::Plain(format!("無法初始化更新器：{error}")))?;
+    let update = updater
+        .check()
+        .await
+        .map_err(|error| GuiError::Plain(format!("檢查更新失敗：{error}")))?
+        .ok_or_else(|| GuiError::Plain("沒有可用更新。".to_string()))?;
+    if update.version.to_string() != expected_version {
+        return Err(GuiError::Plain(
+            "最新版本已變更，請重新檢查後再安裝。".to_string(),
+        ));
+    }
+    let version = update.version.to_string();
+    update
+        .download_and_install(|_, _| {}, || {})
+        .await
+        .map_err(|error| GuiError::Plain(format!("下載或安裝失敗：{error}")))?;
+    Ok(UpdateInstallDto {
+        status: "installed",
+        version: Some(version),
+    })
+}
+
 fn main() {
     // Resolve the sole writable source; missing files load as an empty store.
     let runtime_connections = match initialize() {
@@ -278,6 +371,7 @@ fn main() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Arc::new(runtime_transfer::RuntimeTransfer::default()))
         .manage(Arc::new(RuntimeSessions::default()))
         .setup(move |app| {
@@ -322,6 +416,8 @@ fn main() {
             crate::instance_desktops::gui_instance_clear,
             crate::instance_desktops::gui_instance_restore,
             gui_open_web_url,
+            gui_update_check,
+            gui_update_install,
             gui_platform,
             gui_open,
             gui_poll,

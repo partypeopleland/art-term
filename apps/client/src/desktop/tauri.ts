@@ -13,7 +13,9 @@ import type {
   SessionDto,
   ScreenshotDto,
   Transport,
-  TargetDto
+  TargetDto,
+  UpdateCheckDto,
+  UpdateInstallDto
 } from '../shared/transport/types'
 
 export function sanitizeError(e: unknown): string {
@@ -78,6 +80,8 @@ export function createTauriTransport(): Transport {
     resize: (sessionId, rows, cols) => call<void>('gui_resize', { sessionId, rows, cols }),
     close: (sessionId) => call<void>('gui_close', { sessionId }),
     desktop: (sessionId, enabled) => call<DesktopStateDto>('gui_desktop', { sessionId, enabled }),
-    screenshot: (sessionId) => call<ScreenshotDto>('gui_screenshot', { sessionId })
+    screenshot: (sessionId) => call<ScreenshotDto>('gui_screenshot', { sessionId }),
+    updateCheck: () => call<UpdateCheckDto>('gui_update_check'),
+    updateInstall: (expectedVersion: string) => call<UpdateInstallDto>('gui_update_install', { expectedVersion })
   }
 }

@@ -36,6 +36,9 @@ tauri-plugin-fs = "=2.6.0"
 serde_json.workspace = true
 tempfile = "3"
 
+[target.'cfg(not(target_os = "android"))'.dependencies]
+tauri-plugin-updater = "=2.14.1"
+
 [dev-dependencies]
 serde_json.workspace = true
 art-term-core = { path = "../art-term-core" }
