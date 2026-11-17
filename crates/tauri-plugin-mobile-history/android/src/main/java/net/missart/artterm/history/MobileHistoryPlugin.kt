@@ -90,6 +90,7 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
     private var verticalGesture = false
     private var swipeStartX = 0f
     private var swipeStartY = 0f
+    private var swipeStartTime = 0L
     private var userGesture = false
     private var userViewportPending = false
     private var pageVisible = false
@@ -276,6 +277,13 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
         val s = scroll ?: return true
         return (text?.height ?: 0) - s.height - s.scrollY <= dp(2)
     }
+    private fun settleSwipe(commit: Boolean, dx: Float) {
+        root?.animate()?.cancel()
+        val width = (webView?.width ?: 0).toFloat()
+        val target = if (commit) (if (dx >= 0) width else -width) else 0f
+        root?.animate()?.translationX(target)?.setDuration(200)
+            ?.setInterpolator(android.view.animation.PathInterpolator(0.2f, 0.7f, 0.3f, 1f))?.start()
+    }
     private fun cancelDraw() {
         pendingDraw?.let { (view, listener) ->
             if (view.viewTreeObserver.isAlive) view.viewTreeObserver.removeOnPreDrawListener(listener)
@@ -285,6 +293,7 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
     private fun closeReader() {
         horizontalSwipe = false; verticalGesture = false
         epoch++; cancelDraw(); main.removeCallbacks(settled)
+        root?.animate()?.cancel(); root?.translationX = 0f
         root?.let { (it.parent as? ViewGroup)?.removeView(it) }
         root = null; scroll = null; text = null
         starts.clear(); renderedStyles = emptyList(); readerId = ""; pending = null
@@ -385,35 +394,45 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
                     val dx = event.rawX - swipeStartX
                     val dy = event.rawY - swipeStartY
                     if (event.actionMasked == MotionEvent.ACTION_POINTER_DOWN && horizontalSwipe) {
-                        send("swipe") { put("phase", "cancel"); put("dx", dx / cssScale) }
+                        send("swipe") {
+                            put("phase", "cancel"); put("dx", dx / cssScale)
+                            put("elapsed", (event.eventTime - swipeStartTime).coerceAtLeast(0))
+                        }
                         horizontalSwipe = false; verticalGesture = true
-                        root?.translationX = 0f
+                        settleSwipe(false, dx)
                         return true
                     }
                     if (selectingText()) requestDisallowInterceptTouchEvent(true)
                     if (event.actionMasked == MotionEvent.ACTION_MOVE && !verticalGesture && !selectingText()) {
                         val slop = android.view.ViewConfiguration.get(activity).scaledTouchSlop
                         if (!horizontalSwipe && kotlin.math.abs(dy) > slop && kotlin.math.abs(dy) > kotlin.math.abs(dx)) verticalGesture = true
-                        if (!horizontalSwipe && dx > slop && dx > kotlin.math.abs(dy) * 1.2f) {
+                        if (!horizontalSwipe && kotlin.math.abs(dx) > slop && kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.2f) {
                             val cancel = MotionEvent.obtain(event)
                             cancel.action = MotionEvent.ACTION_CANCEL
                             super.dispatchTouchEvent(cancel); cancel.recycle()
-                            horizontalSwipe = true; dragging = false; moving = false; userGesture = false; press = null
+                            horizontalSwipe = true; dragging = false; moving = false; userGesture = false; press = null; swipeStartTime = event.eventTime
+                            root?.animate()?.cancel()
                             main.removeCallbacks(settled)
-                            send("swipe") { put("phase", "start"); put("dx", dx / cssScale) }
+                            send("swipe") { put("phase", "start"); put("dx", dx / cssScale); put("elapsed", 0) }
                         }
                     }
                     if (horizontalSwipe) {
-                        root?.translationX = dx.coerceIn(0f, (webView?.width ?: 0).toFloat())
                         val phase = when (event.actionMasked) {
                             MotionEvent.ACTION_UP -> "end"
                             MotionEvent.ACTION_CANCEL -> "cancel"
                             else -> "move"
                         }
-                        send("swipe") { put("phase", phase); put("dx", dx / cssScale) }
+                        val elapsed = (event.eventTime - swipeStartTime).coerceAtLeast(0)
+                        send("swipe") { put("phase", phase); put("dx", dx / cssScale); put("elapsed", elapsed) }
                         if (phase == "end" || phase == "cancel") {
                             horizontalSwipe = false
-                            root?.translationX = 0f
+                            val widthPx = (webView?.width ?: 0).toFloat()
+                            val widthCss = if (cssScale > 0) widthPx.toDouble() / cssScale else widthPx.toDouble()
+                            val distanceCss = kotlin.math.abs(dx) / cssScale
+                            val commit = phase == "end" && (distanceCss > widthCss * 0.25 || (distanceCss > 45.0 && elapsed < 300L))
+                            settleSwipe(commit, dx)
+                        } else {
+                            root?.translationX = dx.coerceIn(-(webView?.width ?: 0).toFloat(), (webView?.width ?: 0).toFloat())
                         }
                         return true
                     }
@@ -597,6 +616,7 @@ class MobileHistoryPlugin(private val activity: Activity) : Plugin(activity) {
     }
     override fun onPause(activity: AppCompatActivity) {
         horizontalSwipe = false
+        root?.animate()?.cancel()
         root?.translationX = 0f
         press = null
         clearTextSelection()

@@ -1,8 +1,8 @@
 import { computed, nextTick, onBeforeUnmount, ref, type Ref } from 'vue'
 import type { NativeSwipeEvent } from '../shared/terminal/native'
 
-export type Workspace = 'home' | 'list' | 'session'
-const pages: Workspace[] = ['home', 'list', 'session']
+export type Workspace = 'home' | 'list' | 'session' | 'settings'
+const pages: Workspace[] = ['home', 'list', 'session', 'settings']
 
 /** One gesture owner for DOM and Android-native terminal drags. */
 export function useWorkspacePager(root: Ref<HTMLElement | null>, page: Ref<Workspace>, activate: (page: Workspace) => void, canStart: () => boolean) {
@@ -15,6 +15,7 @@ export function useWorkspacePager(root: Ref<HTMLElement | null>, page: Ref<Works
   let pointer: number | null = null
   let startX = 0, startY = 0, startedAt = 0, clickUntil = 0
   let timer: ReturnType<typeof setTimeout> | undefined
+  let frame: number | undefined
   const visible = computed(() => dragging.value || animating.value)
   const progress = computed(() => visible.value
     ? Math.max(0, Math.min(pages.length - 1, pages.indexOf(origin.value) - offset.value / width.value))
@@ -31,19 +32,28 @@ export function useWorkspacePager(root: Ref<HTMLElement | null>, page: Ref<Works
   function cancel(): void {
     if (timer) clearTimeout(timer)
     timer = undefined
+    if (frame !== undefined) cancelAnimationFrame(frame)
+    frame = undefined
     pointer = null
     offset.value = 0
     dragging.value = animating.value = nativeDragging.value = false
   }
-  function settle(commit: boolean, destination: Workspace): void {
+  function settle(commit: boolean, destination: Workspace, keepNative = false): void {
     animating.value = true
-    dragging.value = nativeDragging.value = false
+    dragging.value = false
+    if (!keepNative) nativeDragging.value = false
     offset.value = commit ? (pages.indexOf(origin.value) - pages.indexOf(destination)) * width.value : 0
     timer = setTimeout(() => {
-      if (commit) activate(destination)
-      animating.value = false
-      offset.value = 0
       timer = undefined
+      if (commit) activate(destination)
+      const finish = () => {
+        frame = undefined
+        animating.value = false
+        offset.value = 0
+        nativeDragging.value = false
+      }
+      if (typeof requestAnimationFrame === 'function') frame = requestAnimationFrame(finish)
+      else finish()
     }, 200)
   }
   function finish(cancelled: boolean): void {
@@ -52,7 +62,7 @@ export function useWorkspacePager(root: Ref<HTMLElement | null>, page: Ref<Works
     const distance = Math.abs(offset.value)
     const commit = !cancelled && (distance > width.value * .25 || (distance > 45 && performance.now() - startedAt < 300))
     const destination = pages[pages.indexOf(origin.value) + (offset.value < 0 ? 1 : -1)]
-    settle(commit && !!destination, destination ?? origin.value)
+    settle(commit && !!destination, destination ?? origin.value, nativeDragging.value)
   }
   function begin(event: PointerEvent): void {
     if (event.isPrimary === false || event.button !== 0 || animating.value || !canStart()) return
@@ -87,9 +97,13 @@ export function useWorkspacePager(root: Ref<HTMLElement | null>, page: Ref<Works
       if (page.value !== 'session' || animating.value || !canStart()) return
       start(); dragging.value = nativeDragging.value = true
     }
-    if (!nativeDragging.value) return
-    offset.value = Math.min(width.value, Math.max(0, event.dx))
-    if (event.phase === 'end' || event.phase === 'cancel') finish(event.phase === 'cancel')
+    if (!nativeDragging.value || animating.value) return
+    const index = pages.indexOf(origin.value)
+    offset.value = Math.max(index === pages.length - 1 ? 0 : -width.value, Math.min(index === 0 ? 0 : width.value, event.dx))
+    if (event.phase === 'end' || event.phase === 'cancel') {
+      if (event.elapsed !== undefined && Number.isFinite(event.elapsed)) startedAt = performance.now() - event.elapsed
+      finish(event.phase === 'cancel')
+    }
   }
   function slideTo(destination: Workspace): void {
     if (page.value === destination || animating.value || dragging.value) return

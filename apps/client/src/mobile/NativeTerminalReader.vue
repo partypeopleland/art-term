@@ -25,7 +25,7 @@ let remote: HostHistoryWindow | undefined
 function event(value: NativeHistoryEvent): void {
   if (disposed || value.readerId !== readerId) return
   if (value.kind === 'swipe') {
-    if (props.visible && !document.hidden && value.phase && value.dx !== undefined) swipe?.({ phase: value.phase, dx: value.dx })
+    if (props.visible && !document.hidden && value.phase && value.dx !== undefined) swipe?.({ phase: value.phase, dx: value.dx, elapsed: value.elapsed })
     return
   }
   // Native tap is deliberately the only touch event that can focus input.
