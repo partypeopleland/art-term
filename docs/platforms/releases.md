@@ -1,11 +1,11 @@
 # GitHub 自動建置與 Release
 
-Git push 只會上傳原始碼；GitHub 不會自行執行本機打包腳本。此專案的 `Build and release` workflow 在推送 `v*` 版本標籤後，用 GitHub 的 Windows runner 建置 EXE 和已簽章的 ARM64 APK，另用 Ubuntu 24.04 runner 建置 Linux TUI，再建立 GitHub Release。Release 本文取自該 tag 中的 `docs/report/<version>.md`，發布前必須完成對應更新說明。成果不需要加入 Git。
+Git push 只會上傳原始碼；GitHub 不會自行執行本機打包腳本。此專案的 `Build and release` workflow 在推送 `v*` 版本標籤後，用 GitHub 的 Windows runner 建置 EXE、ZIP、NSIS updater 安裝檔與已簽章的 ARM64 APK，另用 Ubuntu 24.04 runner 建置 Linux TUI，再建立 GitHub Release；Windows updater 產物會簽上 Tauri updater signature 並產生 `latest.json`，簽章 secret 見下方說明。Release 本文取自該 tag 中的 `docs/report/<version>.md`，發布前必須完成對應更新說明。成果不需要加入 Git。
 
 ```text
-push v0.1.38 --+--> Windows EXE + ZIP -----------+
-              +--> Android APK + verification --+--> GitHub Release + SHA256SUMS
-              +--> Ubuntu TUI archive + manifest +
+push v0.1.38 --+--> Windows EXE + ZIP + updater installer --+
+              +--> Android APK + verification --------------+--> GitHub Release + SHA256SUMS + latest.json
+              +--> Ubuntu TUI archive + manifest -----------+
 ```
 
 一般推送 `main` 不發布版本。在 Actions → Build and release → Run workflow 選擇 `main`，可先建置並從該次執行的 Artifacts 下載；選擇分支試跑不建立 Release。第一次正式發布成功後，可從 repository 的 Releases 下載；若首頁右欄仍未顯示，於首頁 About 的齒輪設定勾選 Releases。
@@ -82,6 +82,36 @@ Repository 必須允許 GitHub Actions 執行。Workflow 僅在發布 job 要求
 
 Rust 編譯使用平台隔離的 Cargo 快取；Android 另保留 Gradle dependency／wrapper 快取。簽章資料僅存放在當次 runner 的臨時簽章目錄，不加入快取。
 
+## Windows updater 簽章
+
+Tauri updater 使用獨立的 minisign keypair，不是 Android keystore，也不是 Authenticode。私鑰只可由授權維護者在可信任環境產生並設為 repository secret；公開金鑰才會寫入 App 設定（由 Windows updater PR 負責），不得把私鑰放進 Git、Issue、PR、log 或訊息。
+
+Repository secrets：
+
+| Secret | 內容 |
+|---|---|
+| `TAURI_SIGNING_PRIVATE_KEY` | `tauri signer generate` 產生的私鑰檔內容；GitHub secret 建議直接存內容，不要存 repo 內路徑 |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | 僅當私鑰有密碼時設定；無密碼可留空 |
+
+產生金鑰（在可信任機器上執行，不要把金鑰檔提交）：
+
+```powershell
+cd crates/art-term-gui
+node ../../apps/client/node_modules/@tauri-apps/cli/tauri.js signer generate -w "$env:USERPROFILE/.tauri/art-term.key"
+```
+
+命令會輸出公開金鑰；私鑰內容只透過 `gh secret set` 傳入：
+
+```powershell
+$repo = 'partypeopleland/art-term'
+Get-Content "$env:USERPROFILE/.tauri/art-term.key" -Raw | gh secret set TAURI_SIGNING_PRIVATE_KEY --repo $repo
+if ($LASTEXITCODE -ne 0) { throw 'Updater private key secret upload failed' }
+# 僅在私鑰有密碼時執行：
+$env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD | gh secret set TAURI_SIGNING_PRIVATE_KEY_PASSWORD --repo $repo
+```
+
+`latest.json` 由 publish job 從 `*-setup.exe.sig` 內容產生；App 端 `plugins.updater.pubkey` 與 endpoint 設定屬於 Windows updater PR。Tag 發布缺少 `TAURI_SIGNING_PRIVATE_KEY` 會讓 Windows job 失敗；workflow_dispatch 手動建置可不帶 secret，但只產生無 updater signature 的測試安裝檔。
+
 ## 發布版本
 
 先將 workflow、腳本與設定變更 commit 並 push 至 `main`。目前 App 版本為 `0.1.38`，發布可執行：
@@ -97,6 +127,9 @@ git push origin v0.1.38
 
 - `art-term-<version>-windows-x64.zip`：建議 Windows 使用者下載，含 EXE、空設定、操作說明與授權檔。
 - `art-term-<version>-windows-x64.exe`：同一份獨立執行檔，需要 WebView2 Runtime；完整交付請選 ZIP。EXE 尚無 Authenticode 簽章。
+- `art-term-<version>-windows-x64-setup.exe`：NSIS 安裝版，供 Windows updater 與需要安裝式部署的使用者；內含 Tauri updater signature 對應的安裝檔，仍無 Authenticode 簽章。
+- `art-term-<version>-windows-x64-setup.exe.sig`：Tauri updater signature；同一內容也嵌入 `latest.json`。
+- `latest.json`：Tauri updater 靜態 manifest，目前提供 `windows-x86_64` 的 url 與 signature。
 - `art-term-<version>-android-arm64.apk`：使用 repository Secrets 指定的固定金鑰簽署、可安裝的 ARM64 Android 版。
 - `art-term-<version>-linux-x86_64.tar.gz`：Ubuntu 24.04 x86_64 終端機版，含 `art-term`、設定範例及授權檔，不需要圖形桌面。
 - `art-term-<version>-linux-x86_64.manifest.json`：Linux 套件與執行檔的版本及 SHA256。
@@ -106,7 +139,7 @@ git push origin v0.1.38
 
 ## 失敗與驗證範圍
 
-到 Actions 點選該次執行，查看紅色步驟的日誌。缺少 Android Secrets 時，Windows 與 Linux job 仍會獨立建置，成功後可從該次執行的 Artifacts 取得成果，但不會發布缺少任一平台產物的 Release。補好 Secrets 後可對原執行選擇 Re-run all jobs。
+到 Actions 點選該次執行，查看紅色步驟的日誌。缺少 Android Secrets 時，Windows 與 Linux job 仍會獨立建置，成功後可從該次執行的 Artifacts 取得成果，但不會發布缺少任一平台產物的 Release。補好 Secrets 後可對原執行選擇 Re-run all jobs。Tag 發布缺少 `TAURI_SIGNING_PRIVATE_KEY` 會讓 Windows updater installer 步驟失敗；workflow_dispatch 手動建置可不帶 secret，但只產生無 updater signature 的測試安裝檔。
 
 已存在的同名 Release 不會被覆寫；要交付新的程式碼，增加版本並建立新標籤。若流程在上傳附件時遇到網路錯誤，先檢查 Releases 是否已有部分成果，再決定修復該版或發布新版。
 
