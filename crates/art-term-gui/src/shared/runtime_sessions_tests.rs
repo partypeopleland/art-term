@@ -243,6 +243,16 @@ fn repeated_list_reuses_target_without_cumulative_capacity_failure() {
         );
     }
     assert_eq!(sessions.targets.lock().unwrap().len(), 1);
+    assert_eq!(
+        sessions.targets.lock().unwrap()[&initial].binding.lock().unwrap().generation,
+        1024
+    );
+    // A list started before the latest renew must not roll the target back.
+    sessions.issue(binding(), None, true, None).unwrap();
+    assert_eq!(
+        sessions.targets.lock().unwrap()[&initial].binding.lock().unwrap().generation,
+        1024
+    );
 }
 #[test]
 fn replacement_invalidates_old_target_and_missing_sessions_are_pruned() {

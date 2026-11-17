@@ -21,7 +21,7 @@ export interface TerminalHandle {
   /** xterm's logical selection omits line wraps but retains real newlines. */
   getSelection?(): string
   readStyledText?(window?: NativeBufferWindow): NativeTerminalBuffer
-  /** ANSI snapshot of the current viewport for a read-only mirror pane. */
+  /** ANSI snapshot of the current viewport, carried over when the pane remounts. */
   screenSnapshot?(): string
   setNativeReaderActive?(active: boolean): void
   /** Resolves when xterm has parsed the chunk (write-callback backpressure). */

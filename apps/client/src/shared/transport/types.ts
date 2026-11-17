@@ -181,6 +181,8 @@ export interface Transport {
   runtimeSessions(id: string, expectedRevision: number): Promise<HostDto>
   runtimeCreateSession(id: string, expectedRevision: number, name: string): Promise<TargetDto>
   runtimeCreateHistorySession?(id: string, expectedRevision: number): Promise<TargetDto>
+  /** Explicit pane close: terminate the exact backend-issued Shell target. */
+  runtimeDeleteSession?(targetId: string, sessionId: string | null): Promise<void>
   runtimeHistory?(sessionId: string, request: HostHistoryRequest): Promise<HostHistoryReply>
   runtimeHosts(): Promise<RuntimeHostDto[]>
   runtimeDevelopmentMode?(): Promise<boolean>

@@ -21,7 +21,7 @@
 | 真官方 Runtime configure | Rust 原生 configure→未修改官方 Runtime 管理 PTY→adapter→固定 client→A／B；raw／關 echo READY 握手，token 不在 replay／history／cmdline／environ／log；管理 Shell 刪除與名額恢復；renew 後仍可 configure／clear |
 | 工具生命週期 | 無 adapter 不假報 ready、auth／timeout／isError、clear 拒新呼叫、CLI stdio EOF、關頁、detach 與 App 關閉保留 Shell 選擇、Shell 結束清記憶體／socket、背景／晚到回應、App 重啟／takeover 核對既有指派與目前設定後恢復；owner／0700／非 symlink 及同 UID 邊界 |
 | CLI 契約 | 確定性檢查 Codex -c stdio command／args 不含 URL／token、timeout 75秒、其他 CLI 不猜語法、不對既有程式偷偷輸入；此項不等於真 Codex／AI 已測 |
-| Windows 平台呈現 | 保留360px預設可調左欄／左下預覽／右側終端與全頁設定；同一 xterm 原視窗直接顯示較早內容，字型主題與選取保持；四向分割窗格各自獨立 session／輸入，單窗格關閉只斷該連線、原始窗格關閉由存活窗格接手不連坐，唯讀鏡像仍同步且不收輸入；首個小幅 wheel、閱讀中輸出保持、下捲自然追尾、閱讀中輸入／貼上、中文／Backspace、resize／Theme／焦點／表單快捷鍵 |
+| Windows 平台呈現 | 保留360px預設可調左欄／左下預覽／右側終端與全頁設定；同一 xterm 原視窗直接顯示較早內容，字型主題與選取保持；向右／向下分割窗格各自獨立 session／輸入，單窗格關閉只斷該連線、原始窗格關閉由存活窗格接手不連坐；首個小幅 wheel、閱讀中輸出保持、下捲自然追尾、閱讀中輸入／貼上、中文／Backspace、resize／Theme／焦點／表單快捷鍵 |
 | 共同受控端歷史契約 | 同一 helper／Rust channel 向後相容提供 snapshot 五操作及中立 scroll／follow；Android HostHistoryWindow 原流程不變，Windows HostTerminalViewport 使用原 PTY；能力協商、舊 helper 不收未知操作、busy／inner alternate、輸入排序／protocol reply、hidden／close／SIGKILL 只清自有狀態；無平台專用安裝，兩平台呈現另測 |
 | 回歸 | tmux 歷史按需讀頁、輸入／ACK／重連、固定滑動頂列／四主題／語音與鍵列、Host／Screen 混合搬移、Screen-only 還原及舊版 Host 檔相容、無私人預填 |
 

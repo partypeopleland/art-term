@@ -55,6 +55,8 @@ export class FakeTransport implements Transport {
   /** Thrown (verbatim) from open() when set — use ConnectionError for kinds. */
   openError: unknown | null = null
   closeCalls: string[] = []
+  deleteCalls: string[] = []
+  deleteError: unknown | null = null
   desktopCalls: { sid: string; enabled: boolean }[] = []
   screenshotCalls: string[] = []
   desktopGate: Promise<void> | null = null
@@ -93,6 +95,13 @@ export class FakeTransport implements Transport {
     const group = this.runtimeSessionsData.get(id)
     if (group) group.targets.push(target)
     return target
+  }
+  async runtimeDeleteSession(targetId: string, _sessionId: string | null): Promise<void> {
+    this.deleteCalls.push(targetId)
+    if (this.deleteError) throw this.deleteError
+    for (const group of this.runtimeSessionsData.values()) {
+      group.targets = group.targets.filter(target => target.id !== targetId)
+    }
   }
   async runtimeCreateSession(id: string, _expectedRevision: number, name: string): Promise<TargetDto> {
     const target = makeTarget(`created-${name}`, id)

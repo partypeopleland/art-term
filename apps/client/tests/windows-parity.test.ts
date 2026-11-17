@@ -61,9 +61,9 @@ it('applies all four themes immediately to existing and future terminals',async(
  for(const theme of ['dark','light','retro','tech'] as const){selectTheme(theme);await flush();expect(wrapper.attributes('data-theme')).toBe(theme);expect(terms[0].colors.at(-1)).toEqual(terminalTheme(theme))}
  selectTheme('retro');await flush();const next=makeTarget('other','host');controller.openTarget({dto:makeHost('host',[next]),expanded:true},next,false);await flush();expect(terms[1].colors[0]).toEqual(terminalTheme('retro'))
 })
-it('syncs the split mirror theme when switching themes',async()=>{
+it('syncs split pane themes when switching themes',async()=>{
  const {controller,terms,attach}=await setup();const tab=await attach()
- expect(controller.mirrorPane(tab,tab.key,'down')).toBe(true);await flush()
+ expect(await controller.splitPane(tab,tab.key,'right')).toBe(true);await flush()
  const live=terms.filter(t=>!t.disposed);expect(live).toHaveLength(2)
  selectTheme('retro');await flush()
  for(const term of live)expect(term.colors.at(-1)).toEqual(terminalTheme('retro'))

@@ -23,6 +23,7 @@ use runtime_hosts::{
 };
 use runtime_sessions::{
     gui_runtime_ack, gui_runtime_create_history_session, gui_runtime_create_session,
+    gui_runtime_delete_session,
     gui_runtime_history, gui_runtime_recover, gui_runtime_sessions, GuiOutput, RuntimePreview,
     RuntimeSessions, SessionFailure,
 };
@@ -342,6 +343,7 @@ fn main() {
             gui_runtime_sessions,
             gui_runtime_create_session,
             gui_runtime_create_history_session,
+            gui_runtime_delete_session,
             gui_runtime_history,
             gui_runtime_ack,
             gui_runtime_recover

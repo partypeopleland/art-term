@@ -82,7 +82,7 @@ pub trait RuntimePreview: Send + Sync {
 }
 
 struct Target {
-    binding: SessionBinding,
+    binding: Mutex<SessionBinding>,
     grant: Mutex<Option<SessionGrant>>,
     /// Frozen mapped-preview binding captured at issue; `None` means
     /// this target can never offer desktop preview.
@@ -423,6 +423,59 @@ pub async fn gui_runtime_create_history_session(
         .history_bootstrap
         .store(true, Ordering::SeqCst);
     Ok(target)
+}
+
+/// Explicit pane close only. The opaque target is checked against the saved
+/// Host revision and the current runtime generation before a single DELETE.
+/// Ordinary local tab close still only detaches through gui_close.
+#[tauri::command]
+pub async fn gui_runtime_delete_session(
+    hosts: State<'_, Arc<RuntimeHosts>>,
+    sessions: State<'_, Arc<RuntimeSessions>>,
+    target_id: String,
+    session_id: Option<String>,
+) -> Result<(), HostError> {
+    let target_binding = sessions
+        .targets
+        .lock()
+        .map_err(|_| ApiError::Storage)?
+        .get(&target_id)
+        .ok_or(ApiError::StateChanged)?
+        .binding
+        .lock()
+        .map_err(|_| ApiError::Storage)?
+        .clone();
+    // A reattached target can have a newer generation than its original
+    // issued binding. Prefer the live connection's verified binding, while
+    // keeping the opaque target as the authority for profile and name.
+    let binding = if let Some(session_id) = session_id {
+        let conn = sessions
+            .sessions
+            .lock()
+            .map_err(|_| ApiError::Storage)?
+            .get(&session_id)
+            .cloned()
+            .ok_or(ApiError::StateChanged)?;
+        let binding = conn.history_binding.clone().ok_or(ApiError::StateChanged)?;
+        if binding.profile != target_binding.profile || binding.name != target_binding.name {
+            return Err(ApiError::StateChanged.into());
+        }
+        binding
+    } else {
+        target_binding
+    };
+    let snapshot = hosts.store()?.snapshot(&binding.profile.id)?;
+    if snapshot.profile != binding.profile {
+        return Err(ApiError::StateChanged.into());
+    }
+    let list = hosts.admin()?.list(&snapshot).await?;
+    binding.verify_list(&list)?;
+    if !hosts.store()?.is_current(&binding.profile)? {
+        return Err(ApiError::StateChanged.into());
+    }
+    hosts.admin()?.delete(&snapshot, &binding.name).await?;
+    sessions.targets.lock().map_err(|_| ApiError::Storage)?.remove(&target_id);
+    Ok(())
 }
 #[tauri::command]
 pub async fn gui_runtime_history(

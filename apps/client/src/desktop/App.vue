@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, provide, ref, watch } f
 import type { HostDto, InstanceDesktop, Transport } from '../shared/transport/types'
 import { createAppController, type AppController, type ControllerOptions, type TabState } from '../shared/state/controller'
 import { TerminalFactoryKey, createDesktopXtermTerminal, type TerminalFactory } from '../shared/terminal/handle'
-import type { PaneLeaf, SplitDirection } from '../shared/terminal/split'
+import type { PaneLeaf } from '../shared/terminal/split'
 import { runtimeConnectedIds } from '../shared/state/runtime-entry'
 import ConnectionDashboard from '../shared/components/ConnectionDashboard.vue'
 import ThemeSettings from '../shared/components/ThemeSettings.vue'
@@ -20,7 +20,7 @@ import { readClipboardText, writeClipboardText } from '../shared/transport/clipb
 import { createDesktopClipboard } from './clipboard'
 
 const props = defineProps<{ transport: Transport; terminalFactory?: TerminalFactory; controllerOptions?: ControllerOptions }>()
-const controller: AppController = createAppController(props.transport, { ...props.controllerOptions, closeFinishedTabs: true, backgroundConnection: 'keep' })
+const controller: AppController = createAppController(props.transport, { ...props.controllerOptions, closeFinishedTabs: true, backgroundConnection: 'keep', paneHotkeys: true })
 defineExpose({ controller })
 const baseFactory = props.terminalFactory ?? createDesktopXtermTerminal
 provide(TerminalFactoryKey, element => {
@@ -32,14 +32,13 @@ watch(selectedTheme, theme => {
   const terminalThemeValue = terminalTheme(theme)
   for (const tab of controller.tabs) {
     tab.term?.setTheme?.(terminalThemeValue)
-    tab.mirrorTerm?.setTheme?.(terminalThemeValue)
   }
 })
 const activeTab = controller.activeTab
 const page = ref<'workspace' | 'settings' | 'home'>('workspace')
 const screenPickerOpen = ref(false), transferPicker = ref(false)
 const zoomOpen = ref(false)
-const settingsSection = ref<'appearance' | 'connections'>('appearance')
+const settingsSection = ref<'appearance' | 'connections' | 'hotkeys'>('appearance')
 const workspace = ref<HTMLElement | null>(null)
 const sizing = useWorkspaceSize(workspace)
 const { sidebarWidth, previewHeight, maxWidth, maxHeight } = sizing
@@ -117,7 +116,7 @@ function onGlobalKey(event: KeyboardEvent): void {
   if (page.value !== 'workspace' || covered.value || documentHidden.value) return
   const target = event.target instanceof HTMLElement ? event.target : null
   if (target?.closest('input,select,[contenteditable=true]') || (target?.closest('textarea') && !target.closest('.xterm'))) return
-  if (target?.closest('.xterm') && !target.closest('.pane.mirror') && clipboard.handleKey(event)) return
+  if (target?.closest('.xterm') && clipboard.handleKey(event)) return
   controller.handleKey(event)
 }
 function visibility(): void {
@@ -135,7 +134,7 @@ function tabViewClass(tab: TabState): string {
   return tab.paneRoot ? 'tab-view pane-view' : 'tab-view single'
 }
 // Unsplit tabs render through the same pane view so the right-click menu
-// (split / mirror / close) exists before the first split. The synthetic
+// (split / close) exists before the first split. The synthetic
 // leaf is cached per tab to keep prop identity stable across renders.
 const singleLeaves = new WeakMap<TabState, PaneLeaf>()
 function singleLeaf(tab: TabState): PaneLeaf {
@@ -145,13 +144,6 @@ function singleLeaf(tab: TabState): PaneLeaf {
     singleLeaves.set(tab, leaf)
   }
   return leaf
-}
-async function onSplitChange(tab: TabState, event: Event): Promise<void> {
-  const select = event.target as HTMLSelectElement
-  const value = select.value
-  const leafId = tab.focusedLeafId ?? tab.key
-  const ok = !value ? (controller.unsplitPanes(tab), true) : await controller.splitPane(tab, leafId, value as SplitDirection)
-  if (!ok) select.value = tab.paneRoot ? 'split' : ''
 }
 // Toolbar/statusbar describe the pane that currently owns input focus.
 const paneTab = computed(() => (activeTab.value ? controller.focusedConnTab(activeTab.value) : null))
@@ -171,7 +163,7 @@ const statusText = computed(() => !paneTab.value ? '未連線' : paneTab.value.s
       <aside class="desktop-sidebar" aria-label="連線與桌面" :style="{ width: `${sidebarWidth}px` }">
       <section class="desktop-main-page" aria-label="連線主畫面">
         <div class="desktop-page-heading"><div><span class="desktop-eyebrow">YOUR WORKSPACE</span><h1>連接你的工作空間</h1><p>選擇既有 Shell，或建立新的工作。</p></div></div>
-        <ConnectionDashboard :transport="transport" :active="page === 'workspace' && !documentHidden" :catalog-loading="controller.catalogLoading.value" :runtime-profiles="controller.runtimeProfiles.value" :runtime-profiles-error="controller.runtimeProfilesError.value" :runtime-pending="null" :runtime-connected="runtimeConnected" :screens="controller.instanceDesktops.value" :screens-error="controller.instanceDesktopsError.value" @open="openTarget" @create="showSettings('connections')" />
+        <ConnectionDashboard :transport="transport" :active="page === 'workspace' && !documentHidden" :catalog-loading="controller.catalogLoading.value" :runtime-profiles="controller.runtimeProfiles.value" :runtime-profiles-error="controller.runtimeProfilesError.value" :runtime-pending="null" :runtime-connected="runtimeConnected" :sessions-revision="controller.sessionsRevision.value" :screens="controller.instanceDesktops.value" :screens-error="controller.instanceDesktopsError.value" @open="openTarget" @create="showSettings('connections')" />
       </section>
       <div class="workspace-divider horizontal" role="separator" tabindex="0" aria-label="調整桌面預覽高度" aria-orientation="horizontal" :aria-valuenow="previewHeight" :aria-valuemin="100" :aria-valuemax="maxHeight" data-testid="preview-divider" @pointerdown="sizing.start($event, 'height')" @pointermove="sizing.move" @pointerup="sizing.release" @pointercancel="sizing.release" @lostpointercapture="sizing.end" @keydown="sizing.key($event, 'height')" />
       <section class="desktop-preview" aria-label="桌面預覽" :style="{ height: `${previewHeight}px` }">
@@ -185,7 +177,6 @@ const statusText = computed(() => !paneTab.value ? '未連線' : paneTab.value.s
         <div v-if="activeTab" class="toolbar">
           <span class="t-name">{{ paneTab?.hostLabel }} / {{ paneTab?.label }}</span><span class="status" :class="paneTab?.status">{{ statusText }}</span><span class="spacer" />
           <button v-if="activeTab.status === 'live'" class="btn screen-trigger" data-testid="desktop-toggle" aria-label="選擇 Screen" title="選擇 Screen" :aria-pressed="!!activeTab.instanceDesktop" :disabled="activeTab.desktopBusy" @click="openScreens"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2" /><path d="M8 21h8M12 18v3" /></svg></button>
-          <label v-if="activeTab.status === 'live' || activeTab.paneRoot" class="split-control"><span class="muted">分割</span><select data-testid="terminal-split" :value="activeTab.paneRoot ? 'split' : ''" :disabled="activeTab.status !== 'live' && !activeTab.paneRoot" @change="onSplitChange(activeTab, $event)"><option v-if="activeTab.paneRoot" value="split" disabled>已分割</option><option value="">不分割</option><option value="up">向上</option><option value="down">向下</option><option value="left">向左</option><option value="right">向右</option></select></label>
           <button v-if="paneTab && (paneTab.status === 'error' || paneTab.status === 'exited')" class="btn" @click="controller.reopenTab(paneTab, false)">重新連線</button>
         </div>
         <div class="desktop-session-content">
@@ -237,8 +228,6 @@ const statusText = computed(() => !paneTab.value ? '未連線' : paneTab.value.s
 .workspace-divider.vertical { width: 5px; cursor: col-resize; }
 .workspace-divider.horizontal { height: 5px; cursor: row-resize; }
 .screen-trigger svg { display: block; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.5; }
-.split-control { display: inline-flex; align-items: center; gap: 6px; }
-.split-control select { background: var(--bg-raised); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; font: inherit; }
 .desktop-sidebar :deep(.section-heading) { padding-inline: 8px; }
 .desktop-sidebar :deep(.section-content) { margin-inline: 6px; }
 .desktop-sidebar :deep(.category-toggle) { gap: 5px; }

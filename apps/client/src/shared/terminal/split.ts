@@ -4,16 +4,12 @@ export type SplitDirection = 'up' | 'down' | 'left' | 'right'
 export type SplitAxis = 'row' | 'column'
 
 /**
- * Pane tree for the Windows split view. Every `conn` leaf owns a full
+ * Pane tree for the Windows split view. Every leaf is a `conn` owning a full
  * TabState — its own target, session, poll loop and input queue — so panes
- * are independent connections, not mirrors of one screen. `mirror` leaves
- * stay read-only views of an existing connection (issue #34 behaviour).
- * `conn` leaves are always live connections — a split creates its session
- * up front, so no placeholder leaf kind exists.
+ * are independent connections. `conn` leaves are always live connections —
+ * a split creates its session up front, so no placeholder leaf kind exists.
  */
-export type PaneLeaf =
-  | { kind: 'conn'; id: string; tab: TabState }
-  | { kind: 'mirror'; id: string; of: TabState }
+export type PaneLeaf = { kind: 'conn'; id: string; tab: TabState }
 
 export interface PaneSplitNode {
   kind: 'split'
@@ -94,10 +90,7 @@ export function paneLeaves(root: PaneNode | null): PaneLeaf[] {
 
 /** Connection panes in display order (left→right, top→bottom). */
 export function paneConnTabs(root: PaneNode | null): TabState[] {
-  if (!root) return []
-  if (root.kind === 'conn') return [root.tab]
-  if (root.kind !== 'split') return []
-  return [...paneConnTabs(root.a), ...paneConnTabs(root.b)]
+  return paneLeaves(root).map((leaf) => leaf.tab)
 }
 
 /** Find a leaf by id; returns the leaf object or null. */
