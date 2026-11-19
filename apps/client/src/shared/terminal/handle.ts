@@ -31,6 +31,9 @@ export interface TerminalHandle {
   /** Resolves when xterm has parsed the chunk (write-callback backpressure). */
   write(data: Uint8Array, historical?: boolean): Promise<void>
   onData(cb: (text: string, terminalReply?: boolean) => void): void
+  /** User input sent outside onData (desktop paste/interrupt shortcuts) must
+   * trigger the same host-history follow handling as typed input. */
+  noteUserInput?(): void
   /** Return false from fn to keep the event out of xterm entirely. */
   setKeyInterceptor(fn: (ev: KeyboardEvent) => boolean): void
   fit(): void
@@ -311,6 +314,14 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
       return false
     })
   }
+  const noteUserInput = () => {
+    // User input makes the host follow out of history atomically; hide the
+    // anchored selection now and let the refreshed view remap or drop it.
+    if (hostViewport?.reading) {
+      clearActiveSelection()
+      hostViewport.noteInput()
+    }
+  }
   return {
     setTheme: theme => { term.options.theme = theme },
     setHostViewport: viewport => {
@@ -361,15 +372,11 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
       term.onData(text => {
         if (historicalParsing) return
         const terminalReply = protocolReply || undefined
-        // User input makes the host follow out of history atomically; hide the
-        // anchored selection now and let the refreshed view remap or drop it.
-        if (!terminalReply && hostViewport?.reading) {
-          clearActiveSelection()
-          hostViewport.noteInput()
-        }
+        if (!terminalReply) noteUserInput()
         cb(text, terminalReply)
       })
     },
+    noteUserInput,
     setKeyInterceptor(fn) {
       term.attachCustomKeyEventHandler(fn)
     },

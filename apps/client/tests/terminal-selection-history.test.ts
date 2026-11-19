@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createDesktopXtermTerminal, type TerminalHandle } from '../src/shared/terminal/handle'
 import { HostTerminalViewport, type HostHistoryRequest } from '../src/shared/terminal/native'
+import { createTerminalIo } from '../src/shared/state/controller-terminal-io'
+import type { TabState } from '../src/shared/state/controller-types'
+import type { Transport } from '../src/shared/transport/types'
 
 vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
 window.matchMedia = (() => ({ matches: false, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia
@@ -159,6 +162,35 @@ describe('desktop host-history selection', () => {
 
     term.onData(() => {})
     host.querySelector('textarea')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true, cancelable: true }))
+    await vi.waitFor(() => expect(viewport.offset).toBe(0))
+    expect(viewport.held).toBe(false)
+    expect(selectionActive(term)).toBe(false)
+    expect(selectionText(term)).toBe('')
+  })
+
+  it('clears a history selection when input bypassing onData (paste path) follows to live', async () => {
+    const { term, viewport } = setup()
+    await writeLines(term, Array.from({ length: term.rows }, (_, y) => `LIVE-${y}`))
+    term.setHostViewport?.(viewport)
+    viewport.start()
+    await vi.waitFor(() => expect(viewport.instance).toBe('history-1'))
+
+    viewport.scroll(-3)
+    await vi.waitFor(() => expect(viewport.offset).toBe(3))
+    selectRange(term, 0, 0, 'HIST3-0'.length)
+    expect(selectionText(term)).toBe('HIST3-0')
+
+    // Desktop Alt+V paste and Ctrl+C reach the host through controller.sendInput,
+    // never through term.onData; the write still makes the host follow to live.
+    const writes: number[][] = []
+    const transport = { write: vi.fn(async (_sid: string, chunk: number[]) => { writes.push(chunk) }) } as unknown as Transport
+    const io = createTerminalIo(transport, () => false, () => false)
+    const tab = {
+      term, status: 'live', closed: false, sessionId: 's1', connectionGen: 0,
+      writeBuf: [], writing: false, errorMsg: '', writeDropped: false, notice: ''
+    } as unknown as TabState
+    io.sendInput(tab, 'pasted\r')
+    await vi.waitFor(() => expect(writes.length).toBeGreaterThan(0))
     await vi.waitFor(() => expect(viewport.offset).toBe(0))
     expect(viewport.held).toBe(false)
     expect(selectionActive(term)).toBe(false)

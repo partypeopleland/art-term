@@ -38,6 +38,9 @@ export function createTerminalIo(
   }
 
   function sendInput(tab: TabState, text: string): void {
+    // Paste/interrupt shortcuts bypass term.onData; the write still makes the
+    // host follow out of history, so run the same selection handling here.
+    tab.term?.noteUserInput?.()
     // A modal password must never fall through to a previously focused terminal.
     if (isHidden() || tab.status !== 'live' || !tab.sessionId || tab.closed) return
     const bytes = Array.from(textEncoder.encode(text))
