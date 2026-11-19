@@ -197,6 +197,64 @@ describe('desktop host-history selection', () => {
     expect(selectionText(term)).toBe('')
   })
 
+  it('does not swallow a user clear right after a programmatic selection refresh', async () => {
+    const { term, viewport, live } = setup()
+    await writeLines(term, live)
+    term.setHostViewport?.(viewport)
+    viewport.start()
+    await vi.waitFor(() => expect(viewport.instance).toBe('history-1'))
+
+    selectRange(term, 0, 5, live[5].length)
+    viewport.scroll(-3)
+    await vi.waitFor(() => expect(viewport.offset).toBe(3))
+    expect(selectionPosition(term).start.y).toBe(8)
+
+    // A user click-clear right after the scroll remap must not be mistaken
+    // for xterm's deferred empty echo and leave a stale anchor behind.
+    term.clearSelection!()
+    expect(selectionActive(term)).toBe(false)
+    expect(selectionText(term)).toBe('')
+
+    viewport.scroll(3)
+    await vi.waitFor(() => expect(viewport.offset).toBe(0))
+    expect(selectionActive(term)).toBe(false)
+    expect(selectionText(term)).toBe('')
+  })
+
+  it('clears the selection and its text when a row resize changes the height', async () => {
+    const { term, viewport, live } = setup()
+    await writeLines(term, live)
+    term.setHostViewport?.(viewport)
+    viewport.start()
+    await vi.waitFor(() => expect(viewport.instance).toBe('history-1'))
+
+    selectRange(term, 0, 5, live[5].length)
+    expect(selectionText(term)).toBe(live[5])
+
+    term.resize!(term.cols, term.rows - 1)
+    expect(selectionActive(term)).toBe(false)
+    expect(selectionText(term)).toBe('')
+  })
+
+  it('clears a stale selection on the next view after a column resize', async () => {
+    const { term, viewport, live } = setup()
+    await writeLines(term, live)
+    term.setHostViewport?.(viewport)
+    viewport.start()
+    await vi.waitFor(() => expect(viewport.instance).toBe('history-1'))
+
+    selectRange(term, 0, 5, live[5].length)
+    viewport.scroll(-3)
+    await vi.waitFor(() => expect(viewport.offset).toBe(3))
+    expect(selectionText(term)).toBe(live[5])
+
+    term.resize!(term.cols + 10, term.rows)
+    viewport.scroll(3)
+    await vi.waitFor(() => expect(viewport.offset).toBe(0))
+    expect(selectionActive(term)).toBe(false)
+    expect(selectionText(term)).toBe('')
+  })
+
   it('clears the selection when the viewport detaches while reading history', async () => {
     const { term, viewport } = setup()
     await writeLines(term, Array.from({ length: term.rows }, (_, y) => `LIVE-${y}`))

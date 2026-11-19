@@ -37,6 +37,8 @@ export interface TerminalHandle {
   /** Return false from fn to keep the event out of xterm entirely. */
   setKeyInterceptor(fn: (ev: KeyboardEvent) => boolean): void
   fit(): void
+  /** Programmatic resize; production sizing goes through fit(). */
+  resize?(cols: number, rows: number): void
   focus(): void
   suppressSoftKeyboard?(): void
   reset(): void
@@ -242,12 +244,14 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
   }
   let hostSelection: HostSelection | null = null
   let applyingHostSelection = false
-  // xterm emits deferred selection events after programmatic select/clear;
-  // empty captures stay suppressed briefly so they cannot drop the anchor.
-  let emptyCaptureSuppressedUntil = 0
+  // Empty selection events are ambiguous: xterm auto-clears the selection on
+  // user input (which then triggers a host follow), clearSelection() re-fires
+  // a deferred echo, and a genuine user clear looks identical. The decision
+  // is deferred to a microtask and the anchor is preserved only while an
+  // input-triggered follow refresh is in flight.
+  let awaitingFollowView = false
   const clearActiveSelection = () => {
     if (!term.hasSelection()) return
-    emptyCaptureSuppressedUntil = Date.now() + 500
     applyingHostSelection = true
     term.clearSelection()
     applyingHostSelection = false
@@ -271,6 +275,7 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
     }
   }
   const applyHostSelection = () => {
+    awaitingFollowView = false
     if (mobileScroll || !hostViewport || applyingHostSelection) return
     if (!hostSelection && term.buffer.active.type === 'normal' && term.hasSelection()) captureHostSelection()
     const anchor = hostSelection
@@ -292,15 +297,20 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
     }
     const baseY = term.buffer.active.baseY
     const length = (endY - startY) * term.cols + (anchor.end.x - anchor.start.x)
-    emptyCaptureSuppressedUntil = Date.now() + 500
     applyingHostSelection = true
     term.select(anchor.start.x, baseY + startY, length)
     applyingHostSelection = false
   }
   if (!mobileScroll) term.onSelectionChange(() => {
     if (applyingHostSelection) return
-    if (!term.hasSelection() && Date.now() < emptyCaptureSuppressedUntil) return
-    captureHostSelection()
+    if (term.hasSelection()) {
+      captureHostSelection()
+      return
+    }
+    queueMicrotask(() => {
+      if (applyingHostSelection || term.hasSelection() || awaitingFollowView) return
+      captureHostSelection()
+    })
   })
   if (desktopWheel) {
     term.attachCustomWheelEventHandler(event => {
@@ -320,12 +330,14 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
     if (hostViewport?.reading) {
       clearActiveSelection()
       hostViewport.noteInput()
+      awaitingFollowView = true
     }
   }
   return {
     setTheme: theme => { term.options.theme = theme },
     setHostViewport: viewport => {
       if (mobileScroll) return
+      awaitingFollowView = false
       const previous = hostViewport
       if (previous) {
         previous.onView = null
@@ -388,6 +400,9 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
       } catch {
         // Element hidden or zero-sized; keep last stable size.
       }
+    },
+    resize(cols, rows) {
+      term.resize(cols, rows)
     },
     focus() {
       const textarea = term.textarea
