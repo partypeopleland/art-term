@@ -194,6 +194,8 @@ export class FakeTerm implements TerminalHandle {
   focusCount = 0
   resetCount = 0
   disposed = false
+  fontSize = 14
+  fontSizes: number[] = []
   private writeResolvers: (() => void)[] = []
   private dataCb: ((text: string, terminalReply?: boolean) => void) | null = null
   keyInterceptor: ((e: KeyboardEvent) => boolean) | null = null
@@ -220,6 +222,11 @@ export class FakeTerm implements TerminalHandle {
 
   setKeyInterceptor(fn: (e: KeyboardEvent) => boolean): void {
     this.keyInterceptor = fn
+  }
+
+  setFontSize(size: number): void {
+    this.fontSize = size
+    this.fontSizes.push(size)
   }
 
   fit(): void {

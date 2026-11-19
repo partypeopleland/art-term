@@ -8,6 +8,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { attachMobileScroll } from '../../mobile/scroll'
 import { attachTerminalLinks, openPreviewWebUrl, type LinkOpener } from './links'
+import { clampTerminalFontSize } from './font-size'
 
 export const SCROLLBACK_LINES = 5000
 
@@ -36,6 +37,8 @@ export interface TerminalHandle {
   noteUserInput?(): void
   /** Return false from fn to keep the event out of xterm entirely. */
   setKeyInterceptor(fn: (ev: KeyboardEvent) => boolean): void
+  /** Set the xterm font size in px; callers refit and report rows/cols. */
+  setFontSize?(size: number): void
   fit(): void
   /** Programmatic resize; production sizing goes through fit(). */
   resize?(cols: number, rows: number): void
@@ -391,6 +394,9 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
     noteUserInput,
     setKeyInterceptor(fn) {
       term.attachCustomKeyEventHandler(fn)
+    },
+    setFontSize(size) {
+      term.options.fontSize = clampTerminalFontSize(size)
     },
     fit() {
       try {
