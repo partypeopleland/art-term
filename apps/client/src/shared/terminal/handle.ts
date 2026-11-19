@@ -239,8 +239,12 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
   }
   let hostSelection: HostSelection | null = null
   let applyingHostSelection = false
+  // xterm emits deferred selection events after programmatic select/clear;
+  // empty captures stay suppressed briefly so they cannot drop the anchor.
+  let emptyCaptureSuppressedUntil = 0
   const clearActiveSelection = () => {
     if (!term.hasSelection()) return
+    emptyCaptureSuppressedUntil = Date.now() + 500
     applyingHostSelection = true
     term.clearSelection()
     applyingHostSelection = false
@@ -285,11 +289,16 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
     }
     const baseY = term.buffer.active.baseY
     const length = (endY - startY) * term.cols + (anchor.end.x - anchor.start.x)
+    emptyCaptureSuppressedUntil = Date.now() + 500
     applyingHostSelection = true
     term.select(anchor.start.x, baseY + startY, length)
     applyingHostSelection = false
   }
-  if (!mobileScroll) term.onSelectionChange(() => { if (!applyingHostSelection) captureHostSelection() })
+  if (!mobileScroll) term.onSelectionChange(() => {
+    if (applyingHostSelection) return
+    if (!term.hasSelection() && Date.now() < emptyCaptureSuppressedUntil) return
+    captureHostSelection()
+  })
   if (desktopWheel) {
     term.attachCustomWheelEventHandler(event => {
       if (term.buffer.active.type !== 'alternate' || term.modes.mouseTrackingMode !== 'none') return true
@@ -306,7 +315,16 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
     setTheme: theme => { term.options.theme = theme },
     setHostViewport: viewport => {
       if (mobileScroll) return
-      if (hostViewport) hostViewport.onView = null
+      const previous = hostViewport
+      if (previous) {
+        previous.onView = null
+        // Closing a held viewport makes the host follow back to the live
+        // screen; selections anchored to the replaced history must not linger.
+        if (previous.held || previous.offset !== 0) {
+          hostSelection = null
+          clearActiveSelection()
+        }
+      }
       hostViewport = viewport
       if (hostViewport) hostViewport.onView = applyHostSelection
     },
@@ -341,7 +359,15 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
     },
     onData(cb) {
       term.onData(text => {
-        if (!historicalParsing) cb(text, protocolReply || undefined)
+        if (historicalParsing) return
+        const terminalReply = protocolReply || undefined
+        // User input makes the host follow out of history atomically; hide the
+        // anchored selection now and let the refreshed view remap or drop it.
+        if (!terminalReply && hostViewport?.reading) {
+          clearActiveSelection()
+          hostViewport.noteInput()
+        }
+        cb(text, terminalReply)
       })
     },
     setKeyInterceptor(fn) {
