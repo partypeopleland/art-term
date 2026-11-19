@@ -215,4 +215,21 @@ describe('desktop host-history selection', () => {
     expect(selectionActive(term)).toBe(false)
     expect(selectionText(term)).toBe('')
   })
+
+  it('clears the selection when the terminal enters the alternate buffer', async () => {
+    const { term, viewport, live } = setup()
+    await writeLines(term, live)
+    term.setHostViewport?.(viewport)
+    viewport.start()
+    await vi.waitFor(() => expect(viewport.instance).toBe('history-1'))
+
+    selectRange(term, 0, 5, live[5].length)
+    expect(selectionText(term)).toBe(live[5])
+
+    await term.write(bytes('\x1b[?1049h'))
+    viewport.scroll(-1)
+    await vi.waitFor(() => expect(viewport.offset).toBe(1))
+    expect(selectionActive(term)).toBe(false)
+    expect(selectionText(term)).toBe('')
+  })
 })
