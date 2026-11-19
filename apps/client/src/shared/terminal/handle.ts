@@ -20,6 +20,10 @@ export interface TerminalHandle {
   bracketedPasteMode?(): boolean
   /** xterm's logical selection omits line wraps but retains real newlines. */
   getSelection?(): string
+  hasSelection?(): boolean
+  getSelectionPosition?(): { start: { x: number; y: number }; end: { x: number; y: number } } | undefined
+  select?(column: number, row: number, length: number): void
+  clearSelection?(): void
   readStyledText?(window?: NativeBufferWindow): NativeTerminalBuffer
   /** ANSI snapshot of the current viewport, carried over when the pane remounts. */
   screenSnapshot?(): string
@@ -223,6 +227,69 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
     term.parser.registerEscHandler({ final: 'Z' }, observeReply)
   ]
   let hostViewport: HostTerminalViewport | null = null
+  type SelectionPoint = { x: number; y: number }
+  type HostSelection = {
+    start: SelectionPoint
+    end: SelectionPoint
+    offset: number
+    instance: string
+    cols: number
+    rows: number
+    text: string
+  }
+  let hostSelection: HostSelection | null = null
+  let applyingHostSelection = false
+  const clearActiveSelection = () => {
+    if (!term.hasSelection()) return
+    applyingHostSelection = true
+    term.clearSelection()
+    applyingHostSelection = false
+  }
+  const captureHostSelection = () => {
+    hostSelection = null
+    if (mobileScroll || !hostViewport || term.buffer.active.type !== 'normal' || !term.hasSelection()) return
+    const position = term.getSelectionPosition()
+    if (!position) return
+    const top = term.buffer.active.baseY
+    const bottom = top + term.rows
+    if (position.start.y < top || position.end.y < top || position.start.y >= bottom || position.end.y >= bottom) return
+    hostSelection = {
+      start: { x: position.start.x, y: position.start.y - top },
+      end: { x: position.end.x, y: position.end.y - top },
+      offset: hostViewport.offset,
+      instance: hostViewport.instance,
+      cols: term.cols,
+      rows: term.rows,
+      text: term.getSelection()
+    }
+  }
+  const applyHostSelection = () => {
+    if (mobileScroll || !hostViewport || applyingHostSelection) return
+    if (!hostSelection && term.buffer.active.type === 'normal' && term.hasSelection()) captureHostSelection()
+    const anchor = hostSelection
+    if (!anchor) return
+    if (anchor.instance !== hostViewport.instance || term.buffer.active.type !== 'normal'
+      || term.cols !== anchor.cols || term.rows !== anchor.rows) {
+      hostSelection = null
+      clearActiveSelection()
+      return
+    }
+    const delta = hostViewport.offset - anchor.offset
+    const startY = anchor.start.y + delta
+    const endY = anchor.end.y + delta
+    const visible = startY >= 0 && endY >= 0 && startY < term.rows && endY < term.rows
+    if (!visible) {
+      hostSelection = null
+      clearActiveSelection()
+      return
+    }
+    const baseY = term.buffer.active.baseY
+    const length = (endY - startY) * term.cols + (anchor.end.x - anchor.start.x)
+    applyingHostSelection = true
+    term.select(anchor.start.x, baseY + startY, length)
+    applyingHostSelection = false
+  }
+  if (!mobileScroll) term.onSelectionChange(() => { if (!applyingHostSelection) captureHostSelection() })
   if (desktopWheel) {
     term.attachCustomWheelEventHandler(event => {
       if (term.buffer.active.type !== 'alternate' || term.modes.mouseTrackingMode !== 'none') return true
@@ -237,7 +304,12 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
   }
   return {
     setTheme: theme => { term.options.theme = theme },
-    setHostViewport: viewport => { if (!mobileScroll) hostViewport = viewport },
+    setHostViewport: viewport => {
+      if (mobileScroll) return
+      if (hostViewport) hostViewport.onView = null
+      hostViewport = viewport
+      if (hostViewport) hostViewport.onView = applyHostSelection
+    },
     get cols() {
       return term.cols
     },
@@ -245,7 +317,11 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
       return term.rows
     },
     bracketedPasteMode: () => term.modes.bracketedPasteMode,
-    getSelection: () => term.getSelection(),
+    getSelection: () => hostSelection && term.hasSelection() ? hostSelection.text : term.getSelection(),
+    hasSelection: () => term.hasSelection(),
+    getSelectionPosition: () => term.getSelectionPosition(),
+    select: (column, row, length) => term.select(column, row, length),
+    clearSelection: () => term.clearSelection(),
     readStyledText: window => projection?.read(window) ?? { records: [], supported: false },
     screenSnapshot: () => screenSnapshotAnsi(term),
     setNativeReaderActive(active) {

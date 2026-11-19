@@ -188,6 +188,9 @@ export class HostTerminalViewport {
   held = false
   available = true
   unsupported = false
+  instance = ''
+  offset = 0
+  onView: (() => void) | null = null
   private active = false
   private closed = false
   private pending = 0
@@ -238,7 +241,9 @@ export class HostTerminalViewport {
         }
         if (reply.kind === 'view') {
           this.held = reply.held; this.available = reply.available; this.retry = 0
+          this.instance = reply.instance; this.offset = reply.offset
           if (!reply.available) this.notice('目前程式使用 alternate 畫面，暫時無法閱讀歷史；離開後可再捲動。')
+          this.onView?.()
         } else {
           if (reply.kind === 'error' && reply.error === 'busy' && this.retry++ < 2) {
             this.pending = Math.max(-256, Math.min(256, lines + this.pending))
