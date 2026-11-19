@@ -188,6 +188,9 @@ export class HostTerminalViewport {
   held = false
   available = true
   unsupported = false
+  instance = ''
+  offset = 0
+  onView: (() => void) | null = null
   private active = false
   private closed = false
   private pending = 0
@@ -198,9 +201,50 @@ export class HostTerminalViewport {
   private retry = 0
   private retryTimer: ReturnType<typeof setTimeout> | undefined
   private keepTimer: ReturnType<typeof setInterval> | undefined
+  private followPending = false
   private operation: Promise<void> = Promise.resolve()
   private closing: Promise<void> | undefined
   constructor(private request: HostHistoryRequestFn, private notice: (text: string) => void = () => {}) {}
+  private applyView(reply: Extract<HostHistoryReply, { kind: 'view' }>): void {
+    this.held = reply.held; this.available = reply.available; this.retry = 0
+    this.instance = reply.instance; this.offset = reply.offset
+    if (!reply.available) this.notice('目前程式使用 alternate 畫面，暫時無法閱讀歷史；離開後可再捲動。')
+    this.onView?.()
+  }
+  private markUnsupported(): void {
+    this.unsupported = true; this.pending = 0; this.fraction = 0; this.active = false; this.closed = true
+    clearInterval(this.keepTimer); clearTimeout(this.retryTimer)
+    const release = this.request({ op: 'close' }).catch(() => undefined)
+    this.closing = Promise.allSettled([release, this.operation]).then(() => undefined)
+    this.notice('主機尚未支援原視窗歷史捲動，請更新共用 helper；終端輸入仍可使用。')
+  }
+  /** Terminal input makes the host follow atomically; refresh the view so
+   * scroll state does not stay anchored to replaced history. The write path
+   * holds the same history slot during its own follow, so busy retries briefly. */
+  noteInput(): void {
+    if (!this.active || this.closed || this.unsupported || !this.reading || this.followPending) return
+    this.followPending = true
+    let attempts = 0
+    const send = () => {
+      if (this.closed || !this.active) { this.followPending = false; return }
+      void (async () => {
+        try {
+          const reply = await this.request({ op: 'follow' })
+          if (this.closed || !this.active) { this.followPending = false; return }
+          if (reply.kind === 'view') { this.applyView(reply); this.followPending = false; return }
+          if (reply.kind === 'unsupported' || (reply.kind === 'error' && reply.error === 'unsupported')) {
+            this.markUnsupported(); this.followPending = false; return
+          }
+          if (reply.kind === 'error' && reply.error === 'busy' && attempts++ < 3) {
+            setTimeout(send, 150)
+            return
+          }
+        } catch { /* the keep-alive drain retries the view refresh */ }
+        this.followPending = false
+      })()
+    }
+    send()
+  }
   start(): void {
     if (this.closed || this.active) return
     this.active = true
@@ -229,17 +273,11 @@ export class HostTerminalViewport {
         catch { reply = { kind: 'error', error: 'unavailable' } }
         if (this.closed || !this.active) return
         if (reply.kind === 'unsupported' || (reply.kind === 'error' && reply.error === 'unsupported')) {
-          this.unsupported = true; this.pending = 0; this.fraction = 0; this.active = false; this.closed = true
-          clearInterval(this.keepTimer); clearTimeout(this.retryTimer)
-          const release = this.request({ op: 'close' }).catch(() => undefined)
-          this.closing = Promise.allSettled([release, this.operation]).then(() => undefined)
-          this.notice('主機尚未支援原視窗歷史捲動，請更新共用 helper；終端輸入仍可使用。')
+          this.markUnsupported()
           return
         }
-        if (reply.kind === 'view') {
-          this.held = reply.held; this.available = reply.available; this.retry = 0
-          if (!reply.available) this.notice('目前程式使用 alternate 畫面，暫時無法閱讀歷史；離開後可再捲動。')
-        } else {
+        if (reply.kind === 'view') this.applyView(reply)
+        else {
           if (reply.kind === 'error' && reply.error === 'busy' && this.retry++ < 2) {
             this.pending = Math.max(-256, Math.min(256, lines + this.pending))
             this.retryTimer = setTimeout(() => { this.retryTimer = undefined; void this.drain(true) }, 150)

@@ -20,6 +20,10 @@ export interface TerminalHandle {
   bracketedPasteMode?(): boolean
   /** xterm's logical selection omits line wraps but retains real newlines. */
   getSelection?(): string
+  hasSelection?(): boolean
+  getSelectionPosition?(): { start: { x: number; y: number }; end: { x: number; y: number } } | undefined
+  select?(column: number, row: number, length: number): void
+  clearSelection?(): void
   readStyledText?(window?: NativeBufferWindow): NativeTerminalBuffer
   /** ANSI snapshot of the current viewport, carried over when the pane remounts. */
   screenSnapshot?(): string
@@ -27,9 +31,14 @@ export interface TerminalHandle {
   /** Resolves when xterm has parsed the chunk (write-callback backpressure). */
   write(data: Uint8Array, historical?: boolean): Promise<void>
   onData(cb: (text: string, terminalReply?: boolean) => void): void
+  /** User input sent outside onData (desktop paste/interrupt shortcuts) must
+   * trigger the same host-history follow handling as typed input. */
+  noteUserInput?(): void
   /** Return false from fn to keep the event out of xterm entirely. */
   setKeyInterceptor(fn: (ev: KeyboardEvent) => boolean): void
   fit(): void
+  /** Programmatic resize; production sizing goes through fit(). */
+  resize?(cols: number, rows: number): void
   focus(): void
   suppressSoftKeyboard?(): void
   reset(): void
@@ -223,6 +232,86 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
     term.parser.registerEscHandler({ final: 'Z' }, observeReply)
   ]
   let hostViewport: HostTerminalViewport | null = null
+  type SelectionPoint = { x: number; y: number }
+  type HostSelection = {
+    start: SelectionPoint
+    end: SelectionPoint
+    offset: number
+    instance: string
+    cols: number
+    rows: number
+    text: string
+  }
+  let hostSelection: HostSelection | null = null
+  let applyingHostSelection = false
+  // Empty selection events are ambiguous: xterm auto-clears the selection on
+  // user input (which then triggers a host follow), clearSelection() re-fires
+  // a deferred echo, and a genuine user clear looks identical. The decision
+  // is deferred to a microtask and the anchor is preserved only while an
+  // input-triggered follow refresh is in flight.
+  let awaitingFollowView = false
+  const clearActiveSelection = () => {
+    if (!term.hasSelection()) return
+    applyingHostSelection = true
+    term.clearSelection()
+    applyingHostSelection = false
+  }
+  const captureHostSelection = () => {
+    hostSelection = null
+    if (mobileScroll || !hostViewport || term.buffer.active.type !== 'normal' || !term.hasSelection()) return
+    const position = term.getSelectionPosition()
+    if (!position) return
+    const top = term.buffer.active.baseY
+    const bottom = top + term.rows
+    if (position.start.y < top || position.end.y < top || position.start.y >= bottom || position.end.y >= bottom) return
+    hostSelection = {
+      start: { x: position.start.x, y: position.start.y - top },
+      end: { x: position.end.x, y: position.end.y - top },
+      offset: hostViewport.offset,
+      instance: hostViewport.instance,
+      cols: term.cols,
+      rows: term.rows,
+      text: term.getSelection()
+    }
+  }
+  const applyHostSelection = () => {
+    awaitingFollowView = false
+    if (mobileScroll || !hostViewport || applyingHostSelection) return
+    if (!hostSelection && term.buffer.active.type === 'normal' && term.hasSelection()) captureHostSelection()
+    const anchor = hostSelection
+    if (!anchor) return
+    if (anchor.instance !== hostViewport.instance || term.buffer.active.type !== 'normal'
+      || term.cols !== anchor.cols || term.rows !== anchor.rows) {
+      hostSelection = null
+      clearActiveSelection()
+      return
+    }
+    const delta = hostViewport.offset - anchor.offset
+    const startY = anchor.start.y + delta
+    const endY = anchor.end.y + delta
+    const visible = startY >= 0 && endY >= 0 && startY < term.rows && endY < term.rows
+    if (!visible) {
+      hostSelection = null
+      clearActiveSelection()
+      return
+    }
+    const baseY = term.buffer.active.baseY
+    const length = (endY - startY) * term.cols + (anchor.end.x - anchor.start.x)
+    applyingHostSelection = true
+    term.select(anchor.start.x, baseY + startY, length)
+    applyingHostSelection = false
+  }
+  if (!mobileScroll) term.onSelectionChange(() => {
+    if (applyingHostSelection) return
+    if (term.hasSelection()) {
+      captureHostSelection()
+      return
+    }
+    queueMicrotask(() => {
+      if (applyingHostSelection || term.hasSelection() || awaitingFollowView) return
+      captureHostSelection()
+    })
+  })
   if (desktopWheel) {
     term.attachCustomWheelEventHandler(event => {
       if (term.buffer.active.type !== 'alternate' || term.modes.mouseTrackingMode !== 'none') return true
@@ -235,9 +324,33 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
       return false
     })
   }
+  const noteUserInput = () => {
+    // User input makes the host follow out of history atomically; hide the
+    // anchored selection now and let the refreshed view remap or drop it.
+    if (hostViewport?.reading) {
+      clearActiveSelection()
+      hostViewport.noteInput()
+      awaitingFollowView = true
+    }
+  }
   return {
     setTheme: theme => { term.options.theme = theme },
-    setHostViewport: viewport => { if (!mobileScroll) hostViewport = viewport },
+    setHostViewport: viewport => {
+      if (mobileScroll) return
+      awaitingFollowView = false
+      const previous = hostViewport
+      if (previous) {
+        previous.onView = null
+        // Closing a held viewport makes the host follow back to the live
+        // screen; selections anchored to the replaced history must not linger.
+        if (previous.held || previous.offset !== 0) {
+          hostSelection = null
+          clearActiveSelection()
+        }
+      }
+      hostViewport = viewport
+      if (hostViewport) hostViewport.onView = applyHostSelection
+    },
     get cols() {
       return term.cols
     },
@@ -245,7 +358,11 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
       return term.rows
     },
     bracketedPasteMode: () => term.modes.bracketedPasteMode,
-    getSelection: () => term.getSelection(),
+    getSelection: () => hostSelection && term.hasSelection() ? hostSelection.text : term.getSelection(),
+    hasSelection: () => term.hasSelection(),
+    getSelectionPosition: () => term.getSelectionPosition(),
+    select: (column, row, length) => term.select(column, row, length),
+    clearSelection: () => term.clearSelection(),
     readStyledText: window => projection?.read(window) ?? { records: [], supported: false },
     screenSnapshot: () => screenSnapshotAnsi(term),
     setNativeReaderActive(active) {
@@ -265,9 +382,13 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
     },
     onData(cb) {
       term.onData(text => {
-        if (!historicalParsing) cb(text, protocolReply || undefined)
+        if (historicalParsing) return
+        const terminalReply = protocolReply || undefined
+        if (!terminalReply) noteUserInput()
+        cb(text, terminalReply)
       })
     },
+    noteUserInput,
     setKeyInterceptor(fn) {
       term.attachCustomKeyEventHandler(fn)
     },
@@ -279,6 +400,9 @@ export function createXtermTerminal(el: HTMLElement, desktopWheel = false, mobil
       } catch {
         // Element hidden or zero-sized; keep last stable size.
       }
+    },
+    resize(cols, rows) {
+      term.resize(cols, rows)
     },
     focus() {
       const textarea = term.textarea
