@@ -110,6 +110,7 @@ function startDrag(event: PointerEvent, node: PaneSplitNode): void {
       :controller="controller"
       :reader-visible="visible"
       native-scroll
+      font-zoom
       :closable="leafClosable(node)"
       close-label="關閉窗格"
       :on-selection-finished="onSelectionFinished"
