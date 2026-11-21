@@ -5,6 +5,7 @@ import { NativeHistoryKey, HostTerminalViewport } from '../terminal/native'
 import type { AppController, TabState } from '../state/controller'
 import type { HostHistoryRequest } from '../terminal/native'
 import { TerminalFactoryKey, createDesktopXtermTerminal, type TerminalHandle } from '../terminal/handle'
+import { terminalFontSize, terminalFontZoomKeyDirection, terminalFontZoomWheelDirection, zoomTerminalFontSize } from '../terminal/font-size'
 
 const props = withDefaults(defineProps<{
   tab: TabState
@@ -15,10 +16,11 @@ const props = withDefaults(defineProps<{
   controller: AppController
   readerVisible?: boolean
   nativeScroll?: boolean
+  fontZoom?: boolean
   closable?: boolean
   closeLabel?: string
   onSelectionFinished?: (tab: TabState) => void
-}>(), { focused: undefined })
+}>(), { focused: undefined, fontZoom: false })
 
 const emit = defineEmits<{ close: []; activate: [] }>()
 
@@ -69,6 +71,35 @@ function fitAndReport(): void {
   props.controller.requestResize(props.tab, term.rows, term.cols)
 }
 
+function applyFontSize(): void {
+  if (!props.fontZoom) return
+  termHandle?.setFontSize?.(terminalFontSize.value)
+}
+
+function onTerminalWheel(event: WheelEvent): void {
+  if (!props.fontZoom) return
+  const direction = terminalFontZoomWheelDirection(event)
+  if (!direction) return
+  event.preventDefault()
+  event.stopPropagation()
+  zoomTerminalFontSize(direction)
+}
+
+function onTerminalKeydown(event: KeyboardEvent): void {
+  if (!props.fontZoom) return
+  const direction = terminalFontZoomKeyDirection(event)
+  if (!direction) return
+  event.preventDefault()
+  event.stopPropagation()
+  zoomTerminalFontSize(direction)
+}
+
+watch(terminalFontSize, () => {
+  if (!props.fontZoom) return
+  applyFontSize()
+  fitAndReport()
+})
+
 function focusOnPointer(event: PointerEvent): void {
   if (event.button !== 0) return
   emit('activate')
@@ -94,6 +125,7 @@ onMounted(() => {
   // buffers keep draining in the background.
   const handle = factory(el.value)
   termHandle = handle
+  applyFontSize()
   handle.fit()
   props.controller.attachTerminal(props.tab, handle)
   if (props.active && isFocused()) handle.focus()
@@ -134,7 +166,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="pane" data-pane="primary" v-show="active">
     <button v-if="closable" class="pane-close" type="button" :aria-label="closeLabel || '關閉窗格'" @click="emit('close')">×</button>
-    <div ref="el" class="term-host" @pointerdown="focusOnPointer" />
+    <div ref="el" class="term-host" @pointerdown="focusOnPointer" @wheel.capture="onTerminalWheel" @keydown.capture="onTerminalKeydown" />
     <NativeTerminalReader v-if="nativeReader && active && tab.status === 'live'"
       :key="tab.sessionId ?? tab.key" :terminal="tab.term"
       :history-request="tab.runtime ? historyRequest : undefined" :history-notice="historyNotice"
