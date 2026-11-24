@@ -18,6 +18,7 @@ mod runtime_sessions;
 mod runtime_transfer;
 #[path = "../shared/voice_dto.rs"]
 mod voice_dto;
+#[cfg_attr(not(windows), allow(dead_code))]
 #[path = "../shared/voice_text.rs"]
 mod voice_text;
 #[cfg(windows)]
