@@ -20,7 +20,7 @@ Windows 桌面版需要與 Android 相同的語音輸入體驗：點按或按住
 ## 限制與候選方案
 
 - SAPI dictation 需要使用者已安裝對應 Windows 語音辨識語言；App 不會代為下載語言包，只提示至 Windows 設定安裝。
-- 語音分段串接與 Android `joinSegmentTexts` 完全一致：SAPI 每個最終轉寫片段原樣接上，片段之間在累積文字未以句讀標點結尾時補全形逗號 `，`（含 `，` `。` `！` `？` `、` `；` `：` `…` `,` `.` `!` `?` `;` `:`）；不另外補半形空格，中英邊界與括號不因串接產生空白。錄音中的即時預覽使用同一規則顯示 committed＋partial。
+- 語音分段串接以 Android `joinSegmentTexts` 的全形逗號規則為基礎，並延伸括號與引號邊界：片段間在累積文字未以句讀標點（`，` `。` `！` `？` `、` `；` `：` `…` `,` `.` `!` `?` `;` `:`）或開括號／開引號結尾、且下一片段不以閉括號／閉引號或句讀開頭時補 `，`；片段內容原樣保留，不插入半形空格，括號與引號跨停頓切開時不會在內側產生多餘標點。錄音中的即時預覽使用同一規則顯示 committed＋partial。
 - 中英混說由單一 `zh-TW` recognizer 處理；是否夠用必須以實機語料驗證，不能由 Android 的 `EXTRA_ENABLE_LANGUAGE_SWITCH` 行為推定。
 - 若 SAPI 在目標 Windows 版本不可用或品質不足，候選方案是 WinRT `SpeechRecognizer`（需要 package identity 或改打包方式）、Windows.Media.SpeechRecognition 的自訂 grammar（不適合自由 dictation），或評估自帶模型；本版不加入上傳錄音服務。
 
