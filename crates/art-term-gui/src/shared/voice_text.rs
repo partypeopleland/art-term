@@ -15,16 +15,16 @@ fn is_cjk(ch: char) -> bool {
     )
 }
 
-fn is_opening(ch: char) -> bool {
-    matches!(ch, '(' | '[' | '{' | '（' | '【' | '「' | '『' | '《' | '〈' | '“' | '‘' | '《')
+fn is_clause_punctuation(ch: char) -> bool {
+    matches!(ch,
+        '，' | '。' | '、' | '；' | '：' | '！' | '？' |
+        ',' | '.' | ';' | ':' | '!' | '?' |
+        '…' | '·' | '・' | '）' | '】' | '」' | '』' | '》' | '〉' | '”' | '’'
+    )
 }
 
-fn is_closing_or_punctuation(ch: char) -> bool {
-    matches!(ch,
-        ')' | ']' | '}' | '，' | '。' | '、' | '；' | '：' | '！' | '？' |
-        ',' | '.' | ';' | ':' | '!' | '?' |
-        '）' | '】' | '」' | '』' | '》' | '〉' | '”' | '’' | '…' | '·' | '・'
-    )
+fn is_closing_bracket(ch: char) -> bool {
+    matches!(ch, ')' | ']' | '}')
 }
 
 fn word_char(ch: char) -> bool {
@@ -34,17 +34,21 @@ fn word_char(ch: char) -> bool {
 fn needs_space(prev: &str, next: &str) -> bool {
     let Some(last) = prev.chars().next_back() else { return false };
     let Some(first) = next.chars().next() else { return false };
-    if is_opening(last) || is_closing_or_punctuation(first) || is_closing_or_punctuation(last) {
+    // Clause punctuation and a closing bracket hug the preceding text, while
+    // an opening bracket keeps its separating space ("run (safe) now").
+    if is_clause_punctuation(last) || is_clause_punctuation(first) || is_closing_bracket(first) {
         return false;
     }
-    if is_cjk(last) || is_cjk(first) {
+    // Latin text flows straight into CJK ("the檔案"), but the reverse and
+    // CJK-to-CJK boundaries keep a space so words never merge.
+    if word_char(last) && !is_cjk(last) && is_cjk(first) {
         return false;
     }
-    word_char(last) && word_char(first)
+    true
 }
 
 /// Append one recognized utterance to the committed text, inserting a space
-/// only where separating two Latin/alphanumeric words would otherwise merge.
+/// only where separating two words would otherwise merge or detach brackets.
 pub fn append_segment(committed: &mut String, segment: &str) {
     let segment = segment.trim();
     if segment.is_empty() {
