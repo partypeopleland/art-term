@@ -18,9 +18,15 @@ import PreviewZoom from '../shared/components/PreviewZoom.vue'
 import { useWorkspaceSize } from '../shared/components/workspace-size'
 import { readClipboardText, writeClipboardText } from '../shared/transport/clipboard'
 import { createDesktopClipboard } from './clipboard'
+import VoiceBar from './VoiceBar.vue'
+import { createDesktopVoiceController } from './voice'
+import type { VoicePlugin, VoiceTarget } from '../shared/voice'
 
-const props = defineProps<{ transport: Transport; terminalFactory?: TerminalFactory; controllerOptions?: ControllerOptions }>()
+const props = defineProps<{ transport: Transport; terminalFactory?: TerminalFactory; controllerOptions?: ControllerOptions; voicePlugin?: VoicePlugin }>()
 const controller: AppController = createAppController(props.transport, { ...props.controllerOptions, closeFinishedTabs: true, backgroundConnection: 'keep', paneHotkeys: true })
+const voice = props.voicePlugin
+  ? createDesktopVoiceController(props.voicePlugin, { isTauri: () => true })
+  : createDesktopVoiceController()
 defineExpose({ controller })
 const baseFactory = props.terminalFactory ?? createDesktopXtermTerminal
 provide(TerminalFactoryKey, element => {
@@ -121,11 +127,11 @@ function onGlobalKey(event: KeyboardEvent): void {
 }
 function visibility(): void {
   documentHidden.value = document.hidden
-  if (document.hidden) { sizing.end(); screenPickerOpen.value = false }
+  if (document.hidden) { sizing.end(); screenPickerOpen.value = false; voice.cancel('background') }
   void controller.setHidden(document.hidden)
 }
-onMounted(() => { window.addEventListener('keydown', onGlobalKey, true); document.addEventListener('visibilitychange', visibility); void controller.loadCatalog(); void controller.loadInstanceDesktops() })
-onBeforeUnmount(() => { window.removeEventListener('keydown', onGlobalKey, true); document.removeEventListener('visibilitychange', visibility); clearTimeout(clipboardNoticeTimer); controller.dispose() })
+onMounted(() => { window.addEventListener('keydown', onGlobalKey, true); document.addEventListener('visibilitychange', visibility); void controller.loadCatalog(); void controller.loadInstanceDesktops(); void voice.initialize() })
+onBeforeUnmount(() => { window.removeEventListener('keydown', onGlobalKey, true); document.removeEventListener('visibilitychange', visibility); clearTimeout(clipboardNoticeTimer); voice.dispose(); controller.dispose() })
 const visibleTabs = computed(() => controller.tabs.filter(tab => !tab.paneOf && !tab.closed))
 function paneVisible(tab: TabState): boolean {
   return terminalVisible.value && tab.key === controller.activeKey.value
@@ -147,6 +153,40 @@ function singleLeaf(tab: TabState): PaneLeaf {
 }
 // Toolbar/statusbar describe the pane that currently owns input focus.
 const paneTab = computed(() => (activeTab.value ? controller.focusedConnTab(activeTab.value) : null))
+const voiceTarget = computed<VoiceTarget | null>(() => {
+  const parent = activeTab.value
+  const connTab = paneTab.value
+  if (!terminalVisible.value || !parent || !connTab || parent.closed || connTab.closed) return null
+  const generation = connTab.connectionGen
+  return {
+    tabId: connTab.key,
+    generation,
+    isValid: () => terminalVisible.value &&
+      activeTab.value === parent &&
+      controller.tabs.includes(connTab) &&
+      !parent.closed &&
+      !connTab.closed &&
+      controller.focusedConnTab(parent) === connTab &&
+      connTab.status === 'live' &&
+      connTab.connectionGen === generation,
+    bracketedPasteMode: () => connTab.term?.bracketedPasteMode?.() ?? false,
+    send: (text) => controller.sendInput(connTab, text)
+  }
+})
+watch(
+  () => [
+    terminalVisible.value,
+    activeTab.value?.key,
+    activeTab.value?.focusedLeafId,
+    paneTab.value?.key,
+    paneTab.value?.connectionGen,
+    paneTab.value?.status,
+    paneTab.value?.closed
+  ] as const,
+  (next, previous) => {
+    if (next.some((value, index) => value !== previous[index])) voice.cancel('target')
+  }
+)
 const statusText = computed(() => !paneTab.value ? '未連線' : paneTab.value.status === 'live' ? '已連線' : paneTab.value.status === 'connecting' ? '連線中…' : paneTab.value.status === 'exited' ? '已結束' : `錯誤：${paneTab.value.errorMsg}`)
 </script>
 
@@ -194,6 +234,7 @@ const statusText = computed(() => !paneTab.value ? '未連線' : paneTab.value.s
             <div v-if="clipboardNotice" class="clipboard-toast" data-testid="clipboard-toast" role="status">{{ clipboardNotice }}</div>
           </div>
         </div>
+        <VoiceBar v-if="voice.state.pluginPresent && activeTab" :voice="voice" :target="voiceTarget" />
       </section>
       </div>
       <section v-if="page === 'settings'" class="desktop-settings-page" aria-label="全域設定"><ThemeSettings embedded desktop :initial-section="settingsSection" :transport="transport" :hosts="controller.runtimeProfiles.value" @changed="settingsChanged" @picker="transferPicker = $event" /></section>

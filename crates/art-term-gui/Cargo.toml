@@ -53,6 +53,10 @@ tauri-plugin-mobile-vault = { path = "../tauri-plugin-mobile-vault" }
 tauri-plugin-mobile-voice = { path = "../tauri-plugin-mobile-voice" }
 tauri-plugin-mobile-history = { path = "../tauri-plugin-mobile-history" }
 
+[target.'cfg(windows)'.dependencies]
+robius-speech = "=0.3.1"
+windows = { version = "0.61.3", default-features = false, features = ["Win32_Media_Speech", "Win32_System_Com", "Win32_Globalization"] }
+
 [features]
 openab-fixture = ["art-term-core/openab-fixture"]
 default = ["custom-protocol"]
