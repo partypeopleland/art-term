@@ -20,6 +20,7 @@ Windows 桌面版需要與 Android 相同的語音輸入體驗：點按或按住
 ## 限制與候選方案
 
 - SAPI dictation 需要使用者已安裝對應 Windows 語音辨識語言；App 不會代為下載語言包，只提示至 Windows 設定安裝。
+- 語音分段串接不沿用 Android 的停頓補全形逗號；Windows 以字元邊界補半形空格：CJK 相鄰不補，拉丁字詞、中英邊界與括號依邊界規則補空格，避免把停頓轉成標點。
 - 中英混說由單一 `zh-TW` recognizer 處理；是否夠用必須以實機語料驗證，不能由 Android 的 `EXTRA_ENABLE_LANGUAGE_SWITCH` 行為推定。
 - 若 SAPI 在目標 Windows 版本不可用或品質不足，候選方案是 WinRT `SpeechRecognizer`（需要 package identity 或改打包方式）、Windows.Media.SpeechRecognition 的自訂 grammar（不適合自由 dictation），或評估自帶模型；本版不加入上傳錄音服務。
 
