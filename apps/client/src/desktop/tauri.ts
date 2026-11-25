@@ -2,6 +2,7 @@
 // Vue components and the controller depend only on the Transport interface,
 // so this adapter can later be replaced by HTTP/WebSocket without UI changes.
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import { asConnectionError } from '../shared/transport/types'
 import type {
   TransferPreview, TransferResult, InstanceDesktop, InstanceSelection,
@@ -17,6 +18,7 @@ import type {
   UpdateCheckDto,
   UpdateInstallDto
 } from '../shared/transport/types'
+import type { VoiceEvent, VoicePermission, VoicePlugin, VoiceStatus } from '../shared/voice'
 
 export function sanitizeError(e: unknown): string {
   let msg: string
@@ -83,5 +85,23 @@ export function createTauriTransport(): Transport {
     screenshot: (sessionId) => call<ScreenshotDto>('gui_screenshot', { sessionId }),
     updateCheck: () => call<UpdateCheckDto>('gui_update_check'),
     updateInstall: (expectedVersion: string) => call<UpdateInstallDto>('gui_update_install', { expectedVersion })
+  }
+}
+
+export function desktopVoiceRuntime(): boolean {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+}
+
+export function createDesktopVoicePlugin(): VoicePlugin {
+  return {
+    status: () => call<VoiceStatus>('gui_voice_status'),
+    requestPermission: () => call<{ permission: VoicePermission }>('gui_voice_request_permission'),
+    start: args => call('gui_voice_start', args),
+    stop: args => call('gui_voice_stop', args),
+    cancel: args => call('gui_voice_cancel', args),
+    listen: async callback => {
+      const unlisten = await listen<VoiceEvent>('gui-voice', event => callback(event.payload))
+      return () => { void unlisten() }
+    }
   }
 }

@@ -16,6 +16,17 @@ mod runtime_hosts;
 mod runtime_sessions;
 #[path = "../shared/runtime_transfer.rs"]
 mod runtime_transfer;
+#[path = "../shared/voice_dto.rs"]
+mod voice_dto;
+#[cfg_attr(not(windows), allow(dead_code))]
+#[path = "../shared/voice_text.rs"]
+mod voice_text;
+#[cfg(windows)]
+#[path = "../platform/windows/voice.rs"]
+mod voice;
+#[cfg(not(windows))]
+#[path = "../shared/voice_stub.rs"]
+mod voice;
 use art_term_core::connections::Connections;
 use runtime_hosts::{
     gui_runtime_delete_host, gui_runtime_hosts, gui_runtime_reorder_connections,
@@ -374,6 +385,7 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(Arc::new(runtime_transfer::RuntimeTransfer::default()))
         .manage(Arc::new(RuntimeSessions::default()))
+        .manage(Arc::new(voice::VoiceSessions::default()))
         .setup(move |app| {
             #[cfg(windows)]
             {
@@ -426,6 +438,11 @@ fn main() {
             gui_close,
             gui_desktop,
             gui_screenshot,
+            voice::gui_voice_status,
+            voice::gui_voice_request_permission,
+            voice::gui_voice_start,
+            voice::gui_voice_stop,
+            voice::gui_voice_cancel,
             runtime_transfer::gui_transfer_export,
             runtime_transfer::gui_transfer_pick_import,
             runtime_transfer::gui_transfer_unlock,

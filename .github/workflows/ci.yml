@@ -114,4 +114,6 @@ jobs:
           key: ci-gui-linux
 
       - name: Test shared GUI sessions
-        run: cargo test --locked -p art-term-gui --bin art-term-gui runtime_sessions::tests
+        run: |
+          cargo test --locked -p art-term-gui --bin art-term-gui runtime_sessions::tests
+          cargo test --locked -p art-term-gui --bin art-term-gui voice_text::tests

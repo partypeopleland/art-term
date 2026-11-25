@@ -13,6 +13,8 @@ Runtime HTTPS／WSS 使用 rustls／ring；uuid 與 zeroize 為 Apache-2.0 OR MI
 
 連線可攜檔使用 RustCrypto 的 argon2、aes-gcm 與 aes，以及 getrandom；原生檔案選擇／讀寫使用 tauri-plugin-dialog 與 tauri-plugin-fs。版本由 Cargo.lock 鎖定，各套件原有許可與歸屬仍適用。
 
+Windows 語音辨識使用 robius-speech 0.3.1（MIT，Project Robius Developers）與對應 `windows` crate bindings；辨識本身由 Windows SAPI 系統元件在裝置端執行，App 不內嵌語音模型。
+
 ## tmux 主機歷史支援
 
 選配的 Linux 主機支援使用 tmux 3.6a；其 ISC／BSD 授權與所含來源通知需隨 binary 保存。若靜態連入 libevent 與 ncurses，亦需附上對應授權。私有 Node 22 應保留 Node 及其第三方通知。`tmux-history.cjs` 包含 xterm，請一併保存本專案與 xterm 的授權；APK 本身不內嵌 tmux 或 Node。
